@@ -390,6 +390,11 @@ export async function assess(root = ROOT, { runSuite = defaultSuiteRunner } = {}
   const reportNames = has(root, REPORT) && /NOT_ESTABLISHED/.test(read(root, REPORT));
   if (chronology.state === "ORDERED") {
     add("chronology.identity-was-frozen-first", "Git history shows rule identity frozen before the detectors that bind to it.", SATISFIED, chronology.reason);
+  } else if (chronology.state === "ANCHOR_MISSING") {
+    // Deliberately NOT routed through the gap path. An unprovable claim and a check with no subject
+    // are opposite failures, and the accepted limitation granted to the first would silently absorb
+    // the second — which is how this defect survived until the day of the tag.
+    add("chronology.identity-was-frozen-first", "Git history shows rule identity frozen before the detectors that bind to it.", FAILED, chronology.reason);
   } else if (chronology.state === "INVERTED") {
     add("chronology.identity-was-frozen-first", "Git history shows rule identity frozen before the detectors that bind to it.", FAILED, chronology.reason);
   } else {

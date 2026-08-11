@@ -109,7 +109,7 @@ Framework: `node:test`, no dependencies.
   drift silently.
 - **Deliverables:**
   - Every must-never detector's doc comment contains `VIEW:`.
-  - `EVALUATED_RULES` and the bound rule literals in `uiux.mjs` agree in both directions.
+  - `DETECTOR_RULES` and the bound rule literals in `uiux.mjs` agree in both directions.
   - **No second content-identity implementation exists anywhere in `scripts/`** — one owner for the
     concept ([ADR 0011](../adr/0011-freshness-is-committed-content-identity-with-path-scoped-working-subject-integrity.md)).
   - `content-identity.mjs` does not USE the rejected alternatives, and is free to EXPLAIN them. The

@@ -261,6 +261,32 @@ test("the chronology gap is the only one permitted to be an accepted limitation,
   assert.match(accepted[0].accepted, /rule-identity\.mjs/, "an accepted gap must name what still defends the property");
 });
 
+// --- The chronology check must have a subject -------------------------------------------------------
+
+test("the chronology anchor is a string that actually exists in the file it searches", async () => {
+  // The direct guard, and the one that was missing. `resolveChronology` searched history for
+  // `EVALUATED_RULES`, which the plan named and the evaluator never adopted — so it found nothing,
+  // reported NO_HISTORY, and would have gone on reporting it on a correctly staged repository
+  // forever. An anchor that matches nothing is a check that cannot fail.
+  const { CHRONOLOGY_ANCHORS } = await import("../scripts/chronology.mjs");
+  const source = await readFile(path.join(ROOT, CHRONOLOGY_ANCHORS.DETECTOR_SUBJECT), "utf8");
+  const hits = source.split(CHRONOLOGY_ANCHORS.DETECTOR_ANCHOR).length - 1;
+  assert.equal(hits, 1, `the anchor "${CHRONOLOGY_ANCHORS.DETECTOR_ANCHOR}" appears ${hits} times; it must name exactly one site`);
+});
+
+test("a chronology check with no subject fails; it is never an accepted limitation", async () => {
+  const assessment = await assessWith(async (dir) => {
+    // Reformatted, not renamed. The module still exports `DETECTORS` and everything importing it
+    // still works — only the anchor's spelling is gone, which is precisely the silent case: nothing
+    // breaks, and the chronology check quietly stops having a subject.
+    await edit(dir, "scripts/uiux.mjs", (body) => body.replace("export const DETECTORS = [", "export const\n  DETECTORS = ["));
+  });
+  const chronology = assessment.byId.get("chronology.identity-was-frozen-first");
+  assert.equal(chronology.state, "FAILED", "a broken check was recorded as an unprovable claim");
+  assert.match(chronology.detail, /has no subject to look for in history/);
+  assert.equal(assessment.verdict, "NOT_READY");
+});
+
 // --- The third release state, read rather than assumed ----------------------------------------------
 
 /** Commit everything in a sandbox, so it has a HEAD a tag can point at. */

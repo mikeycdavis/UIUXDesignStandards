@@ -60,7 +60,7 @@ The tag is what happens afterwards, if the report has no unrecorded gaps.
   - The drift test names which rules differ, not merely that they do.
 - **Verification:**
   ```bash
-  node --test test/release.test.mjs    # → 17 pass
+  node --test test/release.test.mjs    # → 22 pass
   ```
 - **Dependencies:** the readiness checker.
 
@@ -143,7 +143,7 @@ lets any criterion grant itself one is a registered falsifier.
 **The chronology check needed to be replaced, not merely un-deferred.** The plan's form of it —
 freeze added before `scripts/uiux.mjs` added — is a proxy that can fail on a repository that did
 everything right, because `uiux.mjs` first appeared in section 06 as a CLI router before any detector
-existed. `scripts/chronology.mjs` anchors on the commit introducing `EVALUATED_RULES` instead, and
+existed. `scripts/chronology.mjs` anchors on the commit introducing the detector table instead, and
 resolves four states rather than a boolean. The state that matters is `SAME_COMMIT`: a single lump
 first commit puts both anchors in one commit, Git records no ordering between two changes in one
 commit, and a naive `freeze <= detectors` timestamp comparison would report that as satisfied off two
@@ -172,6 +172,32 @@ Instead a hashing file must carry a `DIGEST-SCOPE:` declaration saying what it h
 disclaiming freshness — the same discipline as the `VIEW:` doc-comment every detector carries — and
 the guard now asserts that the declaration denies the thing the guard is about. Removing the
 declaration is a falsifier.
+
+**The chronology check had no subject, and reported a gap for a fictitious reason.**
+`scripts/chronology.mjs` searched history for `EVALUATED_RULES` — the identifier the *plan* used for
+the set of rule ids a detector claims to evaluate. The evaluator never adopted that name; it calls the
+table `DETECTORS` and derives `DETECTOR_RULES` from it. So the anchor appeared nowhere in the file
+being searched, `git log -S` returned no commits, and the resolver reported `NO_HISTORY` — which is
+indistinguishable from "the work was never committed", and which is exactly what was true at the
+time, so it looked right for as long as it could possibly look right. It would have gone on reporting
+`NO_HISTORY` on a perfectly staged repository forever. A check whose subject does not exist cannot
+fail, and a check that cannot fail is not a check.
+
+It surfaced only after the release candidate was committed, when the reason text changed from "not in
+Git history" to "`EVALUATED_RULES` is not in the recorded history of `scripts/uiux.mjs`" — a sentence
+that is true and useless. The recorded gap was correct throughout, and the reasoning behind it was
+wrong throughout, which is the more dangerous of the two failures: the release record would have
+carried an accurate conclusion supported by a check that had never looked at anything.
+
+Two repairs, because the anchor being wrong and the anchor being unverifiable are separate faults.
+`resolveChronology` now establishes that the anchor exists in the source before asking history about
+it, returning a fifth state, `ANCHOR_MISSING`. That state is deliberately routed to `FAILED` rather
+than through the gap path: an unprovable claim and a check with no subject are opposite failures, and
+the accepted limitation granted to the first would have silently absorbed the second — which is how
+this survived to the day of the tag. A test asserts the anchor appears exactly once in the file it
+searches, and a second reformats the declaration without renaming it, so the module still exports
+`DETECTORS`, every importer still works, and only the anchor's spelling is gone. That is the silent
+case, and it now fails.
 
 **The verification did not reproduce from the artifact being tagged, and only the tag operation
 found it.** With `core.autocrlf=true` — the Windows default — and no `.gitattributes`, the committed

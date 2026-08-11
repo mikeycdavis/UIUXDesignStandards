@@ -138,7 +138,7 @@ appeared in section 06 as a CLI router, before a single detector was written, so
 `scripts/uiux.mjs`" is a proxy that can fail on a repository that did everything in the right order —
 and, worse, can pass on one that did not, because a file's birth says nothing about when the bindings
 inside it appeared. The invariant is about the bindings, so `scripts/chronology.mjs` anchors on the
-commit that introduced `EVALUATED_RULES`, the set at which the evaluator starts asserting rule
+commit that introduced `export const DETECTORS`, the table at which the evaluator starts asserting rule
 identities. It resolves four states rather than a boolean: `NO_HISTORY` (unmeasured), `SAME_COMMIT`
 (both anchors in one commit — Git records no ordering, so the chronology cannot be demonstrated no
 matter what order the work was actually done in), `ORDERED`, and `INVERTED`. `SAME_COMMIT` is the

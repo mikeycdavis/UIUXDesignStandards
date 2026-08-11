@@ -102,7 +102,7 @@ test("invariant ids are unique, and each carries a statement", () => {
  *
  * The comparison itself lives in `scripts/chronology.mjs`, for two reasons. It is subtler than it
  * looks — the file-birth form of the check is a proxy that can be both false-negative and
- * false-positive, so the anchor is the introduction of `EVALUATED_RULES` rather than the birth of
+ * false-positive, so the anchor is the introduction of the detector table rather than the birth of
  * the file containing it — and the release-readiness report must reach the same conclusion this
  * test does, which it can only guarantee by asking the same function.
  *

@@ -16,13 +16,25 @@
  * bindings inside it appeared. The invariant is about the bindings, so the check is about the
  * bindings:
  *
- *     freeze added  <  the first commit that introduced EVALUATED_RULES
+ *     freeze added  <  the first commit that introduced the detector table
  *
- * `EVALUATED_RULES` is the set naming every rule id a static detector claims to evaluate. It is the
- * exact point at which the evaluator starts asserting rule identities, so the commit that
+ * `export const DETECTORS` is the table in which every detector declares the rule id it binds to. It
+ * is the exact point at which the evaluator starts asserting rule identities, so the commit that
  * introduces it is the commit where detector implementation began.
  *
- * FOUR STATES, and none of them is allowed to be silently satisfied:
+ * THE ANCHOR IS VERIFIED TO EXIST before it is searched for, and that guard is not decoration. This
+ * module was first written against the PLAN's vocabulary — `EVALUATED_RULES` — which the evaluator
+ * never adopted; it named the table `DETECTORS`. Searching history for a string that appears nowhere
+ * returns no commits, which is indistinguishable from "the work was never committed", so the resolver
+ * reported `NO_HISTORY` and the gap was recorded for an entirely fictitious reason. It would have gone
+ * on reporting `NO_HISTORY` on a perfectly staged repository forever. A check whose subject does not
+ * exist cannot fail, and a check that cannot fail is not a check.
+ *
+ * FIVE STATES, and none of them is allowed to be silently satisfied:
+ *
+ *   ANCHOR_MISSING  the anchor is not in the current source at all, so history cannot be asked about
+ *                   it. This is a broken check, NOT an unprovable claim, and it is never an accepted
+ *                   release limitation — the two are opposite failures wearing the same face.
  *
  *   NO_HISTORY      one or both anchors are not in history at all. Nothing to compare. The claim is
  *                   not false — it is unmeasured, and must be recorded as such.
@@ -40,10 +52,12 @@
  */
 
 import { spawnSync } from "node:child_process";
+import { existsSync, readFileSync } from "node:fs";
+import path from "node:path";
 
 const FREEZE = "artifacts/design/rule-catalog-v1.md";
 const DETECTOR_SUBJECT = "scripts/uiux.mjs";
-const DETECTOR_ANCHOR = "EVALUATED_RULES";
+const DETECTOR_ANCHOR = "export const DETECTORS";
 
 function git(root, args) {
   const result = spawnSync("git", args, { cwd: root, encoding: "utf8" });
@@ -76,6 +90,22 @@ function introducedString(root, file, needle) {
 }
 
 export function resolveChronology(root) {
+  // Before asking history about the anchor, establish that the anchor is a thing. A `git log -S` for
+  // a string nobody ever wrote returns nothing, which reads exactly like "never committed".
+  const subject = path.join(root, DETECTOR_SUBJECT);
+  if (!existsSync(subject) || !readFileSync(subject, "utf8").includes(DETECTOR_ANCHOR)) {
+    return {
+      state: "ANCHOR_MISSING",
+      freeze: null,
+      detectors: null,
+      reason:
+        `\`${DETECTOR_ANCHOR}\` does not appear in ${DETECTOR_SUBJECT}, so this check has no subject to ` +
+        `look for in history. That is a broken check rather than an unprovable claim, and it must not be ` +
+        `recorded as a gap: a search for a string that was never written returns no commits, which is ` +
+        `indistinguishable from work that was never committed.`,
+    };
+  }
+
   const freeze = introducedPath(root, FREEZE);
   const detectors = introducedString(root, DETECTOR_SUBJECT, DETECTOR_ANCHOR);
 
