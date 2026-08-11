@@ -69,6 +69,25 @@ const FAILED = "FAILED";
 const RECORDED_GAP = "RECORDED_GAP";
 const BLOCKING_GAP = "BLOCKING_GAP";
 const NOT_EVALUATED = "NOT_EVALUATED";
+const NOT_APPLICABLE = "NOT_APPLICABLE";
+
+/**
+ * The criteria allowed to report NOT_APPLICABLE, and the condition under which the proposition
+ * genuinely does not apply.
+ *
+ * Same shape and same reason as `GAP_POLICY`. NOT_APPLICABLE does not block a release, so an
+ * unconstrained one is a waiver by another name — "this criterion does not apply to us" is the
+ * oldest way to pass a check without meeting it. Membership is required, the condition is stated,
+ * and a criterion not listed here that reports NOT_APPLICABLE gets NOT_EVALUATED instead, which
+ * blocks. Fail-closed, as with gaps.
+ */
+const APPLICABILITY_POLICY = {
+  "release.the-tag-agrees-with-this-tree":
+    "the proposition is about the released artifact. It applies when the release tag exists and this " +
+    "tree could be it; once development has advanced past the tag, HEAD is not claiming to be the " +
+    "released tree and the question is answered by release.current-line-descends-from-latest-release " +
+    "instead. Ancestry is never accepted as agreement — that would pass a tree with every file rewritten.",
+};
 
 /**
  * The criteria allowed to settle for an accepted release limitation, and the reason each qualifies.
@@ -90,43 +109,75 @@ const read = (root, file) => readFileSync(path.join(root, file), "utf8");
 const has = (root, file) => existsSync(path.join(root, file));
 
 /**
- * The third release state, READ rather than assumed.
+ * Where this tree stands relative to the release its `VERSION` names.
  *
- * Before this existed the checker hard-coded `NOT_RELEASED`, which was true when it was written and
- * would have stayed "true" forever — a constant dressed as an observation. The tag is a fact about
- * the repository, so it is looked up:
+ * TWO PROPOSITIONS, TWO GIT RELATIONS, AND THEY MAY NOT SUBSTITUTE FOR EACH OTHER.
  *
- *   RELEASED                    the tag exists and points at the commit being assessed
- *   NOT_RELEASED                no such tag; the ordinary pre-release state, and not a failure
- *   RELEASED_AT_ANOTHER_COMMIT  the tag exists elsewhere — this tree is not the released one
- *   UNKNOWN                     git could not answer, which is not the same as "no tag"
+ *   "is this the release tree?"           equality    HEAD == tag^{commit}
+ *   "does this line descend from it?"     ancestry    merge-base --is-ancestor tag HEAD
  *
- * `UNKNOWN` matters for the same reason it does everywhere else here: an unanswerable question must
- * not collapse into the convenient answer. "No tag exists" and "I could not look" are different
- * claims, and only one of them is evidence.
+ * The first version of this function knew only equality, which was correct for verifying the v1.0.0
+ * artifact and wrong for every commit afterwards: `VERSION` in this family names the LAST RELEASED
+ * version and stays there while development continues, so an ordinary post-release commit would have
+ * reported a failure forever. The tempting repair — accept an ancestor tag as agreement — was
+ * rejected, because ancestry proves only that the release is somewhere behind us. It would pass a
+ * tree that had rewritten every file since the tag. Equality establishes artifact identity; ancestry
+ * establishes historical continuity; neither answers the other's question. ADR 0015.
+ *
+ * So the tag is resolved into two independent facts:
+ *
+ *   release   RELEASED | NOT_RELEASED | UNKNOWN
+ *             a property of the VERSION, not of this checkout. v1.0.0 is released no matter which
+ *             commit happens to be checked out.
+ *
+ *   tree      RELEASE_TREE              HEAD is exactly the released commit
+ *             POST_RELEASE_DEVELOPMENT  the release is an ancestor; ordinary work continues
+ *             RELEASE_HISTORY_DIVERGED  the tag exists and is NOT behind us — history was rewritten,
+ *                                       or the tag was moved. Always a failure.
+ *             UNRELEASED_CANDIDATE      no tag yet. Not a failure: demanding the tag in order to
+ *                                       permit the tag is the circular gate this file refuses.
+ *             UNKNOWN                   git could not answer, which is never "no tag".
  */
 export function resolveRelease(root, version) {
   const tag = `v${version}`;
   const git = (args) => spawnSync("git", args, { cwd: root, encoding: "utf8" });
+  const unknown = (reason) => ({ release: "UNKNOWN", tree: "UNKNOWN", tag, reason });
+
   // "Not a repository" and "no such tag" both make `rev-parse` exit non-zero, and collapsing them
   // would turn "I could not look" into "I looked and there was nothing".
   const repo = git(["rev-parse", "--git-dir"]);
-  if (repo.error) return { state: "UNKNOWN", tag, reason: `git is unavailable: ${repo.error.message}` };
-  if (repo.status !== 0) return { state: "UNKNOWN", tag, reason: "not a git repository, so no tag could be looked for" };
+  if (repo.error) return unknown(`git is unavailable: ${repo.error.message}`);
+  if (repo.status !== 0) return unknown("not a git repository, so no tag could be looked for");
 
   const exists = git(["rev-parse", "--verify", "--quiet", `refs/tags/${tag}`]);
-  if (exists.status !== 0) return { state: "NOT_RELEASED", tag, reason: `no tag ${tag} exists yet` };
+  if (exists.status !== 0) {
+    return { release: "NOT_RELEASED", tree: "UNRELEASED_CANDIDATE", tag, reason: `no tag ${tag} exists yet` };
+  }
 
   const head = git(["rev-parse", "HEAD^{commit}"]);
   const tagged = git(["rev-parse", `${tag}^{commit}`]);
-  if (head.status !== 0 || tagged.status !== 0) {
-    return { state: "UNKNOWN", tag, reason: `${tag} exists but could not be resolved to a commit` };
-  }
+  if (head.status !== 0 || tagged.status !== 0) return unknown(`${tag} exists but could not be resolved to a commit`);
+
   const at = tagged.stdout.trim();
-  if (at !== head.stdout.trim()) {
-    return { state: "RELEASED_AT_ANOTHER_COMMIT", tag, at, reason: `${tag} points at ${at.slice(0, 12)}, which is not HEAD` };
+  const now = head.stdout.trim();
+  if (at === now) {
+    return { release: "RELEASED", tree: "RELEASE_TREE", tag, at, ahead: 0, reason: `${tag} points at ${at.slice(0, 12)}, which is this tree` };
   }
-  return { state: "RELEASED", tag, at, reason: `${tag} points at ${at.slice(0, 12)}` };
+
+  const descends = git(["merge-base", "--is-ancestor", `${tag}^{commit}`, "HEAD"]).status === 0;
+  if (!descends) {
+    return { release: "RELEASED", tree: "RELEASE_HISTORY_DIVERGED", tag, at, reason: `${tag} points at ${at.slice(0, 12)}, which is not an ancestor of HEAD — history was rewritten or the tag was moved` };
+  }
+
+  const ahead = Number(git(["rev-list", "--count", `${tag}^{commit}..HEAD`]).stdout.trim()) || 0;
+  return {
+    release: "RELEASED",
+    tree: "POST_RELEASE_DEVELOPMENT",
+    tag,
+    at,
+    ahead,
+    reason: `${tag} points at ${at.slice(0, 12)}; HEAD is ${ahead} commit(s) ahead of it, so this tree is not the released one`,
+  };
 }
 
 function run(root, args, { env = {} } = {}) {
@@ -187,13 +238,20 @@ export async function assess(root = ROOT, { runSuite = defaultSuiteRunner } = {}
   const add = (id, claim, state, detail) => {
     // A criterion asks for RECORDED_GAP; only this table can grant it. Anything else asking becomes a
     // BLOCKING_GAP — accurately recorded and still not releasable.
-    const granted = state !== RECORDED_GAP || id in GAP_POLICY;
+    const grantedGap = state !== RECORDED_GAP || id in GAP_POLICY;
+    const grantedNa = state !== NOT_APPLICABLE || id in APPLICABILITY_POLICY;
+    const resolved = !grantedGap ? BLOCKING_GAP : !grantedNa ? NOT_EVALUATED : state;
     criteria.push({
       id,
       claim,
-      state: granted ? state : BLOCKING_GAP,
-      detail: granted ? detail : `${detail} This gap is resolvable, so it blocks the release rather than being carried into it.`,
-      ...(state === RECORDED_GAP && granted ? { accepted: GAP_POLICY[id] } : {}),
+      state: resolved,
+      detail: !grantedGap
+        ? `${detail} This gap is resolvable, so it blocks the release rather than being carried into it.`
+        : !grantedNa
+          ? `${detail} No applicability condition is on record for this criterion, so "does not apply" is not available to it.`
+          : detail,
+      ...(state === RECORDED_GAP && grantedGap ? { accepted: GAP_POLICY[id] } : {}),
+      ...(state === NOT_APPLICABLE && grantedNa ? { inapplicable: APPLICABILITY_POLICY[id] } : {}),
     });
   };
 
@@ -406,28 +464,48 @@ export async function assess(root = ROOT, { runSuite = defaultSuiteRunner } = {}
     );
   }
 
-  // 12 — The tag, if one exists. This criterion NEVER requires the tag: an absent tag is the normal
-  //      pre-release state and satisfies it, because demanding the tag in order to permit the tag is
-  //      the circular gate this file opens by refusing. It fails only on a tag that EXISTS and
-  //      disagrees — which means the artifacts in this tree are not the ones v1.0.0 released, and a
-  //      reader comparing them would be reading the wrong bytes.
-  let release = { state: "UNKNOWN", reason: "the version could not be read" };
+  // 12 and 13 — the tag, resolved into the two propositions it can actually support.
+  //
+  // These were one criterion until the first real release lifecycle showed it was answering two
+  // questions with one git relation. Neither may borrow the other's evidence: equality establishes
+  // that this tree IS the released artifact, ancestry establishes only that the release is behind us.
+  let release = { release: "UNKNOWN", tree: "UNKNOWN", reason: "the version could not be read" };
   try {
     release = resolveRelease(root, read(root, "VERSION").trim());
   } catch (error) {
-    release = { state: "UNKNOWN", reason: error.message };
+    release = { release: "UNKNOWN", tree: "UNKNOWN", reason: error.message };
   }
+
+  // 12 — Artifact identity. EQUALITY, never ancestry.
+  //
+  // Never requires the tag: an absent tag is the ordinary pre-release state, because demanding the
+  // tag in order to permit the tag is the circular gate this file opens by refusing. Once HEAD has
+  // moved past the release, the tree is no longer claiming to be the artifact and the proposition
+  // stops applying — which is NOT the same as being met, and is why it reports NOT_APPLICABLE under
+  // a recorded condition rather than SATISFIED.
   add(
     "release.the-tag-agrees-with-this-tree",
-    "No tag contradicts this tree: either the release tag is absent, or it points at this commit.",
-    release.state === "RELEASED_AT_ANOTHER_COMMIT" || release.state === "UNKNOWN" ? FAILED : SATISFIED,
+    "This tree is the released artifact: HEAD is exactly the commit the release tag names.",
+    { RELEASE_TREE: SATISFIED, UNRELEASED_CANDIDATE: SATISFIED, POST_RELEASE_DEVELOPMENT: NOT_APPLICABLE, RELEASE_HISTORY_DIVERGED: FAILED, UNKNOWN: FAILED }[release.tree] ?? FAILED,
     release.reason,
+  );
+
+  // 13 — Historical continuity. ANCESTRY, and only ancestry.
+  //
+  // The proposition the previous criterion cannot answer, and the one that catches a rewritten or
+  // moved tag. A release that is no longer in the history of the line claiming to continue it means
+  // the immutable artifact and the development line have come apart.
+  add(
+    "release.current-line-descends-from-latest-release",
+    "This development line still contains the latest release: the tag is an ancestor of HEAD, or is HEAD.",
+    { RELEASE_TREE: SATISFIED, POST_RELEASE_DEVELOPMENT: SATISFIED, UNRELEASED_CANDIDATE: SATISFIED, RELEASE_HISTORY_DIVERGED: FAILED, UNKNOWN: FAILED }[release.tree] ?? FAILED,
+    release.tree === "UNRELEASED_CANDIDATE" ? "no release exists yet for this line to descend from" : release.reason,
   );
 
   const failed = criteria.filter((c) => [FAILED, NOT_EVALUATED, BLOCKING_GAP].includes(c.state));
   const gaps = criteria.filter((c) => c.state === RECORDED_GAP);
   const verdict = failed.length > 0 ? "NOT_READY" : gaps.length > 0 ? "READY_WITH_RECORDED_GAPS" : "READY";
-  return { verdict, criteria, chronology, release: release.state, releaseDetail: release };
+  return { verdict, criteria, chronology, release: release.release, tree: release.tree, releaseDetail: release };
 }
 
 /** Runs the real suite. Injectable so tests can exercise `assess` without recursing into it. */
@@ -478,7 +556,7 @@ if (isMain) {
     await writeSnapshot(ROOT);
   } else {
     const assessment = await assess(ROOT);
-    const mark = { [SATISFIED]: "✔", [FAILED]: "✘", [RECORDED_GAP]: "◐", [BLOCKING_GAP]: "✘", [NOT_EVALUATED]: "?" };
+    const mark = { [SATISFIED]: "✔", [FAILED]: "✘", [RECORDED_GAP]: "◐", [BLOCKING_GAP]: "✘", [NOT_EVALUATED]: "?", [NOT_APPLICABLE]: "–" };
     process.stdout.write("Release readiness — v1.0.0\n\n");
     for (const criterion of assessment.criteria) {
       process.stdout.write(`  ${mark[criterion.state]} ${criterion.state.padEnd(13)} ${criterion.id}\n`);
@@ -487,6 +565,7 @@ if (isMain) {
     const gaps = assessment.criteria.filter((c) => c.state === RECORDED_GAP);
     process.stdout.write(`\n  implementation: ${assessment.verdict === "NOT_READY" ? "NOT_VERIFIED" : "VERIFIED"}\n`);
     process.stdout.write(`  release:        ${assessment.release} — ${assessment.releaseDetail.reason}\n`);
+    process.stdout.write(`  this tree:      ${assessment.tree}\n`);
     process.stdout.write(`  verdict:        ${assessment.verdict}\n`);
     if (gaps.length > 0) {
       process.stdout.write(`\n  ${gaps.length} accepted release limitation(s). Recorded, not satisfied:\n`);

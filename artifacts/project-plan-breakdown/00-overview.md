@@ -36,21 +36,21 @@ ran.
 | | |
 | --- | --- |
 | Branch | `main` |
-| Remote | none configured |
+| Remote | `origin` — github.com/mikeycdavis/UIUXDesignStandards. `main` and `v1.0.0` published 2026-08-11 |
 | Standards written | 40 of 40 |
 | Rules catalogued | 70 in 15 files, 15 forbidden |
-| Tooling | vendored core, content-identity primitive, inventory, provenance, rule-identity, and policy checkers; the Gate 1 classifier; the `audit` and `validate` pipelines with 13 static detectors; browser-evidence ingestion; the attestation model; the `init` bootstrap; CI and the documentation; the release-readiness checker and the frozen v1.0.0 catalog snapshot; the full suite, including 20 architectural falsifiers |
+| Tooling | vendored core, content-identity primitive, inventory, provenance, rule-identity, and policy checkers; the Gate 1 classifier; the `audit` and `validate` pipelines with 13 static detectors; browser-evidence ingestion; the attestation model; the `init` bootstrap; CI and the documentation; the release-readiness checker and the frozen v1.0.0 catalog snapshot; the full suite, including 21 architectural falsifiers |
 | Platform | Node ≥ 18, zero dependencies |
 | Own policy | `no-ui` declared, and classified `NOT_APPLICABLE` from evidence — complete scan, zero signals, `agreement: match`. `validate` exits 0: `uiCompliance: null`, `frameworkCompliance: COMPLIANT` |
-| Framework version | `1.0.0` — implementation `VERIFIED`, release `NOT_RELEASED`. One gap recorded in [the readiness report](../release/release-readiness-v1.0.0.md): the Git chronology is `NOT_ESTABLISHED`, which is the only kind of gap a release may carry — evidence that cannot now be recovered honestly |
+| Framework version | `1.0.0` — `RELEASED` at [`8353469`](../release/publication-v1.0.0.md), verified from a clone of the published tag. This tree is `POST_RELEASE_DEVELOPMENT`, not the release tree. One gap carried: the Git chronology is `NOT_ESTABLISHED` — the only kind a release may carry, evidence that cannot now be recovered honestly |
 
-- **Current status:** `IN_PROGRESS`
-- **Current release target:** v1.0.0, gated by `13-release-readiness-and-v1.md`
+- **Current status:** `IN_PROGRESS` — v1.0.0 released; development continues on top of it
+- **Current release target:** none declared. `VERSION` stays at `1.0.0`, the last release, until the next one is cut (ADR 0015)
 - **Known risks:** the detector set is the least certain part of the plan; false positives are the
   failure mode this family has shipped most often, and no external UI project has exercised these
   detectors yet (see `14-real-project-dogfood.md`).
 - **Known blockers:** none.
-- **Next recommended work:** `12-release-readiness-and-v1.md`.
+- **Next recommended work:** `13-version-identity-and-reusable-workflow.md`, now unblocked by the published tag.
 
 ## Sections
 
@@ -68,7 +68,7 @@ ran.
 | [`09-init-bootstrap.md`](09-init-bootstrap.md) | `init.mjs`, three modes | `COMPLETE` |
 | [`10-tests-and-fixtures.md`](10-tests-and-fixtures.md) | Full suite, fixtures, mutation and meta-tests | `COMPLETE` |
 | [`11-ci-and-docs.md`](11-ci-and-docs.md) | CI, README, INSTRUCTIONS, PROJECT, architecture | `COMPLETE` |
-| [`12-release-readiness-and-v1.md`](12-release-readiness-and-v1.md) | Readiness checker, frozen snapshot, tag | `IN_REVIEW` — the tag is a separate owner act |
+| [`12-release-readiness-and-v1.md`](12-release-readiness-and-v1.md) | Readiness checker, frozen snapshot, tag | `COMPLETE` — v1.0.0 tagged and published |
 | [`13-version-identity-and-reusable-workflow.md`](13-version-identity-and-reusable-workflow.md) | Deferred — post-v1.0.0 | `READY` |
 | [`14-real-project-dogfood.md`](14-real-project-dogfood.md) | Deferred — needs an owner-nominated target | `NOT_STARTED` |
 | [`15-browser-evidence-producer.md`](15-browser-evidence-producer.md) | Deferred — the runner half of ADR 0002 | `NOT_STARTED` |
@@ -79,7 +79,7 @@ recorded here so that deferral is visible rather than becoming silent scope loss
 
 ## Decisions on record
 
-Thirteen ADRs, all `Accepted`, all dated 2026-08-10. The four that most constrain later work:
+Fifteen ADRs, all `Accepted`. The four that most constrain later work:
 
 - [ADR 0003](../adr/0003-ui-applicability-is-established-by-evidence-in-this-repository.md) — two-gate
   applicability, classifier in this repository, ships in v1.0.0, three separate envelope blocks.

@@ -145,13 +145,23 @@ export const FALSIFIERS = [
     suite: "test/release.test.mjs",
   },
   {
+    // The repair that looks obvious and is wrong: accept an ancestor tag as agreement, so ordinary
+    // post-release development stops failing. It also accepts a tree that has rewritten every file
+    // since the release. Ancestry proves the release is behind us, never that this IS it.
+    invariant: "release.identity-is-equality-never-ancestry",
+    file: "scripts/release-readiness.mjs",
+    find: `  if (at === now) {`,
+    replace: `  if (at === now || git(["merge-base", "--is-ancestor", \`\${tag}^{commit}\`, "HEAD"]).status === 0) {`,
+    suite: "test/release.test.mjs",
+  },
+  {
     // Let every criterion grant itself an accepted limitation, and RECORDED_GAP stops meaning "this
     // evidence cannot be recovered" and starts meaning "we wrote it down". That is the release waiver
     // the state was invented to prevent, and it is one boolean away at all times.
     invariant: "release.a-recorded-gap-is-not-a-waiver",
     file: "scripts/release-readiness.mjs",
-    find: `    const granted = state !== RECORDED_GAP || id in GAP_POLICY;`,
-    replace: `    const granted = true;`,
+    find: `    const grantedGap = state !== RECORDED_GAP || id in GAP_POLICY;`,
+    replace: `    const grantedGap = true;`,
     suite: "test/release.test.mjs",
   },
   {

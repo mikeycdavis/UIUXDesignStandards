@@ -24,7 +24,7 @@ import { cp, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { spawnSync } from "node:child_process";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 
 import { assess, projectCatalog, digestOf } from "../scripts/release-readiness.mjs";
 import { loadCatalog } from "../scripts/catalog.mjs";
@@ -299,42 +299,103 @@ function commitAll(dir, message = "release candidate") {
   return git("rev-parse", "HEAD").stdout.trim();
 }
 
-test("the tag is looked up, not assumed: a tag on this commit reports RELEASED", async () => {
+/** Assess a sandbox after committing, tagging, and optionally moving on. */
+async function atRelease(build) {
   const dir = await sandbox();
   try {
-    commitAll(dir);
-    spawnSync("git", ["tag", "-a", "v1.0.0", "-m", "v1.0.0"], { cwd: dir });
+    await build(dir, commitAll);
     const assessment = await assess(dir, { runSuite: greenSuite });
-    assert.equal(assessment.release, "RELEASED");
-    assert.equal(assessment.criteria.find((c) => c.id === "release.the-tag-agrees-with-this-tree").state, "SATISFIED");
-    // Tagging changes no standards semantics: the verdict is what it was before the tag existed.
-    assert.equal(assessment.verdict, "READY_WITH_RECORDED_GAPS");
+    return { ...assessment, byId: new Map(assessment.criteria.map((c) => [c.id, c])) };
   } finally {
     await rm(dir, { recursive: true, force: true });
   }
-});
+}
 
-test("a tag that exists somewhere else fails, because this tree is not the released one", async () => {
-  const dir = await sandbox();
-  try {
-    commitAll(dir, "first");
+const IDENTITY = "release.the-tag-agrees-with-this-tree";
+const CONTINUITY = "release.current-line-descends-from-latest-release";
+
+test("the tag is looked up, not assumed: a tag on this commit is the release tree", async () => {
+  const assessment = await atRelease(async (dir, commit) => {
+    commit(dir);
     spawnSync("git", ["tag", "-a", "v1.0.0", "-m", "v1.0.0"], { cwd: dir });
-    await writeFile(path.join(dir, "docs", "drift.md"), "written after the tag\n");
-    commitAll(dir, "second");
-    const assessment = await assess(dir, { runSuite: greenSuite });
-    assert.equal(assessment.release, "RELEASED_AT_ANOTHER_COMMIT");
-    assert.equal(assessment.criteria.find((c) => c.id === "release.the-tag-agrees-with-this-tree").state, "FAILED");
-    assert.equal(assessment.verdict, "NOT_READY");
-  } finally {
-    await rm(dir, { recursive: true, force: true });
-  }
+  });
+  assert.equal(assessment.release, "RELEASED");
+  assert.equal(assessment.tree, "RELEASE_TREE");
+  assert.equal(assessment.byId.get(IDENTITY).state, "SATISFIED");
+  assert.equal(assessment.byId.get(CONTINUITY).state, "SATISFIED");
+  // Tagging changes no standards semantics: the verdict is what it was before the tag existed.
+  assert.equal(assessment.verdict, "READY_WITH_RECORDED_GAPS");
 });
 
-test("an absent tag satisfies the criterion — the gate is never circular", async () => {
+test("an ordinary post-release commit is development, not a failure and not the release tree", async () => {
+  // The state the family convention actually produces: VERSION stays at the last released version
+  // while HEAD advances. A sibling repository is fourteen commits into this state.
+  const assessment = await atRelease(async (dir, commit) => {
+    commit(dir, "release");
+    spawnSync("git", ["tag", "-a", "v1.0.0", "-m", "v1.0.0"], { cwd: dir });
+    await writeFile(path.join(dir, "docs", "post-release.md"), "bookkeeping\n");
+    commit(dir, "after");
+  });
+  assert.equal(assessment.release, "RELEASED", "the version is released regardless of what is checked out");
+  assert.equal(assessment.tree, "POST_RELEASE_DEVELOPMENT");
+  // Not SATISFIED. The tree is not the artifact, and saying so is the point of the split.
+  assert.equal(assessment.byId.get(IDENTITY).state, "NOT_APPLICABLE");
+  assert.match(assessment.byId.get(IDENTITY).inapplicable, /Ancestry is never accepted as agreement/);
+  assert.equal(assessment.byId.get(CONTINUITY).state, "SATISFIED");
+  assert.notEqual(assessment.verdict, "NOT_READY", "ordinary development after a release must not be permanently red");
+});
+
+test("a release that is no longer in this line's history fails, however far ahead HEAD is", async () => {
+  const assessment = await atRelease(async (dir, commit) => {
+    commit(dir, "release");
+    spawnSync("git", ["tag", "-a", "v1.0.0", "-m", "v1.0.0"], { cwd: dir });
+    // The tag stays; the branch is rebuilt without it. Ancestry is broken, so continuity is false.
+    spawnSync("git", ["checkout", "--quiet", "--orphan", "rewritten"], { cwd: dir });
+    await writeFile(path.join(dir, "docs", "rewritten.md"), "a different history\n");
+    commit(dir, "rewritten");
+  });
+  assert.equal(assessment.tree, "RELEASE_HISTORY_DIVERGED");
+  assert.equal(assessment.byId.get(IDENTITY).state, "FAILED");
+  assert.equal(assessment.byId.get(CONTINUITY).state, "FAILED");
+  assert.equal(assessment.verdict, "NOT_READY");
+});
+
+test("an absent tag satisfies both criteria — the gate is never circular", async () => {
   const assessment = await assessWith(null);
   assert.equal(assessment.release, "NOT_RELEASED");
-  assert.equal(assessment.byId.get("release.the-tag-agrees-with-this-tree").state, "SATISFIED");
+  assert.equal(assessment.tree, "UNRELEASED_CANDIDATE");
+  assert.equal(assessment.byId.get(IDENTITY).state, "SATISFIED");
+  assert.equal(assessment.byId.get(CONTINUITY).state, "SATISFIED");
   assert.notEqual(assessment.verdict, "NOT_READY", "requiring the tag in order to permit the tag is the circular gate");
+});
+
+test("NOT_APPLICABLE is not available to a criterion with no recorded applicability condition", async () => {
+  // The same fail-closed guard GAP_POLICY has, for the same reason: "this does not apply to us" is
+  // the oldest way to pass a check without meeting it, so it must be a listed decision rather than a
+  // state a criterion can reach on its own. Emptying the table must make the post-release state
+  // BLOCK, not silently keep passing.
+  const dir = await sandbox();
+  try {
+    // The emptied table has to be in place before the module under test is loaded from this root.
+    const source = await readFile(path.join(dir, "scripts/release-readiness.mjs"), "utf8");
+    await writeFile(
+      path.join(dir, "scripts/release-readiness.mjs"),
+      source.replace(/const APPLICABILITY_POLICY = \{[\s\S]*?\n\};/, "const APPLICABILITY_POLICY = {};"),
+    );
+    commitAll(dir, "release");
+    spawnSync("git", ["tag", "-a", "v1.0.0", "-m", "v1.0.0"], { cwd: dir });
+    await writeFile(path.join(dir, "docs", "post-release.md"), "bookkeeping\n");
+    commitAll(dir, "after");
+
+    const { assess: ungoverned } = await import(pathToFileURL(path.join(dir, "scripts/release-readiness.mjs")).href);
+    const assessment = await ungoverned(dir, { runSuite: greenSuite });
+    const identity = assessment.criteria.find((c) => c.id === IDENTITY);
+    assert.equal(identity.state, "NOT_EVALUATED", "an ungoverned NOT_APPLICABLE was granted");
+    assert.match(identity.detail, /No applicability condition is on record/);
+    assert.equal(assessment.verdict, "NOT_READY", "NOT_EVALUATED must never satisfy");
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
 });
 
 // --- The snapshot projection itself -----------------------------------------------------------------

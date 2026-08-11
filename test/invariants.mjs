@@ -289,4 +289,28 @@ export const INVARIANTS = [
     ],
     falsifier: "release.a-recorded-gap-is-not-a-waiver",
   },
+  {
+    id: "release.identity-is-equality-never-ancestry",
+    statement:
+      "Whether a tree is the released artifact is established by commit equality with the tag, never by the tag " +
+      "being an ancestor. Ancestry establishes only that the development line still contains the release, which " +
+      "is a different proposition with its own criterion. Neither may substitute for the other.",
+    record: { file: "artifacts/adr/0015-version-names-the-last-release-and-identity-is-not-ancestry.md", quote: "Equality establishes artifact identity. Ancestry establishes historical continuity." },
+    tests: [
+      "the tag is looked up, not assumed: a tag on this commit is the release tree",
+      "an ordinary post-release commit is development, not a failure and not the release tree",
+      "a release that is no longer in this line's history fails, however far ahead HEAD is",
+      "an absent tag satisfies both criteria — the gate is never circular",
+    ],
+    falsifier: "release.identity-is-equality-never-ancestry",
+  },
+  {
+    id: "release.inapplicability-is-a-recorded-decision",
+    statement:
+      "A criterion may report NOT_APPLICABLE only where an applicability condition is on record for it. " +
+      "Unlisted criteria get NOT_EVALUATED, which never satisfies.",
+    record: { file: "artifacts/adr/0015-version-names-the-last-release-and-identity-is-not-ancestry.md", quote: "an ungoverned inapplicability is a waiver" },
+    tests: ["NOT_APPLICABLE is not available to a criterion with no recorded applicability condition"],
+    falsifier: null,
+  },
 ];

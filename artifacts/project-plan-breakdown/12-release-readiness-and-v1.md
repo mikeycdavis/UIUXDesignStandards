@@ -88,7 +88,7 @@ The tag is what happens afterwards, if the report has no unrecorded gaps.
 
 ### Version, changelog, and tag
 
-- **Status:** `IN_REVIEW` — 2026-08-11
+- **Status:** `COMPLETE` — 2026-08-11
 - **Purpose:** Release an immutable v1.0.0 that consuming projects can pin.
 - **Deliverables:** `VERSION` containing `1.0.0`; `CHANGELOG.md` with `## 1.0.0 — YYYY-MM-DD`, the
   increment declared and justified on the first line, and the semver law stated in the preamble —
