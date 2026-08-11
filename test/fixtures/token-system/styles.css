@@ -1,0 +1,13 @@
+/* A project with a token system, whose stylesheet then restates literal values anyway. */
+:root {
+  --color-text: #333333;
+  --color-surface: #eeeeee;
+  --color-line: #cccccc;
+}
+
+.summary {
+  color: #333333;
+  background-color: #eeeeee;
+  border-color: #cccccc;
+  box-shadow: 0 1px 0 #bbbbbb;
+}

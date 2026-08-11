@@ -1,0 +1,13 @@
+{
+  "name": "web-ui-signals-fixture",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "react": "^18.3.0",
+    "react-dom": "^18.3.0"
+  },
+  "devDependencies": {
+    "vite": "^5.0.0"
+  }
+}

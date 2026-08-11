@@ -1,0 +1,30 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no, maximum-scale=1" />
+    <title>Checkout</title>
+  </head>
+  <body>
+    <nav role="navigaton">
+      <a href="/home" tabindex="3">Home</a>
+    </nav>
+
+    <main>
+      <h1>Checkout</h1>
+      <h3>Card details</h3>
+
+      <img src="/card.png" />
+
+      <form action="/pay" method="post">
+        <span>Card number</span>
+        <input name="card" type="text" />
+        <button>Pay now</button>
+      </form>
+
+      <button aria-hidden="true">Skip</button>
+
+      <div onclick="applyPromo()">Apply promo code</div>
+    </main>
+  </body>
+</html>

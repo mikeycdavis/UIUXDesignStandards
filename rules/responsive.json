@@ -1,0 +1,49 @@
+{
+  "$comment": "Identity is frozen by artifacts/design/rule-catalog-v1.md. Both rules are scoped by the viewport classes the project's policy declares — a project that declares only desktop is not judged against a phone it never claimed to support (Standard 28).",
+  "rules": [
+    {
+      "id": "responsive.viewport-behavior-defined",
+      "title": "Behavior at each declared viewport class is defined",
+      "standard": 13,
+      "category": "responsive",
+      "level": "required",
+      "severity": "error",
+      "validationType": "document",
+      "assurance": "partial",
+      "nonExemptible": false,
+      "introducedIn": "1.0.0",
+      "description": "For every viewport class the project declares support for, the intended layout and interaction behavior is defined — including what is deliberately degraded or omitted there.",
+      "rationale": "Undefined responsive behavior is not absent behavior; it is whatever the layout happens to do, discovered by users on the devices nobody tested.",
+      "remediation": "Define behavior per declared viewport class, and record deliberate degradation as a decision rather than leaving it as an artifact.",
+      "aliases": [],
+      "deprecatedIn": null,
+      "supersededBy": null,
+      "removedIn": null,
+      "appliesTo": ["any-ui"],
+      "crossReferences": [],
+      "$assuranceNote": "The presence of a definition per declared class is checkable. Whether the implementation matches it needs rendering at those viewports."
+    },
+    {
+      "id": "responsive.no-unintentional-overflow",
+      "title": "Content does not overflow unintentionally",
+      "standard": 13,
+      "category": "responsive",
+      "level": "required",
+      "severity": "error",
+      "validationType": "browser-analysis",
+      "assurance": "partial",
+      "nonExemptible": false,
+      "introducedIn": "1.0.0",
+      "description": "At every declared viewport class, content stays within its container unless the overflow is a designed, scrollable affordance.",
+      "rationale": "Horizontal overflow hides content behind an edge with no indication that anything is there, and it is the most common way a layout fails on a real device.",
+      "remediation": "Let the container constrain the content, or make the overflow an explicit scroll region.",
+      "aliases": [],
+      "deprecatedIn": null,
+      "supersededBy": null,
+      "removedIn": null,
+      "appliesTo": ["any-ui"],
+      "crossReferences": [],
+      "$assuranceNote": "Overflow is a property of resolved layout with real content at a real width. It is established only for viewports and routes a run exercised."
+    }
+  ]
+}

@@ -1,0 +1,49 @@
+{
+  "$comment": "Identity is frozen by artifacts/design/rule-catalog-v1.md. These govern the presentation of consent and of sensitive values. Whether data may be collected at all is a legal and engineering question this framework does not answer.",
+  "rules": [
+    {
+      "id": "privacy.sensitive-data-masked",
+      "title": "Sensitive values are not exposed by default",
+      "standard": 25,
+      "category": "privacy",
+      "level": "required",
+      "severity": "error",
+      "validationType": "code-analysis",
+      "assurance": "partial",
+      "nonExemptible": false,
+      "introducedIn": "1.0.0",
+      "description": "Values whose exposure harms the user — credentials, financial identifiers, health and identity data — are masked by default, with revealing them a deliberate act.",
+      "rationale": "A screen is shared, projected, and shoulder-read far more often than its author imagines. Default exposure makes every one of those an incident.",
+      "remediation": "Mask by default and make disclosure explicit and temporary.",
+      "aliases": [],
+      "deprecatedIn": null,
+      "supersededBy": null,
+      "removedIn": null,
+      "appliesTo": ["any-ui"],
+      "crossReferences": [],
+      "$assuranceNote": "Source can show a field rendered unmasked where its name indicates sensitivity. Which values are sensitive in a given product is a judgment no scan holds."
+    },
+    {
+      "id": "privacy.no-deceptive-consent",
+      "title": "Consent is not obtained deceptively",
+      "standard": 29,
+      "category": "privacy",
+      "level": "forbidden",
+      "severity": "error",
+      "validationType": "manual-review",
+      "assurance": "none",
+      "nonExemptible": true,
+      "introducedIn": "1.0.0",
+      "description": "Consent is not pre-selected, buried, obtained by making refusal harder than acceptance, or bundled so that agreeing to one thing agrees to another.",
+      "rationale": "Consent obtained by design pressure is not consent. The user's agreement is the only thing the mechanism exists to establish, and a deceptive flow establishes nothing while appearing to.",
+      "remediation": "Present accept and decline with equal prominence and effort, unbundled, unselected.",
+      "aliases": [],
+      "deprecatedIn": null,
+      "supersededBy": null,
+      "removedIn": null,
+      "appliesTo": ["any-ui"],
+      "crossReferences": [],
+      "$assuranceNote": "Whether a consent flow is deceptive depends on the relative effort and prominence of the two paths as rendered. A human establishes it."
+    }
+  ]
+}

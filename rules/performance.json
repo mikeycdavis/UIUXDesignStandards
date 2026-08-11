@@ -1,0 +1,49 @@
+{
+  "$comment": "Identity is frozen by artifacts/design/rule-catalog-v1.md. Performance appears here only where it is experienced as interface behavior; engineering performance work is not this framework's subject (Standard 2).",
+  "rules": [
+    {
+      "id": "performance.budgets-testable",
+      "title": "Declared performance budgets are expressed testably",
+      "standard": 19,
+      "category": "performance",
+      "level": "recommended",
+      "severity": "warning",
+      "validationType": "configuration",
+      "assurance": "partial",
+      "nonExemptible": false,
+      "introducedIn": "1.0.0",
+      "description": "Where a project declares performance budgets, they are stated as measurable thresholds against named conditions rather than as adjectives.",
+      "rationale": "'Fast' cannot be met or missed. A budget that cannot fail is a preference wearing a budget's clothes.",
+      "remediation": "State each budget as a metric, a threshold, and the condition it is measured under.",
+      "aliases": [],
+      "deprecatedIn": null,
+      "supersededBy": null,
+      "removedIn": null,
+      "appliesTo": ["any-ui"],
+      "crossReferences": [],
+      "$assuranceNote": "Applicable only where budgets are declared. The declaration's shape is checkable; whether the product meets it is a measurement this framework does not perform."
+    },
+    {
+      "id": "performance.layout-stability",
+      "title": "Layout does not shift under the user",
+      "standard": 19,
+      "category": "performance",
+      "level": "required",
+      "severity": "error",
+      "validationType": "browser-analysis",
+      "assurance": "partial",
+      "nonExemptible": false,
+      "introducedIn": "1.0.0",
+      "description": "Content arriving after first paint does not displace content the user is already reading or about to act on.",
+      "rationale": "A shift at the moment of a tap turns an intended action into a different one, and the user is blamed for it by the interface's own logic.",
+      "remediation": "Reserve space for late-arriving content rather than letting it insert itself.",
+      "aliases": [],
+      "deprecatedIn": null,
+      "supersededBy": null,
+      "removedIn": null,
+      "appliesTo": ["any-ui"],
+      "crossReferences": [],
+      "$assuranceNote": "Shift is measured during loading with real timing. Nothing in source establishes it."
+    }
+  ]
+}

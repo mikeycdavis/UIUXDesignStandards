@@ -1,0 +1,8 @@
+{
+  "name": "no-ui-fixture",
+  "version": "0.0.0",
+  "type": "module",
+  "private": true,
+  "dependencies": {},
+  "devDependencies": {}
+}

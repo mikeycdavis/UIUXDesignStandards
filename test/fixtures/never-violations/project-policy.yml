@@ -1,0 +1,17 @@
+# The known-positive half of the detector proving ground. Every file here contains a real instance
+# of the pattern its detector hunts. Its twin, ../never-clean, carries the same filenames with the
+# same patterns only ever MENTIONED — and must produce no finding at all.
+standardVersion: 1.0.0
+project: fixture-never-violations
+
+ui:
+  applicability: web-ui
+  platforms:
+    - web
+  viewportClasses:
+    - mobile
+    - desktop
+  accessibility:
+    target: framework-baseline
+
+exceptions: []

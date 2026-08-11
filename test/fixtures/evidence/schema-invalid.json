@@ -1,0 +1,95 @@
+{
+  "schemaVersion": "1.0",
+  "producedBy": {
+    "name": "fixture-producer",
+    "version": "0.0.0"
+  },
+  "runAt": "2026-08-10T09:00:00.000Z",
+  "revision": {
+    "gitSha": "0000000000000000000000000000000000000000",
+    "paths": [
+      "index.html",
+      "styles.css",
+      "src"
+    ]
+  },
+  "run": {
+    "status": "completed"
+  },
+  "viewports": [
+    {
+      "name": "iphone-14",
+      "class": "mobile",
+      "width": 390,
+      "height": 844
+    },
+    {
+      "name": "laptop",
+      "class": "desktop",
+      "width": 1440,
+      "height": 900
+    }
+  ],
+  "routes": [
+    {
+      "route": "/",
+      "status": "tested",
+      "viewportsTested": [
+        "iphone-14",
+        "laptop"
+      ],
+      "accessibilityTree": "obtained",
+      "checks": [
+        {
+          "ruleId": "accessibility.contrast",
+          "outcome": "passed",
+          "viewport": "iphone-14",
+          "evidence": "every text pair met the declared target at iphone-14"
+        },
+        {
+          "ruleId": "accessibility.contrast",
+          "outcome": "passed",
+          "viewport": "laptop",
+          "evidence": "every text pair met the declared target at laptop"
+        },
+        {
+          "ruleId": "design-integrity.no-fake-success",
+          "outcome": "passed",
+          "viewport": "laptop",
+          "evidence": "no success state was shown for a failed request at laptop"
+        }
+      ],
+      "screenshots": []
+    },
+    {
+      "route": "/account",
+      "status": "tested",
+      "viewportsTested": [
+        "iphone-14",
+        "laptop"
+      ],
+      "accessibilityTree": "obtained",
+      "checks": [
+        {
+          "ruleId": "accessibility.contrast",
+          "outcome": "passed",
+          "viewport": "iphone-14",
+          "evidence": "every text pair met the declared target at iphone-14"
+        },
+        {
+          "ruleId": "accessibility.contrast",
+          "outcome": "passed",
+          "viewport": "laptop",
+          "evidence": "every text pair met the declared target at laptop"
+        },
+        {
+          "ruleId": "design-integrity.no-fake-success",
+          "outcome": "passed",
+          "viewport": "laptop",
+          "evidence": "no success state was shown for a failed request at laptop"
+        }
+      ],
+      "screenshots": []
+    }
+  ]
+}

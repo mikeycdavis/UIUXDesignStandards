@@ -1,0 +1,10 @@
+standardVersion: 1.0.0
+project: fixture
+ui:
+  applicability: no-ui
+exceptions:
+  - rule: visual.typography-scale
+    reason: Scale work is scheduled.
+    approvedBy: someone
+    approvedAt: 2025-01-01
+    expires: 2025-06-01

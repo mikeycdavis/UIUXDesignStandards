@@ -1,0 +1,27 @@
+{
+  "$comment": "Identity is frozen by artifacts/design/rule-catalog-v1.md. One rule in v1.0.0. The remaining Standard 21 requirements — bidirectional layout, locale-correct formatting, translated-length tolerance — are recorded there without mechanical support rather than given rules no evidence surface can establish.",
+  "rules": [
+    {
+      "id": "localization.no-string-concatenation",
+      "title": "Displayed sentences are not assembled by concatenation",
+      "standard": 21,
+      "category": "localization",
+      "level": "required",
+      "severity": "error",
+      "validationType": "code-analysis",
+      "assurance": "partial",
+      "nonExemptible": false,
+      "introducedIn": "1.0.0",
+      "description": "User-facing sentences are single translatable units with parameters, not fragments joined at runtime.",
+      "rationale": "Concatenation encodes one language's grammar in the code. Word order, agreement, and pluralization differ per language, so the fragments cannot be reassembled correctly in any other one — and the defect is invisible to everyone who reads the original.",
+      "remediation": "Make the whole sentence one message with named placeholders, and handle plurals through the message rather than around it.",
+      "aliases": [],
+      "deprecatedIn": null,
+      "supersededBy": null,
+      "removedIn": null,
+      "appliesTo": ["any-ui"],
+      "crossReferences": [],
+      "$assuranceNote": "Concatenation adjacent to a translation call is recognisable in source. Sentences assembled further from the call site are not, and this rule does not claim to find them."
+    }
+  ]
+}

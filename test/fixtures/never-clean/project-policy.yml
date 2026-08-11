@@ -1,0 +1,20 @@
+# The known-negative half of the detector proving ground, and the one that matters.
+#
+# Every pattern its twin (../never-violations) commits is NAMED here — in an HTML comment, a CSS
+# comment, a JavaScript comment — and never used. The whole fixture must produce zero findings.
+# False positives are the failure mode this family has actually shipped, and a finding an adopter
+# learns to ignore makes the framework worse than no framework.
+standardVersion: 1.0.0
+project: fixture-never-clean
+
+ui:
+  applicability: web-ui
+  platforms:
+    - web
+  viewportClasses:
+    - mobile
+    - desktop
+  accessibility:
+    target: framework-baseline
+
+exceptions: []

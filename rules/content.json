@@ -1,0 +1,49 @@
+{
+  "$comment": "Identity is frozen by artifacts/design/rule-catalog-v1.md. Standard 20 owns message wording for the whole framework: forms and error-presentation rules govern association and classification, and defer here for what the text says.",
+  "rules": [
+    {
+      "id": "content.error-messages-actionable",
+      "title": "Failure and consequence copy says what happened and what to do",
+      "standard": 20,
+      "category": "content",
+      "level": "required",
+      "severity": "warning",
+      "validationType": "manual-review",
+      "assurance": "none",
+      "nonExemptible": false,
+      "introducedIn": "1.0.0",
+      "description": "A message reporting a failure or a consequence names what happened and what the user can do about it, where the application holds that information.",
+      "rationale": "'Something went wrong' spends the user's attention and returns nothing. Where the system knows more, withholding it converts a recoverable situation into a dead end.",
+      "remediation": "Say what failed and what action is available, and reserve generic wording for cases where the system genuinely knows nothing more.",
+      "aliases": [],
+      "deprecatedIn": null,
+      "supersededBy": null,
+      "removedIn": null,
+      "appliesTo": ["any-ui"],
+      "crossReferences": [],
+      "$assuranceNote": "Whether a message is actionable depends on what the system knew at that moment, which is not recoverable from the message's text."
+    },
+    {
+      "id": "content.button-labels-specific",
+      "title": "Action labels describe the action",
+      "standard": 20,
+      "category": "content",
+      "level": "recommended",
+      "severity": "info",
+      "validationType": "manual-review",
+      "assurance": "none",
+      "nonExemptible": false,
+      "introducedIn": "1.0.0",
+      "description": "Where a more specific label reads naturally, an action is labeled with what it does rather than with a generic affirmative.",
+      "rationale": "A specific label lets the user confirm their intent against the button rather than against the sentence above it — which matters most in exactly the dialogs people stop reading.",
+      "remediation": "Replace a generic label with the action, where doing so does not produce unnatural wording.",
+      "aliases": [],
+      "deprecatedIn": null,
+      "supersededBy": null,
+      "removedIn": null,
+      "appliesTo": ["any-ui"],
+      "crossReferences": [],
+      "$assuranceNote": "Standard 20 R3 is explicit that this is a preference with a purpose, not a prohibition on the word 'OK'. Detecting it mechanically would produce a rule the standard does not state."
+    }
+  ]
+}

@@ -1,0 +1,29 @@
+/*
+ * House style for stylesheets. CSS has no line comments, which is why this block is a block: a
+ * detector configured with `//` here would blank the remainder of every line containing a URL.
+ *
+ * Never remove a focus indicator without replacing it:
+ *
+ *   button:focus {
+ *     outline: none;
+ *   }
+ *
+ * Never restate a token's value where the token exists:
+ *
+ *   .summary {
+ *     color: #333333;
+ *     background-color: #eeeeee;
+ *     border-top-color: #cccccc;
+ *   }
+ *
+ * Never declare :root { --color-brand: #0b5fff; } and then ignore it.
+ *
+ * Never animate without a guard: @keyframes slide-in without a prefers-reduced-motion query moves
+ * the interface under a reader who asked it not to.
+ *
+ * See https://example.org/house-style for the reasoning.
+ */
+
+.summary {
+  color: inherit;
+}

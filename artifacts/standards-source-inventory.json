@@ -1,0 +1,87 @@
+{
+  "$comment": "Internal source provenance for the standards series: which sections of which prompt each standard realizes. Hand-authored, reviewed, and NEVER regenerated from a run — scripts/inventory.mjs extracts from the sources and compares against this file, so a change in extraction cannot silently redefine what standards exist. The mapping is deliberately many-to-one and is NOT a 1:1 fiction: 58 of the source prompt's 64 sections become standards, six become nothing and are recorded below with where they went instead (ADR 0010). The second source contributes to a subset of standards only; its remaining sections are recorded as non-standard with their destination. Every section of every source must have exactly one recorded destination across standards[].sourceSections, the source's nonStandardSections, and its splitSections — that reconciliation is what inventory.mjs proves. A section realized by more than one standard is permitted only when splitSections declares it with a reason; an undeclared second owner is a failure, because a section quietly acquiring one reads as intentional.",
+  "reviewedOn": "2026-08-10",
+  "expectedCount": 40,
+  "sources": [
+    {
+      "id": "original-prompt",
+      "path": "artifacts/prompts/original_prompt.md",
+      "extraction": "reviewed-sections",
+      "$comment": "Sections are top-level headings of the form '# N. Title', numbered 1 through 64. Subsections of §4 are '## Title' headings beneath it and are cited by name because §4 alone spans six domains.",
+      "expectedSectionCount": 64,
+      "splitSections": [
+        {
+          "section": 4,
+          "subsection": "Accessibility",
+          "standards": [3, 4, 5],
+          "reason": "ADR 0010 decided that Keyboard and Focus (4) stays separate from Accessibility Foundations (3) because the two have different evidence sources — focus behavior is browser-established, structure is static — and that Accessible Component Patterns (5) is a third subject with per-pattern behavioral contracts. One source subsection, three standards, by decision rather than by accident."
+        }
+      ],
+      "nonStandardSections": [
+        { "section": 3, "destination": "Repository scaffolding — realized by the repository layout itself" },
+        { "section": 54, "destination": "The CLI contract — tooling; Standards 34 and 35 cross-reference it" },
+        { "section": 60, "destination": "This repository's definition of done — artifacts/release/release-readiness-v1.0.0.md" },
+        { "section": 61, "destination": "Development process — artifacts/project-plan-breakdown/ and ADR practice" },
+        { "section": 63, "destination": "Deliverables list — the project plan" },
+        { "section": 64, "destination": "Closing philosophy — README preamble and the Standard 35 abstract" }
+      ]
+    },
+    {
+      "id": "enforcement-prompt",
+      "path": "artifacts/prompts/enforcement-architecture-prompt.md",
+      "extraction": "reviewed-sections",
+      "$comment": "Sections are '## Title' and '### Title' headings. The document title at line 1 is not a section. Much of this prompt is CI, branch-protection, and organization-rollout material that belongs to deferred milestones rather than to any standard; those destinations are recorded below.",
+      "nonStandardSections": [
+        { "section": "Make validation mandatory in CI", "destination": "Plan section 11 (CI) and deferred section 13 (reusable workflow)" },
+        { "section": "Then make the check required", "destination": "Deferred section 13 — branch protection is host configuration, not a standard" },
+        { "section": "Build a UI standards adoption controller", "destination": "Deferred section 16 (portfolio integration)" },
+        { "section": "New projects should get enforcement automatically", "destination": "Deferred section 13 (reusable workflow) and Standard 39's init model" },
+        { "section": "Organization enforcement policy", "destination": "Deferred section 16 (portfolio integration)" },
+        { "section": "The end state", "destination": "Deferred section 16 (portfolio integration)" },
+        { "section": "Note on the build order above", "destination": "The project plan; the revised order is recorded in artifacts/prompts/owner-decisions.md" }
+      ]
+    }
+  ],
+  "standards": [
+    { "number": 1, "title": "Interface Operability for Humans and AI Agents", "implementedBy": "standards/01-interface-operability-for-humans-and-ai-agents.md", "sourceSections": [{ "source": "original-prompt", "section": 2 }] },
+    { "number": 2, "title": "Boundary with EngineeringStandards", "implementedBy": "standards/02-boundary-with-engineering-standards.md", "sourceSections": [{ "source": "original-prompt", "section": 29 }, { "source": "original-prompt", "section": 55 }] },
+    { "number": 3, "title": "Accessibility Foundations", "implementedBy": "standards/03-accessibility-foundations.md", "sourceSections": [{ "source": "original-prompt", "section": 4, "subsection": "Accessibility" }] },
+    { "number": 4, "title": "Keyboard and Focus", "implementedBy": "standards/04-keyboard-and-focus.md", "sourceSections": [{ "source": "original-prompt", "section": 4, "subsection": "Accessibility" }] },
+    { "number": 5, "title": "Accessible Component Patterns and Custom Controls", "implementedBy": "standards/05-accessible-component-patterns-and-custom-controls.md", "sourceSections": [{ "source": "original-prompt", "section": 4, "subsection": "Accessibility" }, { "source": "original-prompt", "section": 30 }] },
+    { "number": 6, "title": "Design Tokens and Design-System Consistency", "implementedBy": "standards/06-design-tokens-and-design-system-consistency.md", "sourceSections": [{ "source": "original-prompt", "section": 4, "subsection": "Design-system consistency" }, { "source": "original-prompt", "section": 28 }] },
+    { "number": 7, "title": "Component Reuse and Component States", "implementedBy": "standards/07-component-reuse-and-component-states.md", "sourceSections": [{ "source": "original-prompt", "section": 4, "subsection": "Component reuse and consistency" }, { "source": "original-prompt", "section": 27 }] },
+    { "number": 8, "title": "Typography", "implementedBy": "standards/08-typography.md", "sourceSections": [{ "source": "original-prompt", "section": 12 }] },
+    { "number": 9, "title": "Color", "implementedBy": "standards/09-color.md", "sourceSections": [{ "source": "original-prompt", "section": 13 }] },
+    { "number": 10, "title": "Spacing and Layout", "implementedBy": "standards/10-spacing-and-layout.md", "sourceSections": [{ "source": "original-prompt", "section": 14 }] },
+    { "number": 11, "title": "Visual Hierarchy and Progressive Disclosure", "implementedBy": "standards/11-visual-hierarchy-and-progressive-disclosure.md", "sourceSections": [{ "source": "original-prompt", "section": 11 }, { "source": "original-prompt", "section": 35 }] },
+    { "number": 12, "title": "Motion and Animation", "implementedBy": "standards/12-motion-and-animation.md", "sourceSections": [{ "source": "original-prompt", "section": 15 }] },
+    { "number": 13, "title": "Responsive and Adaptive Design", "implementedBy": "standards/13-responsive-and-adaptive-design.md", "sourceSections": [{ "source": "original-prompt", "section": 4, "subsection": "Responsive and adaptive design" }] },
+    { "number": 14, "title": "Navigation and Information Architecture", "implementedBy": "standards/14-navigation-and-information-architecture.md", "sourceSections": [{ "source": "original-prompt", "section": 4, "subsection": "Navigation and information architecture" }] },
+    { "number": 15, "title": "Forms and Data Entry", "implementedBy": "standards/15-forms-and-data-entry.md", "sourceSections": [{ "source": "original-prompt", "section": 4, "subsection": "Forms and data entry" }] },
+    { "number": 16, "title": "Interface States", "implementedBy": "standards/16-interface-states.md", "sourceSections": [{ "source": "original-prompt", "section": 5 }, { "source": "original-prompt", "section": 6 }, { "source": "original-prompt", "section": 7 }] },
+    { "number": 17, "title": "Error Presentation and Feedback", "implementedBy": "standards/17-error-presentation-and-feedback.md", "sourceSections": [{ "source": "original-prompt", "section": 8 }, { "source": "original-prompt", "section": 9 }] },
+    { "number": 18, "title": "Destructive Actions, Error Prevention, and Recovery", "implementedBy": "standards/18-destructive-actions-error-prevention-and-recovery.md", "sourceSections": [{ "source": "original-prompt", "section": 10 }, { "source": "original-prompt", "section": 33 }, { "source": "original-prompt", "section": 34 }] },
+    { "number": 19, "title": "Performance as UX", "implementedBy": "standards/19-performance-as-ux.md", "sourceSections": [{ "source": "original-prompt", "section": 16 }] },
+    { "number": 20, "title": "Content Design", "implementedBy": "standards/20-content-design.md", "sourceSections": [{ "source": "original-prompt", "section": 17 }] },
+    { "number": 21, "title": "Localization and Internationalization", "implementedBy": "standards/21-localization-and-internationalization.md", "sourceSections": [{ "source": "original-prompt", "section": 18 }] },
+    { "number": 22, "title": "Data-Heavy Interfaces", "implementedBy": "standards/22-data-heavy-interfaces.md", "sourceSections": [{ "source": "original-prompt", "section": 19 }] },
+    { "number": 23, "title": "Search and Filtering", "implementedBy": "standards/23-search-and-filtering.md", "sourceSections": [{ "source": "original-prompt", "section": 20 }] },
+    { "number": 24, "title": "Authentication and Authorization UX", "implementedBy": "standards/24-authentication-and-authorization-ux.md", "sourceSections": [{ "source": "original-prompt", "section": 21 }] },
+    { "number": 25, "title": "Privacy UX", "implementedBy": "standards/25-privacy-ux.md", "sourceSections": [{ "source": "original-prompt", "section": 22 }] },
+    { "number": 26, "title": "AI User Experience", "implementedBy": "standards/26-ai-user-experience.md", "sourceSections": [{ "source": "original-prompt", "section": 23 }] },
+    { "number": 27, "title": "First-Use and Onboarding", "implementedBy": "standards/27-first-use-and-onboarding.md", "sourceSections": [{ "source": "original-prompt", "section": 36 }] },
+    { "number": 28, "title": "Platform Conventions and Supported Environments", "implementedBy": "standards/28-platform-conventions-and-supported-environments.md", "sourceSections": [{ "source": "original-prompt", "section": 37 }, { "source": "original-prompt", "section": 38 }] },
+    { "number": 29, "title": "Design Integrity Prohibitions", "implementedBy": "standards/29-design-integrity-prohibitions.md", "sourceSections": [{ "source": "original-prompt", "section": 31 }, { "source": "original-prompt", "section": 32 }, { "source": "original-prompt", "section": 56 }] },
+    { "number": 30, "title": "Design/Code Consistency", "implementedBy": "standards/30-design-code-consistency.md", "sourceSections": [{ "source": "original-prompt", "section": 24 }, { "source": "original-prompt", "section": 49 }] },
+    { "number": 31, "title": "Design Artifacts and Documentation", "implementedBy": "standards/31-design-artifacts-and-documentation.md", "sourceSections": [{ "source": "original-prompt", "section": 25 }, { "source": "original-prompt", "section": 50 }, { "source": "original-prompt", "section": 53 }] },
+    { "number": 32, "title": "UI Definition of Done", "implementedBy": "standards/32-ui-definition-of-done.md", "sourceSections": [{ "source": "original-prompt", "section": 48 }] },
+    { "number": 33, "title": "Rule Catalog and Rule Identity", "implementedBy": "standards/33-rule-catalog-and-rule-identity.md", "sourceSections": [{ "source": "original-prompt", "section": 1 }, { "source": "original-prompt", "section": 46 }] },
+    { "number": 34, "title": "Project Policy, Applicability, and Exceptions", "implementedBy": "standards/34-project-policy-applicability-and-exceptions.md", "sourceSections": [{ "source": "original-prompt", "section": 43 }, { "source": "original-prompt", "section": 44 }, { "source": "original-prompt", "section": 45 }, { "source": "enforcement-prompt", "section": "Every applicable project gets a policy" }, { "source": "enforcement-prompt", "section": "Have projects declare supported surfaces" }] },
+    { "number": 35, "title": "Evidence, Assurance, and Compliance Output", "implementedBy": "standards/35-evidence-assurance-and-compliance-output.md", "sourceSections": [{ "source": "original-prompt", "section": 40 }, { "source": "original-prompt", "section": 42 }, { "source": "original-prompt", "section": 47 }, { "source": "original-prompt", "section": 59 }, { "source": "enforcement-prompt", "section": "UI enforcement needs multiple evidence layers" }, { "source": "enforcement-prompt", "section": "Static/source evidence" }] },
+    { "number": 36, "title": "Browser and Visual Evidence", "implementedBy": "standards/36-browser-and-visual-evidence.md", "sourceSections": [{ "source": "original-prompt", "section": 26 }, { "source": "original-prompt", "section": 41 }, { "source": "enforcement-prompt", "section": "Browser evidence" }, { "source": "enforcement-prompt", "section": "Visual evidence" }] },
+    { "number": 37, "title": "Manual Design Review", "implementedBy": "standards/37-manual-design-review.md", "sourceSections": [{ "source": "original-prompt", "section": 39 }, { "source": "enforcement-prompt", "section": "Human design review" }, { "source": "enforcement-prompt", "section": "Manual review must participate in gating honestly" }, { "source": "enforcement-prompt", "section": "Do not make every UI rule blocking on day one" }] },
+    { "number": 38, "title": "External Source Provenance", "implementedBy": "standards/38-external-source-provenance.md", "sourceSections": [{ "source": "original-prompt", "section": 62 }] },
+    { "number": 39, "title": "Bootstrap and Existing-UI Reconstruction", "implementedBy": "standards/39-bootstrap-and-existing-ui-reconstruction.md", "sourceSections": [{ "source": "original-prompt", "section": 51 }, { "source": "original-prompt", "section": 52 }, { "source": "enforcement-prompt", "section": "Existing projects need reconstruction" }] },
+    { "number": 40, "title": "Detector and Testing Integrity", "implementedBy": "standards/40-detector-and-testing-integrity.md", "sourceSections": [{ "source": "original-prompt", "section": 57 }, { "source": "original-prompt", "section": 58 }] }
+  ]
+}

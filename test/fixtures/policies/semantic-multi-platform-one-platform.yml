@@ -1,0 +1,8 @@
+standardVersion: 1.0.0
+project: fixture
+ui:
+  applicability: multi-platform
+  platforms:
+    - web
+  accessibility:
+    target: framework-baseline

@@ -1,0 +1,49 @@
+{
+  "$comment": "Identity is frozen by artifacts/design/rule-catalog-v1.md.",
+  "rules": [
+    {
+      "id": "motion.reduced-motion-support",
+      "title": "Motion respects a reduced-motion preference",
+      "standard": 12,
+      "category": "motion",
+      "level": "required",
+      "severity": "error",
+      "validationType": "code-analysis",
+      "assurance": "partial",
+      "nonExemptible": false,
+      "introducedIn": "1.0.0",
+      "description": "Where a project animates, it honours the user's declared preference for reduced motion by removing or substantially reducing non-essential movement.",
+      "rationale": "For users susceptible to motion-triggered disorders, an ignored preference is not an aesthetic disagreement — it is a symptom the interface caused.",
+      "remediation": "Guard animations behind a reduced-motion query and provide a still equivalent.",
+      "aliases": [],
+      "deprecatedIn": null,
+      "supersededBy": null,
+      "removedIn": null,
+      "appliesTo": ["any-ui"],
+      "crossReferences": [],
+      "$assuranceNote": "The detector reports a project that animates with no reduced-motion handling anywhere. Whether each individual animation is correctly guarded is not established by it."
+    },
+    {
+      "id": "motion.purposeful",
+      "title": "Motion serves comprehension rather than decoration",
+      "standard": 12,
+      "category": "motion",
+      "level": "recommended",
+      "severity": "info",
+      "validationType": "manual-review",
+      "assurance": "none",
+      "nonExemptible": false,
+      "introducedIn": "1.0.0",
+      "description": "Animation explains a relationship, a transition, or a state change, and does not delay the user or interfere with reading and operation.",
+      "rationale": "Motion is expensive attention. Spent on decoration it costs time on every repetition and buys nothing after the first.",
+      "remediation": "Keep motion that explains a change and remove motion that only decorates one.",
+      "aliases": [],
+      "deprecatedIn": null,
+      "supersededBy": null,
+      "removedIn": null,
+      "appliesTo": ["any-ui"],
+      "crossReferences": [],
+      "$assuranceNote": "Purpose is intent. Duration and easing are visible in source and say nothing about whether the motion earns its place."
+    }
+  ]
+}

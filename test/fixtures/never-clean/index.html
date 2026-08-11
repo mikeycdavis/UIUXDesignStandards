@@ -1,0 +1,44 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Checkout — house style</title>
+  </head>
+  <body>
+    <!--
+      House style, written down where the team will read it.
+
+      Never ship a viewport declaration such as
+        <meta name="viewport" content="width=device-width, user-scalable=no, maximum-scale=1" />
+      because it switches off pinch zoom for everyone.
+
+      Never ship an image with no alternative text:
+        <img src="/card.png" />
+
+      Never override the tab order:
+        <a href="/home" tabindex="3">Home</a>
+
+      Never invent a role. <nav role="navigaton"> is a typo, not a role.
+
+      Never hide an operable control from assistive technology:
+        <button aria-hidden="true">Skip</button>
+
+      Never leave a form button untyped — <button>Pay now</button> submits whether you meant it to
+      or not — and never leave a control unlabelled:
+        <span>Card number</span>
+        <input name="card" type="text" />
+
+      Never skip a heading level: an <h1> followed by an <h3> hides a level from a screen reader.
+
+      Never build a control out of an element that is not one:
+        <div onclick="applyPromo()">Apply promo code</div>
+      has no role, cannot be reached by tab, and answers no key. Use a <button>, or restore all
+      three.
+    -->
+
+    <main>
+      <h1>Checkout</h1>
+    </main>
+  </body>
+</html>

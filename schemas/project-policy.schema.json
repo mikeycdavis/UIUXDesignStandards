@@ -1,0 +1,321 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/UIUXDesignStandards/schemas/project-policy.schema.json",
+  "title": "Project Policy",
+  "description": "A project's declaration of which UI/UX standards apply to it and at what level. This schema validates SHAPE ONLY. Conditional requirements — which ui subkeys are legal given a declared applicability, whether an accessibility target must be present — are cross-field semantics owned by scripts/policy.mjs and are NOT expressed here, because the vendored evaluator's keyword set has no `if`/`then`/`oneOf` and extending it to fake conditionality would create two definitions of validity that can drift (ADR 0012). Keys under `rules`, `applicability`, and `attestations` are canonical rule IDs from artifacts/design/rule-catalog-v1.md; a policy may not invent one.",
+  "type": "object",
+  "required": ["standardVersion", "ui"],
+  "additionalProperties": false,
+
+  "properties": {
+    "standardVersion": {
+      "description": "The framework version this project is evaluated against. An unresolvable version is a configuration error, not a compliance failure.",
+      "type": "string",
+      "pattern": "^(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)$"
+    },
+
+    "project": {
+      "description": "Project identity, carried into validator output as `project`.",
+      "type": "string",
+      "minLength": 1
+    },
+
+    "ui": {
+      "description": "What kind of interface this project has, and the conditions its interface is evaluated under. Required, because a framework whose first question is 'does this repository have a UI at all' cannot treat the answer as optional. NOTE: `ui.applicability` is a DECLARATION and an input to Gate 1 — never its output. A valid `no-ui` declaration says the project asserts it has no interface. Whether that is TRUE is established by scripts/applicability.mjs from repository evidence, and only that classifier may report NOT_APPLICABLE (ADR 0003).",
+      "$ref": "#/$defs/ui"
+    },
+
+    "rules": {
+      "description": "Level per rule. A rule absent from this map takes the framework default; a validator reports how many rules were undeclared so absence is never mistaken for a decision.",
+      "type": "object",
+      "propertyNames": { "$ref": "#/$defs/ruleId" },
+      "additionalProperties": { "$ref": "#/$defs/ruleSetting" }
+    },
+
+    "applicability": {
+      "description": "Whether a rule's subject exists in this project at all. Deliberately NOT an exception: `not-applicable` means the rule has no subject here, whereas an exception means the rule applies and the project is knowingly not satisfying it. The two must never collapse into one mechanism. This is per-RULE applicability and is distinct from `ui.applicability`, which is per-PROJECT.",
+      "type": "object",
+      "propertyNames": { "$ref": "#/$defs/ruleId" },
+      "additionalProperties": { "$ref": "#/$defs/applicabilityDeclaration" }
+    },
+
+    "exceptions": {
+      "description": "Approved, time-bounded waivers of rules that DO apply. An expired exception is a compliance failure, not a resolution. A non-exemptible rule admits none.",
+      "type": "array",
+      "items": { "$ref": "#/$defs/exception" }
+    },
+
+    "attestations": {
+      "description": "Recorded human judgement for rules the catalog says a human evaluates. An attestation is EVIDENCE, not a waiver: it says the rule applies and is satisfied on human review. It never overrides an automated failure, never applies to a rule the catalog marks non-attestable, and returns the rule to not-evaluated once stale or expired.",
+      "type": "object",
+      "propertyNames": { "$ref": "#/$defs/ruleId" },
+      "additionalProperties": { "$ref": "#/$defs/attestation" }
+    }
+  },
+
+  "$defs": {
+    "ruleId": {
+      "description": "Canonical rule identity: `domain.kebab-case-name`, dot-separated, lower-case throughout. The domain segment admits a hyphen so `ai-ux.*` is spellable (ADR 0007). This pattern is byte-identical to CANONICAL_ID in scripts/catalog.mjs; a divergence would let a policy key validate against one and fail the other, which is a split identity by another route.",
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9]*(-[a-z0-9]+)*(\\.[a-z0-9]+(-[a-z0-9]+)*)+$"
+    },
+
+    "ui": {
+      "type": "object",
+      "required": ["applicability"],
+      "additionalProperties": false,
+      "properties": {
+        "applicability": {
+          "description": "The project's own declaration of what kind of interface it has. An input to the applicability classifier, never a substitute for it.",
+          "type": "string",
+          "enum": ["no-ui", "web-ui", "mobile-ui", "desktop-ui", "embedded-ui", "multi-platform"]
+        },
+        "platforms": {
+          "description": "Which platforms the interface targets. `multi-platform` requires at least two — a cross-field rule policy.mjs owns, not this schema.",
+          "type": "array",
+          "items": { "type": "string", "enum": ["web", "ios", "android", "windows", "macos", "linux"] }
+        },
+        "viewportClasses": {
+          "description": "The viewport classes the project supports and is evaluated at. A class absent here is not evaluated and is not counted against the project (Standard 28).",
+          "type": "array",
+          "items": { "type": "string", "enum": ["mobile", "tablet", "desktop", "wide-desktop"] }
+        },
+        "evidencePaths": {
+          "description": "The paths that constitute this project's interface for the purpose of evidence freshness. Declaring them binds an evidence producer: a browser-evidence record whose identity covers a different set of paths is rejected at exit 2, so a producer cannot widen its own claim by measuring a narrower subject. Optional — where it is absent, the producer's declared paths are used and the evidence surface records that the scope was producer-declared rather than project-declared.",
+          "type": "array",
+          "items": { "type": "string", "minLength": 1 }
+        },
+        "reviewPaths": {
+          "description": "The material a human design review must cover before an attestation can establish a rule. Declaring it moves review scope OUT of the reviewer's hands: an attestation whose `reviewedAgainst.paths` do not cover this set is reported `partial-review` and establishes nothing, so a reviewer cannot attest to visual hierarchy after looking at one screenshot of one route. Required whenever the policy records any attestation — a cross-field rule policy.mjs owns.",
+          "type": "array",
+          "minItems": 1,
+          "items": { "type": "string", "minLength": 1 }
+        },
+        "reviewScopes": {
+          "description": "Per-rule narrowing of `reviewPaths`, for rules whose subject genuinely is a subset of the interface. It is still the PROJECT declaring the scope, in a file separate from the review record and diffable on its own — never the reviewer choosing it while writing the attestation.",
+          "type": "object",
+          "propertyNames": { "$ref": "#/$defs/ruleId" },
+          "additionalProperties": {
+            "type": "array",
+            "minItems": 1,
+            "items": { "type": "string", "minLength": 1 }
+          }
+        },
+        "accessibility": { "$ref": "#/$defs/accessibility" },
+        "localization": { "$ref": "#/$defs/localization" },
+        "designSystem": { "$ref": "#/$defs/designSystem" },
+        "environments": { "$ref": "#/$defs/environments" }
+      }
+    },
+
+    "accessibility": {
+      "description": "Required whenever the declared applicability is anything other than `no-ui` — a cross-field rule policy.mjs owns. There is no silent default: an absent target is a configuration error at exit 2, never an implied `framework-baseline`, because implying one would fabricate a declaration the project never made (ADR 0008).",
+      "type": "object",
+      "required": ["target"],
+      "additionalProperties": false,
+      "properties": {
+        "target": {
+          "description": "The accessibility target this project is evaluated against. `framework-baseline` is the minimum: this framework's own universal floor. `none` is deliberately absent from this enum, so it is unrepresentable rather than checked for. A declared external target means 'evaluate against this framework's supported representation of that target' — it is never a claim that the project conforms to that standard.",
+          "type": "string",
+          "enum": ["framework-baseline", "wcag-2.1-a", "wcag-2.1-aa", "wcag-2.2-aa", "wcag-2.2-aaa"]
+        },
+        "assistiveTech": {
+          "description": "Assistive technologies the project tests against. Informational: naming one claims testing, not conformance.",
+          "type": "array",
+          "items": { "type": "string", "minLength": 1 }
+        }
+      }
+    },
+
+    "localization": {
+      "description": "Both flags are string enumerations rather than booleans, deliberately. The policy parser returns every scalar as a string so that type coercion belongs to the schema and not to the parser, which means a `type: boolean` field would be unsatisfiable by any YAML policy ever written. Enumerating also buys something a boolean cannot express: `unknown` is a real answer, and this framework does not convert an unanswered question into a `false`.",
+      "type": "object",
+      "required": ["status"],
+      "additionalProperties": false,
+      "properties": {
+        "status": {
+          "type": "string",
+          "enum": ["required", "not-required", "unknown"]
+        },
+        "locales": {
+          "description": "Non-empty when `status` is `required` — a cross-field rule policy.mjs owns.",
+          "type": "array",
+          "items": { "type": "string", "minLength": 1 }
+        },
+        "rtl": {
+          "description": "Whether a right-to-left locale is supported. `unknown` is honest and is not read as `not-supported`.",
+          "type": "string",
+          "enum": ["supported", "not-supported", "unknown"]
+        }
+      }
+    },
+
+    "designSystem": {
+      "type": "object",
+      "required": ["strategy"],
+      "additionalProperties": false,
+      "properties": {
+        "strategy": {
+          "description": "`none-justified` is a legitimate answer and requires a justification — a cross-field rule policy.mjs owns. It is not an opt-out from the design-system rules; those rules report not-applicable with the strategy as their recorded reason, visibly.",
+          "type": "string",
+          "enum": ["adopted", "custom", "hybrid", "none-justified"]
+        },
+        "name": { "type": "string", "minLength": 1 },
+        "justification": { "type": "string", "minLength": 1 },
+        "tokenPaths": {
+          "description": "Where the token definitions live. Read by the token-drift detector; without it, drift detection is limited to what it can infer.",
+          "type": "array",
+          "items": { "type": "string", "minLength": 1 }
+        }
+      }
+    },
+
+    "environments": {
+      "description": "The environments the project supports. An unsupported environment never affects scoring — a project is not penalised for a browser it never claimed (Standard 28).",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "browsers": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["name"],
+            "additionalProperties": false,
+            "properties": {
+              "name": { "type": "string", "minLength": 1 },
+              "min": { "type": "string", "minLength": 1 }
+            }
+          }
+        },
+        "deviceClasses": {
+          "type": "array",
+          "items": { "type": "string", "minLength": 1 }
+        }
+      }
+    },
+
+    "level": {
+      "description": "Levels are preferred over booleans because `true` cannot express a considered partial adoption.",
+      "type": "string",
+      "enum": ["required", "recommended", "optional", "forbidden"]
+    },
+
+    "ruleSetting": {
+      "type": "object",
+      "required": ["level"],
+      "additionalProperties": false,
+      "properties": {
+        "level": { "$ref": "#/$defs/level" },
+        "note": {
+          "description": "Why this project selected this level. Not a substitute for an exception.",
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    },
+
+    "applicabilityDeclaration": {
+      "type": "object",
+      "required": ["status", "reason"],
+      "additionalProperties": false,
+      "properties": {
+        "status": { "type": "string", "enum": ["applicable", "not-applicable"] },
+        "reason": {
+          "description": "Required. A not-applicable declaration with no reason is indistinguishable from a rule that was forgotten.",
+          "type": "string",
+          "minLength": 1
+        },
+        "evidence": {
+          "description": "What in the repository supports this declaration. Optional, and the difference between a reason and a demonstration.",
+          "type": "string",
+          "minLength": 1
+        },
+        "reviewedAt": {
+          "description": "When this judgement was last examined. Not-applicable is a claim about the PROJECT, not about the rule, and stops being true the moment the project gains the subject.",
+          "type": "string",
+          "format": "date",
+          "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$"
+        },
+        "revisitWhen": {
+          "description": "The condition under which this declaration must be re-examined.",
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    },
+
+    "attestation": {
+      "type": "object",
+      "required": ["status", "reviewedBy", "reviewedAt", "evidence", "reviewedAgainst"],
+      "additionalProperties": false,
+      "properties": {
+        "status": {
+          "description": "Only `approved` establishes the requirement. `rejected` records that a human looked and found it unmet, which is a failure rather than silence.",
+          "type": "string",
+          "enum": ["approved", "rejected"]
+        },
+        "reviewedBy": { "type": "string", "minLength": 1 },
+        "reviewedAt": { "type": "string", "format": "date", "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$" },
+        "evidence": {
+          "description": "What was examined. Required, because an attestation without it is an assertion rather than evidence.",
+          "type": "string",
+          "minLength": 1
+        },
+        "reference": { "type": "string", "minLength": 1 },
+        "expires": { "type": "string", "format": "date", "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$" },
+        "reviewedAgainst": { "$ref": "#/$defs/reviewedAgainst" }
+      }
+    },
+
+    "reviewedAgainst": {
+      "description": "What the reviewer actually looked at. `contentIdentity` is resolved from the COMMITTED tree at `revision`, never from working-tree bytes and never from the index (ADR 0011). The field is deliberately not called `digest`: EngineeringStandards' working-tree digest is a known defect and is not ported, and reusing its name would carry the defect's semantics forward.",
+      "type": "object",
+      "required": ["paths"],
+      "additionalProperties": false,
+      "properties": {
+        "paths": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "type": "string", "minLength": 1 }
+        },
+        "contentIdentity": {
+          "description": "Identity of the reviewed paths as committed. Exactly the 32 hex characters scripts/content-identity.mjs produces: a shorter or longer string can never match a computed identity, so accepting one would let a malformed record be reported as PROVED CHANGED when nothing was proved. Omit it on a first pass — the validator reports the current identity so it can be recorded.",
+          "type": "string",
+          "pattern": "^[0-9a-f]{32}$"
+        },
+        "revision": {
+          "description": "The revision the identity was resolved at, as a full 40-character commit SHA. A symbolic reference is unrepresentable here rather than checked for: `HEAD` or a branch name would re-anchor silently as the branch moves, making the record a claim about content nobody reviewed (Standard 37 R1).",
+          "type": "string",
+          "pattern": "^[0-9a-f]{40}$"
+        }
+      }
+    },
+
+    "exception": {
+      "type": "object",
+      "required": ["rule", "reason", "approvedBy", "approvedAt"],
+      "additionalProperties": false,
+      "properties": {
+        "rule": { "$ref": "#/$defs/ruleId" },
+        "reason": { "type": "string", "minLength": 1 },
+        "approvedBy": {
+          "description": "Provenance. An exception nobody approved is a note.",
+          "type": "string",
+          "minLength": 1
+        },
+        "approvedAt": { "type": "string", "format": "date", "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$" },
+        "expires": {
+          "description": "Optional. Absence means the waiver is indefinite, which is a stronger claim than it looks and should be rare.",
+          "type": "string",
+          "format": "date",
+          "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$"
+        },
+        "reference": {
+          "description": "An ADR, issue, or work item carrying the decision.",
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    }
+  }
+}

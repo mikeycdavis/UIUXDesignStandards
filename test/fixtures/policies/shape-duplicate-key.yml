@@ -1,0 +1,5 @@
+standardVersion: 1.0.0
+project: fixture
+project: fixture2
+ui:
+  applicability: no-ui

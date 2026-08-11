@@ -1,0 +1,2 @@
+:root { --color-surface: #ffffff; }
+main { background: var(--color-surface); }

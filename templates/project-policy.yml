@@ -1,0 +1,154 @@
+# project-policy.yml — copy this into your repository root and edit it.
+#
+# This file declares what applies to YOUR project. It never redefines what a rule means: levels,
+# severities, and prohibitions live in the framework's catalog, and this file selects among them.
+#
+# Validate it at any time with:
+#   node <path-to-uiux-standards>/scripts/policy.mjs project-policy.yml
+#
+# Three kinds of failure, kept distinct because they mean different things:
+#   SHAPE      the document is not a policy                               exit 2
+#   SEMANTICS  it is a policy and its declarations contradict each other  exit 2
+#   FINDINGS   it is a coherent policy declaring a governance problem     exit 1
+# A malformed file is never reported as a failing project.
+
+# The framework version you are evaluated against. `init` stamps this; keep it pinned deliberately.
+standardVersion: 1.0.0
+
+# Optional, and worth setting: it is carried into every validator output as `project`.
+# project: your-project-name
+
+ui:
+  # What kind of interface this project has. This is a DECLARATION and an input to the applicability
+  # classifier — it is never the classifier's answer. Declaring `no-ui` while the repository
+  # contains UI signals produces a conflict, which is INDETERMINATE and does not exit 0.
+  #
+  #   no-ui | web-ui | mobile-ui | desktop-ui | embedded-ui | multi-platform
+  #
+  # If you declare `no-ui`, delete every other key under `ui:` — a project asserting it has no
+  # interface cannot also describe one, and doing both is a semantic error.
+  applicability: web-ui
+
+  platforms:
+    - web
+
+  # Responsive rules are evaluated per declared class. A class you do not declare is not evaluated
+  # and is not counted against you (Standard 28) — so declare what you actually support, not what
+  # you aspire to.
+  viewportClasses:
+    - mobile
+    - desktop
+
+  # The material a design review has to cover before an attestation can establish a rule. REQUIRED as
+  # soon as you record any attestation — the framework refuses a review whose scope the reviewer
+  # chose, because a review of whatever was convenient establishes whatever was convenient.
+  #
+  # reviewPaths:
+  #   - src
+  #   - docs/design
+  #
+  # Narrow it per rule where a rule's subject genuinely is a subset. It is still the project
+  # narrowing it, here, in a file that reviews are checked against rather than written alongside.
+  #
+  # reviewScopes:
+  #   content.button-labels-specific:
+  #     - src/components
+
+  accessibility:
+    # SCAFFOLDED, NOT INFERRED. This line was written by a template, and adopting the template makes
+    # it your project's own declaration. It is not evidence that anyone reviewed your accessibility
+    # posture, and the framework will not treat it as such.
+    #
+    # `framework-baseline` is the minimum: this framework's own universal floor — focus indication
+    # not removed, controls named, keyboard operation, no colour-only critical state. It is not a
+    # claim of conformance to any external standard.
+    #
+    # Declaring a larger target (`wcag-2.2-aa` and friends) means "evaluate me against this
+    # framework's supported representation of that target". It does NOT mean, and must never be
+    # reported as meaning, that your project conforms to that standard.
+    #
+    # There is deliberately no way to write `none`, and deliberately no default: omitting this line
+    # is a configuration error, not an implied baseline. The framework will not record a decision
+    # you did not make.
+    target: framework-baseline
+
+    # assistiveTech:
+    #   - "NVDA + Firefox"
+
+  # localization:
+  #   status: required        # required | not-required | unknown
+  #   locales: [ ]            # non-empty when status is `required`
+  #   rtl: unknown            # supported | not-supported | unknown
+
+  # designSystem:
+  #   strategy: adopted       # adopted | custom | hybrid | none-justified
+  #   name: your-design-system
+  #   # `none-justified` requires a justification. It is a legitimate answer; it is not an opt-out.
+  #   # justification: >-  (single-line only in this YAML subset)
+  #   tokenPaths:             # read by the token-drift detector; without it, drift is under-detected
+  #     - src/styles/tokens.css
+
+  # environments:
+  #   browsers:
+  #     - name: chrome
+  #       min: "120"
+  #   deviceClasses:
+  #     - phone
+
+# Per-rule level selection. A rule absent here takes the framework default, and the validator
+# reports how many rules were undeclared so that absence is never mistaken for a decision.
+#
+# rules:
+#   visual.dark-mode-designed:
+#     level: optional
+#     note: We ship no dark theme. This is a level selection, not an exception.
+
+# Per-rule applicability: the rule's SUBJECT does not exist in this project. This is not an
+# exception and must never be used as one. `not-applicable` says there is nothing to check;
+# an exception says there is, and it is knowingly unmet.
+#
+# Use this for a rule whose subject is genuinely absent — no forms, no motion, no data tables.
+# Do NOT use it to declare that your project has no UI: that is `ui.applicability`, and the
+# classifier establishes it from evidence.
+#
+# applicability:
+#   motion.reduced-motion-support:
+#     status: not-applicable
+#     reason: This application ships no animation of any kind.
+#     evidence: No @keyframes, transition, or animation declaration exists in src/.
+#     reviewedAt: 2026-01-01
+#     revisitWhen: Any motion is introduced.
+
+# Approved, time-bounded waivers of rules that DO apply and are knowingly unmet.
+#
+# An exception is a governance record, not a fix. It requires a reason and an approver, and an
+# expired one is a compliance failure rather than a resolution. The fifteen forbidden rules are
+# non-exemptible: an exception against one is rejected, not recorded. If a forbidden rule has no
+# subject here, declare it not-applicable with a reason — that is the honest route.
+exceptions: []
+
+# Recorded human judgement for rules the catalog says a human evaluates.
+#
+# An attestation is EVIDENCE, not a waiver. It says the rule applies and a person reviewed it and
+# found it satisfied. It never overrides an automated failure — evidence outranks assertion — and
+# it returns the rule to not-evaluated once it expires or once the reviewed content changes.
+#
+# `reviewedAgainst.contentIdentity` is resolved from the COMMITTED tree at `revision`, never from
+# working-tree bytes. Omit it on the first pass; the validator prints the current identity so you
+# can record it. `revision` must be a full commit SHA — a branch name would re-anchor as the branch
+# moved, making the record a claim about content nobody reviewed.
+#
+# `reviewedAgainst.paths` must cover `ui.reviewPaths` (or this rule's `ui.reviewScopes` entry). A
+# narrower review is reported `partial-review` and establishes nothing — it is not a failure, and it
+# is not a pass. templates/design-review-pack.md is the artifact the paths below should come from.
+#
+# attestations:
+#   visual.hierarchy-intentional:
+#     status: approved
+#     reviewedBy: name@example.com
+#     reviewedAt: 2026-01-01
+#     evidence: Reviewed the dashboard, settings, and report views against Standard 11 R1-R6.
+#     reviewedAgainst:
+#       paths:
+#         - src/views
+#       revision: 0000000000000000000000000000000000000000

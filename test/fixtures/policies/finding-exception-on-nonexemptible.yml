@@ -1,0 +1,9 @@
+standardVersion: 1.0.0
+project: fixture
+ui:
+  applicability: no-ui
+exceptions:
+  - rule: design-integrity.no-dark-patterns
+    reason: We need it for the growth funnel.
+    approvedBy: someone
+    approvedAt: 2026-01-01

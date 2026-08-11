@@ -1,0 +1,17 @@
+# A small, correct web UI. Every static detector meets an instance of its subject here and stays
+# silent — which is a stronger fixture than one that gives the detectors nothing to look at, because
+# a detector that never runs also produces no findings.
+standardVersion: 1.0.0
+project: fixture-compliant
+
+ui:
+  applicability: web-ui
+  platforms:
+    - web
+  viewportClasses:
+    - mobile
+    - desktop
+  accessibility:
+    target: framework-baseline
+
+exceptions: []

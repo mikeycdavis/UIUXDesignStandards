@@ -1,0 +1,26 @@
+{
+  "$comment": "Identity is frozen by artifacts/design/rule-catalog-v1.md. The only process-scoped rule in v1.0.0: it governs the framework's own output rather than any interface, so it is evaluated for every project including those with no UI at all. It is stated by Standard 35 R8 and is therefore NOT a framework-origin declaration — see the freeze's 'Framework-origin rules' section.",
+  "rules": [
+    {
+      "id": "evidence.surfaces-declared",
+      "title": "The evidence surfaces a run used are declared in its output",
+      "standard": 35,
+      "category": "evidence",
+      "level": "required",
+      "severity": "error",
+      "validationType": "structural",
+      "assurance": "full",
+      "nonExemptible": false,
+      "introducedIn": "1.0.0",
+      "description": "Every compliance output declares which evidence surfaces were used, which were attempted and failed, and which were not attempted at all. An empty surface is reported as empty, never omitted.",
+      "rationale": "A verdict without its evidence surfaces is unreadable: COMPLIANT means something entirely different after a browser run than after a static scan alone. Omission is the mechanism by which a narrow check comes to look like a broad one.",
+      "remediation": "Emit the evidenceSurface block on every run, with not-attempted defaults rather than absent keys.",
+      "aliases": [],
+      "deprecatedIn": null,
+      "supersededBy": null,
+      "removedIn": null,
+      "appliesTo": ["process"],
+      "crossReferences": []
+    }
+  ]
+}

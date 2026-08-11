@@ -1,0 +1,54 @@
+{
+  "schemaVersion": "1.0",
+  "producedBy": {
+    "name": "fixture-producer",
+    "version": "0.0.0"
+  },
+  "runAt": "2026-08-10T09:00:00.000Z",
+  "revision": {
+    "gitSha": "0000000000000000000000000000000000000000",
+    "paths": [
+      "index.html",
+      "styles.css",
+      "src"
+    ],
+    "sourceIdentity": "00000000000000000000000000000000"
+  },
+  "run": {
+    "status": "completed"
+  },
+  "viewports": [
+    {
+      "name": "iphone-14",
+      "class": "mobile",
+      "width": 390,
+      "height": 844
+    },
+    {
+      "name": "laptop",
+      "class": "desktop",
+      "width": 1440,
+      "height": 900
+    }
+  ],
+  "routes": [
+    {
+      "route": "/",
+      "status": "tested",
+      "viewportsTested": [
+        "iphone-14",
+        "laptop"
+      ],
+      "accessibilityTree": "obtained",
+      "checks": [
+        {
+          "ruleId": "accessibility.colour-harmony",
+          "outcome": "passed",
+          "viewport": "laptop",
+          "evidence": "invented by the producer"
+        }
+      ],
+      "screenshots": []
+    }
+  ]
+}

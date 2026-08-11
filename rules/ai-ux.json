@@ -1,0 +1,75 @@
+{
+  "$comment": "Identity is frozen by artifacts/design/rule-catalog-v1.md. These govern how AI behavior is presented, never what the AI is permitted to do — that boundary belongs to EngineeringStandards, and the crossReferences below record it without importing anything from it.",
+  "rules": [
+    {
+      "id": "ai-ux.proposal-vs-execution",
+      "title": "A proposal is visually distinct from an execution",
+      "standard": 26,
+      "category": "ai-ux",
+      "level": "required",
+      "severity": "error",
+      "validationType": "manual-review",
+      "assurance": "none",
+      "nonExemptible": false,
+      "introducedIn": "1.0.0",
+      "description": "An interface presenting what an AI intends to do makes it unmistakable whether the action has already happened or is awaiting approval.",
+      "rationale": "The difference between 'I will delete these' and 'I deleted these' is the entire content of the user's decision. An interface that blurs it removes the approval it appears to be asking for.",
+      "remediation": "Distinguish proposed and completed actions by wording and by presentation, and put the approval where the distinction is unambiguous.",
+      "aliases": [],
+      "deprecatedIn": null,
+      "supersededBy": null,
+      "removedIn": null,
+      "appliesTo": ["any-ui"],
+      "crossReferences": [
+        { "repository": "EngineeringStandards", "ruleId": "ai.propose-execute", "relationship": "presentation-of" }
+      ],
+      "$assuranceNote": "Whether the distinction reads as a distinction is a judgment about the rendered interface, established by review."
+    },
+    {
+      "id": "ai-ux.ai-failure-states",
+      "title": "AI failure and uncertainty have designed states",
+      "standard": 26,
+      "category": "ai-ux",
+      "level": "required",
+      "severity": "error",
+      "validationType": "manual-review",
+      "assurance": "none",
+      "nonExemptible": false,
+      "introducedIn": "1.0.0",
+      "description": "Refusal, low confidence, partial completion, and outright failure are designed states rather than an empty response or a spinner that never resolves.",
+      "rationale": "An AI feature fails more often and more ambiguously than a deterministic one. Leaving those cases undesigned means the feature is undesigned in exactly the conditions where it needs the most help.",
+      "remediation": "Design each failure and uncertainty state, and say what the user can do from it.",
+      "aliases": [],
+      "deprecatedIn": null,
+      "supersededBy": null,
+      "removedIn": null,
+      "appliesTo": ["any-ui"],
+      "crossReferences": [],
+      "$assuranceNote": "Whether the failure states are present and adequate is established by review of the interface in those states."
+    },
+    {
+      "id": "ai-ux.no-generated-as-verified",
+      "title": "Generated content is not presented as verified",
+      "standard": 29,
+      "category": "ai-ux",
+      "level": "forbidden",
+      "severity": "error",
+      "validationType": "manual-review",
+      "assurance": "none",
+      "nonExemptible": true,
+      "introducedIn": "1.0.0",
+      "description": "Model output is not presented with the visual authority of checked fact — no unmarked citations, no confidence styling the system does not have, no interface treatment reserved for verified data.",
+      "rationale": "Presentation is how users calibrate trust. Borrowing the appearance of verification for output that was not verified transfers a confidence the system has no basis for, and the user pays for it.",
+      "remediation": "Mark generated content as generated, and reserve verified presentation for content that was actually checked.",
+      "aliases": [],
+      "deprecatedIn": null,
+      "supersededBy": null,
+      "removedIn": null,
+      "appliesTo": ["any-ui"],
+      "crossReferences": [
+        { "repository": "EngineeringStandards", "ruleId": "ai.no-fabricated-capabilities", "relationship": "complements" }
+      ],
+      "$assuranceNote": "What an interface's presentation implies about provenance is a reading of the design. Only a human establishes it."
+    }
+  ]
+}

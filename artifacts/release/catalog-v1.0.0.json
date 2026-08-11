@@ -1,0 +1,854 @@
+{
+  "$comment": "Frozen resolved catalog for v1.0.0. Written once by `node scripts/release-readiness.mjs --write-snapshot` and never regenerated during validation: this file is the oracle the live catalog is compared against, and a regenerated oracle only ever proves the catalog equals itself.",
+  "version": "1.0.0",
+  "counts": {
+    "rules": 70,
+    "forbidden": 15,
+    "detectors": 13,
+    "ruleFiles": 15,
+    "standards": 40
+  },
+  "digest": "441636ab645697757093330d20b82f8f65b773d65c4d84f25f99bc063773d8b2",
+  "rules": [
+    {
+      "id": "accessibility.accessible-names",
+      "standard": 3,
+      "level": "required",
+      "severity": "error",
+      "validationType": "browser-analysis",
+      "assurance": "partial",
+      "nonExemptible": false,
+      "appliesTo": [
+        "any-ui"
+      ]
+    },
+    {
+      "id": "accessibility.aria-valid-usage",
+      "standard": 5,
+      "level": "required",
+      "severity": "error",
+      "validationType": "code-analysis",
+      "assurance": "partial",
+      "nonExemptible": false,
+      "appliesTo": [
+        "web-ui"
+      ]
+    },
+    {
+      "id": "accessibility.contrast",
+      "standard": 3,
+      "level": "required",
+      "severity": "error",
+      "validationType": "browser-analysis",
+      "assurance": "partial",
+      "nonExemptible": false,
+      "appliesTo": [
+        "any-ui"
+      ]
+    },
+    {
+      "id": "accessibility.dialog-focus-management",
+      "standard": 4,
+      "level": "required",
+      "severity": "error",
+      "validationType": "browser-analysis",
+      "assurance": "partial",
+      "nonExemptible": false,
+      "appliesTo": [
+        "any-ui"
+      ]
+    },
+    {
+      "id": "accessibility.focus-order",
+      "standard": 4,
+      "level": "required",
+      "severity": "error",
+      "validationType": "browser-analysis",
+      "assurance": "partial",
+      "nonExemptible": false,
+      "appliesTo": [
+        "any-ui"
+      ]
+    },
+    {
+      "id": "accessibility.focus-visible",
+      "standard": 4,
+      "level": "required",
+      "severity": "error",
+      "validationType": "browser-analysis",
+      "assurance": "partial",
+      "nonExemptible": false,
+      "appliesTo": [
+        "any-ui"
+      ]
+    },
+    {
+      "id": "accessibility.heading-structure",
+      "standard": 3,
+      "level": "required",
+      "severity": "warning",
+      "validationType": "code-analysis",
+      "assurance": "partial",
+      "nonExemptible": false,
+      "appliesTo": [
+        "any-ui"
+      ]
+    },
+    {
+      "id": "accessibility.img-alt-text",
+      "standard": 3,
+      "level": "required",
+      "severity": "error",
+      "validationType": "code-analysis",
+      "assurance": "partial",
+      "nonExemptible": false,
+      "appliesTo": [
+        "any-ui"
+      ]
+    },
+    {
+      "id": "accessibility.keyboard-operable",
+      "standard": 4,
+      "level": "required",
+      "severity": "error",
+      "validationType": "browser-analysis",
+      "assurance": "partial",
+      "nonExemptible": false,
+      "appliesTo": [
+        "any-ui"
+      ]
+    },
+    {
+      "id": "accessibility.landmarks",
+      "standard": 3,
+      "level": "recommended",
+      "severity": "warning",
+      "validationType": "code-analysis",
+      "assurance": "partial",
+      "nonExemptible": false,
+      "appliesTo": [
+        "web-ui"
+      ]
+    },
+    {
+      "id": "accessibility.media-alternatives",
+      "standard": 3,
+      "level": "required",
+      "severity": "error",
+      "validationType": "code-analysis",
+      "assurance": "partial",
+      "nonExemptible": false,
+      "appliesTo": [
+        "any-ui"
+      ]
+    },
+    {
+      "id": "accessibility.no-color-only-critical-state",
+      "standard": 29,
+      "level": "forbidden",
+      "severity": "error",
+      "validationType": "manual-review",
+      "assurance": "none",
+      "nonExemptible": true,
+      "appliesTo": [
+        "any-ui"
+      ]
+    },
+    {
+      "id": "accessibility.no-inaccessible-custom-controls",
+      "standard": 29,
+      "level": "forbidden",
+      "severity": "error",
+      "validationType": "code-analysis",
+      "assurance": "partial",
+      "nonExemptible": true,
+      "appliesTo": [
+        "any-ui"
+      ]
+    },
+    {
+      "id": "accessibility.no-removed-focus-indicators",
+      "standard": 29,
+      "level": "forbidden",
+      "severity": "error",
+      "validationType": "code-analysis",
+      "assurance": "partial",
+      "nonExemptible": true,
+      "appliesTo": [
+        "any-ui"
+      ]
+    },
+    {
+      "id": "accessibility.not-deliberately-disabled",
+      "standard": 29,
+      "level": "forbidden",
+      "severity": "error",
+      "validationType": "code-analysis",
+      "assurance": "partial",
+      "nonExemptible": true,
+      "appliesTo": [
+        "web-ui"
+      ]
+    },
+    {
+      "id": "accessibility.pointer-target-size",
+      "standard": 5,
+      "level": "recommended",
+      "severity": "warning",
+      "validationType": "browser-analysis",
+      "assurance": "partial",
+      "nonExemptible": false,
+      "appliesTo": [
+        "any-ui"
+      ]
+    },
+    {
+      "id": "accessibility.positive-tabindex",
+      "standard": 4,
+      "level": "required",
+      "severity": "warning",
+      "validationType": "code-analysis",
+      "assurance": "partial",
+      "nonExemptible": false,
+      "appliesTo": [
+        "web-ui"
+      ]
+    },
+    {
+      "id": "accessibility.table-semantics",
+      "standard": 3,
+      "level": "required",
+      "severity": "error",
+      "validationType": "code-analysis",
+      "assurance": "partial",
+      "nonExemptible": false,
+      "appliesTo": [
+        "any-ui"
+      ]
+    },
+    {
+      "id": "accessibility.zoom-reflow",
+      "standard": 3,
+      "level": "required",
+      "severity": "error",
+      "validationType": "browser-analysis",
+      "assurance": "partial",
+      "nonExemptible": false,
+      "appliesTo": [
+        "any-ui"
+      ]
+    },
+    {
+      "id": "ai-ux.ai-failure-states",
+      "standard": 26,
+      "level": "required",
+      "severity": "error",
+      "validationType": "manual-review",
+      "assurance": "none",
+      "nonExemptible": false,
+      "appliesTo": [
+        "any-ui"
+      ]
+    },
+    {
+      "id": "ai-ux.no-generated-as-verified",
+      "standard": 29,
+      "level": "forbidden",
+      "severity": "error",
+      "validationType": "manual-review",
+      "assurance": "none",
+      "nonExemptible": true,
+      "appliesTo": [
+        "any-ui"
+      ]
+    },
+    {
+      "id": "ai-ux.proposal-vs-execution",
+      "standard": 26,
+      "level": "required",
+      "severity": "error",
+      "validationType": "manual-review",
+      "assurance": "none",
+      "nonExemptible": false,
+      "appliesTo": [
+        "any-ui"
+      ]
+    },
+    {
+      "id": "content.button-labels-specific",
+      "standard": 20,
+      "level": "recommended",
+      "severity": "info",
+      "validationType": "manual-review",
+      "assurance": "none",
+      "nonExemptible": false,
+      "appliesTo": [
+        "any-ui"
+      ]
+    },
+    {
+      "id": "content.error-messages-actionable",
+      "standard": 20,
+      "level": "required",
+      "severity": "warning",
+      "validationType": "manual-review",
+      "assurance": "none",
+      "nonExemptible": false,
+      "appliesTo": [
+        "any-ui"
+      ]
+    },
+    {
+      "id": "design-integrity.artifact-freshness",
+      "standard": 30,
+      "level": "required",
+      "severity": "warning",
+      "validationType": "document",
+      "assurance": "partial",
+      "nonExemptible": false,
+      "appliesTo": [
+        "any-ui"
+      ]
+    },
+    {
+      "id": "design-integrity.no-dark-patterns",
+      "standard": 29,
+      "level": "forbidden",
+      "severity": "error",
+      "validationType": "manual-review",
+      "assurance": "none",
+      "nonExemptible": true,
+      "appliesTo": [
+        "any-ui"
+      ]
+    },
+    {
+      "id": "design-integrity.no-fabricated-data",
+      "standard": 29,
+      "level": "forbidden",
+      "severity": "error",
+      "validationType": "code-analysis",
+      "assurance": "partial",
+      "nonExemptible": true,
+      "appliesTo": [
+        "any-ui"
+      ]
+    },
+    {
+      "id": "design-integrity.no-fake-availability",
+      "standard": 29,
+      "level": "forbidden",
+      "severity": "error",
+      "validationType": "manual-review",
+      "assurance": "none",
+      "nonExemptible": true,
+      "appliesTo": [
+        "any-ui"
+      ]
+    },
+    {
+      "id": "design-integrity.no-fake-progress",
+      "standard": 29,
+      "level": "forbidden",
+      "severity": "error",
+      "validationType": "manual-review",
+      "assurance": "none",
+      "nonExemptible": true,
+      "appliesTo": [
+        "any-ui"
+      ]
+    },
+    {
+      "id": "design-integrity.no-fake-success",
+      "standard": 29,
+      "level": "forbidden",
+      "severity": "error",
+      "validationType": "browser-analysis",
+      "assurance": "partial",
+      "nonExemptible": true,
+      "appliesTo": [
+        "any-ui"
+      ]
+    },
+    {
+      "id": "design-integrity.no-inert-controls",
+      "standard": 29,
+      "level": "forbidden",
+      "severity": "error",
+      "validationType": "browser-analysis",
+      "assurance": "partial",
+      "nonExemptible": true,
+      "appliesTo": [
+        "any-ui"
+      ]
+    },
+    {
+      "id": "design-integrity.no-obscured-destruction",
+      "standard": 29,
+      "level": "forbidden",
+      "severity": "error",
+      "validationType": "manual-review",
+      "assurance": "none",
+      "nonExemptible": true,
+      "appliesTo": [
+        "any-ui"
+      ]
+    },
+    {
+      "id": "design-integrity.no-weakened-visual-evidence",
+      "standard": 29,
+      "level": "forbidden",
+      "severity": "error",
+      "validationType": "manual-review",
+      "assurance": "none",
+      "nonExemptible": true,
+      "appliesTo": [
+        "any-ui"
+      ]
+    },
+    {
+      "id": "design-system.breaking-token-changes-versioned",
+      "standard": 6,
+      "level": "required",
+      "severity": "error",
+      "validationType": "document",
+      "assurance": "partial",
+      "nonExemptible": false,
+      "appliesTo": [
+        "any-ui"
+      ]
+    },
+    {
+      "id": "design-system.component-reuse",
+      "standard": 7,
+      "level": "recommended",
+      "severity": "warning",
+      "validationType": "manual-review",
+      "assurance": "none",
+      "nonExemptible": false,
+      "appliesTo": [
+        "any-ui"
+      ]
+    },
+    {
+      "id": "design-system.component-states-documented",
+      "standard": 7,
+      "level": "required",
+      "severity": "error",
+      "validationType": "document",
+      "assurance": "partial",
+      "nonExemptible": false,
+      "appliesTo": [
+        "any-ui"
+      ]
+    },
+    {
+      "id": "design-system.not-weakened-for-convenience",
+      "standard": 29,
+      "level": "forbidden",
+      "severity": "error",
+      "validationType": "manual-review",
+      "assurance": "none",
+      "nonExemptible": true,
+      "appliesTo": [
+        "any-ui"
+      ]
+    },
+    {
+      "id": "design-system.tokens-defined",
+      "standard": 6,
+      "level": "required",
+      "severity": "error",
+      "validationType": "configuration",
+      "assurance": "partial",
+      "nonExemptible": false,
+      "appliesTo": [
+        "any-ui"
+      ]
+    },
+    {
+      "id": "design-system.tokens-used",
+      "standard": 6,
+      "level": "recommended",
+      "severity": "warning",
+      "validationType": "code-analysis",
+      "assurance": "partial",
+      "nonExemptible": false,
+      "appliesTo": [
+        "any-ui"
+      ]
+    },
+    {
+      "id": "evidence.surfaces-declared",
+      "standard": 35,
+      "level": "required",
+      "severity": "error",
+      "validationType": "structural",
+      "assurance": "full",
+      "nonExemptible": false,
+      "appliesTo": [
+        "process"
+      ]
+    },
+    {
+      "id": "forms.button-type",
+      "standard": 15,
+      "level": "required",
+      "severity": "warning",
+      "validationType": "code-analysis",
+      "assurance": "partial",
+      "nonExemptible": false,
+      "appliesTo": [
+        "web-ui"
+      ]
+    },
+    {
+      "id": "forms.control-label",
+      "standard": 15,
+      "level": "required",
+      "severity": "error",
+      "validationType": "code-analysis",
+      "assurance": "partial",
+      "nonExemptible": false,
+      "appliesTo": [
+        "any-ui"
+      ]
+    },
+    {
+      "id": "forms.data-preserved-on-error",
+      "standard": 15,
+      "level": "required",
+      "severity": "error",
+      "validationType": "browser-analysis",
+      "assurance": "partial",
+      "nonExemptible": false,
+      "appliesTo": [
+        "any-ui"
+      ]
+    },
+    {
+      "id": "forms.duplicate-submission-prevented",
+      "standard": 15,
+      "level": "required",
+      "severity": "error",
+      "validationType": "browser-analysis",
+      "assurance": "partial",
+      "nonExemptible": false,
+      "appliesTo": [
+        "any-ui"
+      ]
+    },
+    {
+      "id": "forms.error-field-association",
+      "standard": 15,
+      "level": "required",
+      "severity": "error",
+      "validationType": "code-analysis",
+      "assurance": "partial",
+      "nonExemptible": false,
+      "appliesTo": [
+        "any-ui"
+      ]
+    },
+    {
+      "id": "forms.required-status-indicated",
+      "standard": 15,
+      "level": "required",
+      "severity": "warning",
+      "validationType": "manual-review",
+      "assurance": "none",
+      "nonExemptible": false,
+      "appliesTo": [
+        "any-ui"
+      ]
+    },
+    {
+      "id": "interaction.destructive-confirmation",
+      "standard": 18,
+      "level": "required",
+      "severity": "error",
+      "validationType": "manual-review",
+      "assurance": "none",
+      "nonExemptible": false,
+      "appliesTo": [
+        "any-ui"
+      ]
+    },
+    {
+      "id": "interaction.duplicate-component-signals",
+      "standard": 7,
+      "level": "recommended",
+      "severity": "info",
+      "validationType": "code-analysis",
+      "assurance": "partial",
+      "nonExemptible": false,
+      "appliesTo": [
+        "any-ui"
+      ]
+    },
+    {
+      "id": "interaction.empty-states-differentiated",
+      "standard": 16,
+      "level": "required",
+      "severity": "warning",
+      "validationType": "manual-review",
+      "assurance": "none",
+      "nonExemptible": false,
+      "appliesTo": [
+        "any-ui"
+      ]
+    },
+    {
+      "id": "interaction.error-classes-distinguished",
+      "standard": 17,
+      "level": "required",
+      "severity": "error",
+      "validationType": "code-analysis",
+      "assurance": "partial",
+      "nonExemptible": false,
+      "appliesTo": [
+        "any-ui"
+      ]
+    },
+    {
+      "id": "interaction.states-complete",
+      "standard": 16,
+      "level": "required",
+      "severity": "error",
+      "validationType": "browser-analysis",
+      "assurance": "partial",
+      "nonExemptible": false,
+      "appliesTo": [
+        "any-ui"
+      ]
+    },
+    {
+      "id": "localization.no-string-concatenation",
+      "standard": 21,
+      "level": "required",
+      "severity": "error",
+      "validationType": "code-analysis",
+      "assurance": "partial",
+      "nonExemptible": false,
+      "appliesTo": [
+        "any-ui"
+      ]
+    },
+    {
+      "id": "motion.purposeful",
+      "standard": 12,
+      "level": "recommended",
+      "severity": "info",
+      "validationType": "manual-review",
+      "assurance": "none",
+      "nonExemptible": false,
+      "appliesTo": [
+        "any-ui"
+      ]
+    },
+    {
+      "id": "motion.reduced-motion-support",
+      "standard": 12,
+      "level": "required",
+      "severity": "error",
+      "validationType": "code-analysis",
+      "assurance": "partial",
+      "nonExemptible": false,
+      "appliesTo": [
+        "any-ui"
+      ]
+    },
+    {
+      "id": "navigation.current-location-indicated",
+      "standard": 14,
+      "level": "required",
+      "severity": "warning",
+      "validationType": "browser-analysis",
+      "assurance": "partial",
+      "nonExemptible": false,
+      "appliesTo": [
+        "any-ui"
+      ]
+    },
+    {
+      "id": "navigation.deep-linkable",
+      "standard": 14,
+      "level": "recommended",
+      "severity": "warning",
+      "validationType": "code-analysis",
+      "assurance": "partial",
+      "nonExemptible": false,
+      "appliesTo": [
+        "web-ui"
+      ]
+    },
+    {
+      "id": "navigation.unsaved-change-protection",
+      "standard": 14,
+      "level": "required",
+      "severity": "error",
+      "validationType": "code-analysis",
+      "assurance": "partial",
+      "nonExemptible": false,
+      "appliesTo": [
+        "any-ui"
+      ]
+    },
+    {
+      "id": "performance.budgets-testable",
+      "standard": 19,
+      "level": "recommended",
+      "severity": "warning",
+      "validationType": "configuration",
+      "assurance": "partial",
+      "nonExemptible": false,
+      "appliesTo": [
+        "any-ui"
+      ]
+    },
+    {
+      "id": "performance.layout-stability",
+      "standard": 19,
+      "level": "required",
+      "severity": "error",
+      "validationType": "browser-analysis",
+      "assurance": "partial",
+      "nonExemptible": false,
+      "appliesTo": [
+        "any-ui"
+      ]
+    },
+    {
+      "id": "privacy.no-deceptive-consent",
+      "standard": 29,
+      "level": "forbidden",
+      "severity": "error",
+      "validationType": "manual-review",
+      "assurance": "none",
+      "nonExemptible": true,
+      "appliesTo": [
+        "any-ui"
+      ]
+    },
+    {
+      "id": "privacy.sensitive-data-masked",
+      "standard": 25,
+      "level": "required",
+      "severity": "error",
+      "validationType": "code-analysis",
+      "assurance": "partial",
+      "nonExemptible": false,
+      "appliesTo": [
+        "any-ui"
+      ]
+    },
+    {
+      "id": "responsive.no-unintentional-overflow",
+      "standard": 13,
+      "level": "required",
+      "severity": "error",
+      "validationType": "browser-analysis",
+      "assurance": "partial",
+      "nonExemptible": false,
+      "appliesTo": [
+        "any-ui"
+      ]
+    },
+    {
+      "id": "responsive.viewport-behavior-defined",
+      "standard": 13,
+      "level": "required",
+      "severity": "error",
+      "validationType": "document",
+      "assurance": "partial",
+      "nonExemptible": false,
+      "appliesTo": [
+        "any-ui"
+      ]
+    },
+    {
+      "id": "visual.color-roles-semantic",
+      "standard": 9,
+      "level": "recommended",
+      "severity": "warning",
+      "validationType": "configuration",
+      "assurance": "partial",
+      "nonExemptible": false,
+      "appliesTo": [
+        "any-ui"
+      ]
+    },
+    {
+      "id": "visual.dark-mode-designed",
+      "standard": 9,
+      "level": "optional",
+      "severity": "info",
+      "validationType": "manual-review",
+      "assurance": "none",
+      "nonExemptible": false,
+      "appliesTo": [
+        "any-ui"
+      ]
+    },
+    {
+      "id": "visual.hierarchy-intentional",
+      "standard": 11,
+      "level": "required",
+      "severity": "warning",
+      "validationType": "manual-review",
+      "assurance": "none",
+      "nonExemptible": false,
+      "appliesTo": [
+        "any-ui"
+      ]
+    },
+    {
+      "id": "visual.primary-action-identifiable",
+      "standard": 11,
+      "level": "required",
+      "severity": "warning",
+      "validationType": "manual-review",
+      "assurance": "none",
+      "nonExemptible": false,
+      "appliesTo": [
+        "any-ui"
+      ]
+    },
+    {
+      "id": "visual.regression-evidence",
+      "standard": 36,
+      "level": "recommended",
+      "severity": "warning",
+      "validationType": "visual-analysis",
+      "assurance": "partial",
+      "nonExemptible": false,
+      "appliesTo": [
+        "any-ui"
+      ]
+    },
+    {
+      "id": "visual.spacing-system",
+      "standard": 10,
+      "level": "recommended",
+      "severity": "warning",
+      "validationType": "configuration",
+      "assurance": "partial",
+      "nonExemptible": false,
+      "appliesTo": [
+        "any-ui"
+      ]
+    },
+    {
+      "id": "visual.typography-scale",
+      "standard": 8,
+      "level": "recommended",
+      "severity": "warning",
+      "validationType": "configuration",
+      "assurance": "partial",
+      "nonExemptible": false,
+      "appliesTo": [
+        "any-ui"
+      ]
+    }
+  ]
+}

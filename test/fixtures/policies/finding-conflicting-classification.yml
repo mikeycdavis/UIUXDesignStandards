@@ -1,0 +1,13 @@
+standardVersion: 1.0.0
+project: fixture
+ui:
+  applicability: no-ui
+applicability:
+  visual.typography-scale:
+    status: not-applicable
+    reason: No typography here.
+exceptions:
+  - rule: visual.typography-scale
+    reason: Also excepted, which contradicts the above.
+    approvedBy: someone
+    approvedAt: 2026-01-01

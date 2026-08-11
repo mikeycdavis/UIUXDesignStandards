@@ -1,0 +1,89 @@
+# CI calls repository commands. It never reimplements standards logic in YAML.
+#
+# The reason is the same one that keeps rule identity out of the evaluator: a check expressed in two
+# places diverges, and the copy that runs in CI is the one nobody reads. Every step below is a bare
+# `npm run` of a script that a developer runs identically on their own machine, so a green build and a
+# green local run are the same event rather than two events that usually agree.
+
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  standards:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      # THERE IS DELIBERATELY NO INSTALL STEP.
+      #
+      # This is a decision, not an oversight, and it is written down here because its absence is
+      # invisible: no `npm ci`, no `npm install`, no dependency cache. This repository has zero
+      # dependencies and no lockfile (ADR 0001), and `node:test` ships with Node. An install step
+      # appearing here means the dependency decision changed and needs an ADR — a test asserts this
+      # file contains none.
+
+      - name: Source inventory
+        run: npm run inventory
+
+      - name: External source provenance
+        run: npm run provenance
+
+      - name: Rule identity — prose, freeze, catalog, provenance
+        run: npm run rule-identity
+
+      - name: Own policy
+        run: npm run policy
+
+      - name: Adoption template policy
+        run: npm run policy:templates
+
+      - name: Architecture diagrams are in sync
+        run: npm run diagrams
+
+      # The full suite, including the falsifier harness — every architectural mutation on record, each run
+      # against the suite that must object. It takes about seventy seconds of the run, and that is the
+      # correct trade: without it, every other step here is a green build with nothing proved behind
+      # it. There is deliberately no "fast" variant of this step. A CI path that quietly drops the
+      # falsifiers would remove the only evidence that the rest of the suite can fail.
+      - name: Tests
+        run: npm test
+
+      # NOT `--strict`.
+      #
+      # `--strict` fails the build on warnings, which turns every advisory finding into a broken
+      # build. The predictable result is that somebody disables the step, and then nobody sees the
+      # advisory findings at all. `audit` here is evidence discovery: it reaches no verdict, and it is
+      # not the gate.
+      - name: Audit
+        run: npm run audit
+
+      # THE GATE.
+      #
+      # This step decides the build. The steps above are supporting evidence about the repository's
+      # own consistency; none of them is a compliance verdict and the workflow does not assemble one
+      # from their exit codes. `validate` runs Gate 0, Gate 1, and Gate 2 and produces the verdict —
+      # reconstructing that from other commands' exit codes would be a second evaluator written in
+      # YAML, which is exactly what the first comment in this file forbids.
+      - name: Validate — the gate
+        run: npm run validate
+
+      # The self-check that breaks if this repository ever grows a UI without saying so. The assertion
+      # lives inside the tool (`--self`), not in shell logic here, so it cannot be weakened by editing
+      # a workflow.
+      - name: Applicability self-check
+        run: npm run applicability:self
+
+      # Release readiness runs on every change, not only at release time, because a criterion that is
+      # first evaluated on the day of the tag is a criterion nobody has ever seen fail. It aggregates
+      # the gates above rather than re-deriving them, and it exits 0 while its gaps are recorded — so
+      # this step going red means a recorded gap stopped being recorded, or a release-critical
+      # criterion regressed, both of which are worth failing a build over long before anyone tags.
+      - name: Release readiness
+        run: npm run release:readiness

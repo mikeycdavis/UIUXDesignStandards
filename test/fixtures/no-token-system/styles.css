@@ -1,0 +1,8 @@
+/* The same literal values, in a project that declares no token system. There is no token to have
+   departed from, so the drift detector has no subject here and its rule is not-evaluated. */
+.summary {
+  color: #333333;
+  background-color: #eeeeee;
+  border-color: #cccccc;
+  box-shadow: 0 1px 0 #bbbbbb;
+}

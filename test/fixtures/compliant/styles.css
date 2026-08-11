@@ -1,0 +1,52 @@
+/*
+ * Token definitions. A custom-property declaration is how a token system is authored, so the hex
+ * values below are the tokens themselves and never drift from them.
+ */
+:root {
+  --color-surface: #ffffff;
+  --color-text: #1a1a1a;
+  --color-focus: #0b5fff;
+  --space-2: 8px;
+}
+
+body {
+  background: var(--color-surface);
+  color: var(--color-text);
+  padding: var(--space-2);
+}
+
+a:focus-visible,
+button:focus-visible {
+  outline: 2px solid var(--color-focus);
+  outline-offset: 2px;
+}
+
+/* The idiom for hiding the ring from pointer users only. It is not a removed indicator. */
+button:focus:not(:focus-visible) {
+  outline: none;
+}
+
+@keyframes fade-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+main {
+  animation: fade-in 200ms ease-out;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  main {
+    animation: none;
+  }
+}
+
+@media (min-width: 48rem) {
+  main {
+    padding: var(--space-2);
+  }
+}

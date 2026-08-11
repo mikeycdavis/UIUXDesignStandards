@@ -1,0 +1,4 @@
+standardVersion: 1.0.0
+project: fixture
+ui:
+  applicability: cli

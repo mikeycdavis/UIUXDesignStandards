@@ -1,0 +1,26 @@
+:root {
+  --color-brand: #0b5fff;
+}
+
+button:focus {
+  outline: none;
+}
+
+.summary {
+  color: #333333;
+  background-color: #eeeeee;
+  border-top-color: #cccccc;
+}
+
+@keyframes slide-in {
+  from {
+    transform: translateX(100%);
+  }
+  to {
+    transform: translateX(0);
+  }
+}
+
+.drawer {
+  animation: slide-in 300ms ease-out;
+}

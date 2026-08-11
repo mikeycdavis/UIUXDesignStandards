@@ -1,0 +1,12 @@
+# A project declaring it ships no user interface.
+#
+# The declaration is one of the three things NOT_APPLICABLE requires. The other two — a complete
+# search and zero contradicting signals — are properties of the directory around this file, which
+# is why this fixture contains no HTML, no stylesheet, and no component.
+standardVersion: 1.0.0
+project: no-ui-fixture
+
+ui:
+  applicability: no-ui
+
+exceptions: []

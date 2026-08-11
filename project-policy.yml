@@ -1,0 +1,56 @@
+# This repository's own policy — the first dogfooded instance of the framework it defines.
+#
+# What a clean result here does and does not mean:
+#
+#   It DOES mean this repository's process rules were evaluated and satisfied, and that its
+#   declaration about its own scope is coherent.
+#
+#   It does NOT mean this framework's UI rules work. They are not exercised here, because there is
+#   no interface here to exercise them against. That evidence has to come from a real UI project
+#   (plan section 14), and until it does, the detectors are unvalidated against anything but
+#   fixtures. Reading a green result here as "the UI rules are proven" would be exactly the false
+#   confidence this framework exists to prevent.
+#
+# On self-exemption: `exceptions` is empty and stays empty. A standards repository that excepts
+# itself from its own rules has stopped being a standard and become a preference. If a rule here is
+# genuinely unmet, the honest outcomes are to fix it or to record it as a gap in the release
+# readiness report — never to waive it in this file.
+
+standardVersion: 1.0.0
+project: UIUXDesignStandards
+
+ui:
+  # A DECLARATION, not a finding. This says the project asserts it ships no user interface.
+  #
+  # It does not establish that the assertion is true, and `node scripts/policy.mjs` deliberately
+  # will not say that it does. Establishing it requires the applicability classifier to scan this
+  # repository, complete that scan without hitting a cap or an unreadable path, and find zero
+  # contradicting UI signals. Only then does the classification become NOT_APPLICABLE, and only the
+  # classifier may say so (ADR 0003).
+  #
+  # If someone adds a UI to this repository, this line becomes false and the classifier's
+  # `agreement` turns to `conflict` — which is INDETERMINATE, not NOT_APPLICABLE, and does not
+  # exit 0. The build breaks until this file tells the truth. That is the intended behavior.
+  applicability: no-ui
+
+  # Every other `ui` subkey is deliberately absent, and is a semantic error if present. A project
+  # declaring no interface cannot also describe one's platforms, viewports, or accessibility target;
+  # a policy that did both would be describing two different projects.
+
+# No per-rule declarations.
+#
+# It is tempting to list the sixty-nine UI-class rules here as `not-applicable`, and the plan for
+# this section originally called for exactly that. It is the wrong mechanism. Per-rule applicability
+# is for a rule whose subject is absent from a project that HAS an interface — no forms, no motion,
+# no data tables. Whether the interface exists at all is Gate 1's question, and Gate 1 answers it
+# from repository evidence rather than from this file.
+#
+# Writing those declarations would put a second, weaker mechanism in front of the classifier: the
+# policy would be asserting the conclusion the classifier is supposed to reach, and a scan that
+# later found a UI would be arguing with sixty-nine assertions instead of one. One declaration, one
+# classifier, one answer.
+#
+# The framework's own `process`-scoped rules are unaffected by any of this: they are evaluated here
+# and reported under `frameworkCompliance`, which is never null regardless of applicability.
+
+exceptions: []

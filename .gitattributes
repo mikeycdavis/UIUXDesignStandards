@@ -1,0 +1,19 @@
+# Line endings are part of this repository's verification, not a cosmetic preference.
+#
+# The falsifier harness locates its mutation sites by matching exact source strings, and three of
+# those anchors span more than one line. Under `core.autocrlf=true` — the Windows default — the
+# committed blobs are LF while the checked-out working tree is CRLF, so those anchors match nothing.
+# The harness then reports its mutations as uncaught, which is the same false green it exists to
+# detect, arriving through the checkout instead of through the code.
+#
+# `eol=lf` pins the working tree to LF on every platform, so a clone verifies the bytes that were
+# tagged rather than a locally re-encoded copy of them. Found immediately before the v1.0.0 tag, by
+# checking that the verification reproduces from a fresh clone rather than assuming it would.
+
+* text=auto eol=lf
+
+*.png binary
+*.jpg binary
+*.gif binary
+*.pdf binary
+*.ico binary

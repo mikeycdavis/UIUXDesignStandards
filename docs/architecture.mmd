@@ -1,0 +1,46 @@
+%% --- 1. The three gates and the three-block envelope
+flowchart TD
+    subgraph gate0["Gate 0 — is the configuration believable?"]
+        POLICY["project-policy.yml<br/>schema shape + cross-field semantics"]
+        BAD(["exit 2 — no verdict<br/>a malformed policy is not a failing project"])
+        POLICY -->|"invalid"| BAD
+    end
+
+    POLICY -->|"valid, or absent"| GATE1
+
+    subgraph gate1["Gate 1 — is a UI applicable?"]
+        GATE1["applicability.mjs<br/>evidence signals + the declaration"]
+    end
+
+    GATE1 -->|"APPLICABLE"| UIRULES["UI rule evaluation<br/>scoped by PROVEN classes"]
+    GATE1 -->|"NOT_APPLICABLE<br/>declared no-ui + complete scan + zero signals"| UINULL["uiCompliance: null"]
+    GATE1 -->|"INDETERMINATE<br/>anything unestablished"| UIONE["uiCompliance: null<br/>exit 1, always"]
+
+    ALWAYS["process rules<br/>appliesTo: process"] --> FRAMEWORK["frameworkCompliance<br/>evaluated on every run, never null"]
+
+    UIRULES --> ENVELOPE
+    UINULL --> ENVELOPE
+    UIONE --> ENVELOPE
+    FRAMEWORK --> ENVELOPE
+
+    ENVELOPE["envelope<br/>applicability | uiCompliance | frameworkCompliance<br/>no field changes meaning by context"]
+
+%% --- 2. The four evidence surfaces, and what each must pass before it establishes anything
+flowchart LR
+    SOURCE["source scan<br/>13 static detectors"] -->|"met an instance of its subject"| EVAL
+    SOURCE -.->|"no subject examined"| UNEST
+
+    BROWSER["browser / visual evidence<br/>--evidence=&lt;file&gt;"] --> AXES
+    AXES{"run completed?<br/>identity FRESH?<br/>surface covered?<br/>check conclusive?"}
+    AXES -->|"all four"| EVAL
+    AXES -.->|"any one missing"| UNEST
+
+    REVIEW["human review<br/>policy attestations"] --> CHECKS
+    CHECKS{"attestable?<br/>uncontradicted?<br/>identity FRESH?<br/>covers ui.reviewPaths?"}
+    CHECKS -->|"all four"| EVAL
+    CHECKS -.->|"any one missing"| UNEST
+
+    EVAL["established<br/>evaluated | evidenced | attested"]
+    UNEST["unestablished<br/>not-evaluated | evidence-unavailable | stale-evidence<br/>partial-coverage | partial-review | unscoped-review | class-unresolved"]
+
+    UNEST --> CAP["on a forbidden rule:<br/>verdict capped at NOT_EVALUATED, exit 1"]

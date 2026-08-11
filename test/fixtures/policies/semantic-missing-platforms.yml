@@ -1,0 +1,6 @@
+standardVersion: 1.0.0
+project: fixture
+ui:
+  applicability: desktop-ui
+  accessibility:
+    target: framework-baseline
