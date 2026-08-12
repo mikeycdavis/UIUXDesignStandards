@@ -23,6 +23,14 @@ import { ingest, assessCoverage, EvidenceError } from "../scripts/evidence.mjs";
 import { computeIdentity } from "../scripts/content-identity.mjs";
 import { loadCatalog } from "../scripts/catalog.mjs";
 
+/**
+ * The suite evaluates throwaway projects with the WORKING TREE, which between releases is the
+ * declared version plus unreleased commits — exactly what the version-identity guard refuses. The
+ * refusal is waived here and nowhere reachable from the CLI; the envelope still records that the
+ * executing tree was not the release, so no result here can claim otherwise.
+ */
+const UNRELEASED = { allowUnreleasedFramework: true };
+
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const fixture = (name) => path.join(ROOT, "test/fixtures", name);
 const EVIDENCE_PATHS = ["index.html", "styles.css", "src"];
@@ -71,7 +79,7 @@ async function repoWith(evidenceFixture, { mutate = (doc) => doc, evidencePaths 
 
 async function resultFor(evidenceFixture, options) {
   const repo = await repoWith(evidenceFixture, options);
-  const result = await runValidate(repo.dir, { evidencePath: repo.evidencePath });
+  const result = await runValidate(repo.dir, { ...UNRELEASED, evidencePath: repo.evidencePath });
   const of = (ruleId) => result.envelope.uiCompliance.results.find((r) => r.ruleId === ruleId);
   return { ...repo, result, of, cleanup: () => rm(repo.dir, { recursive: true, force: true }) };
 }
@@ -234,7 +242,7 @@ test("changing the source after the run makes the evidence stale, not unavailabl
   const repo = await repoWith("valid-fresh.json");
   await appendFile(path.join(repo.dir, "styles.css"), "\n.added-after-the-run { color: red; }\n");
 
-  const result = await runValidate(repo.dir, { evidencePath: repo.evidencePath });
+  const result = await runValidate(repo.dir, { ...UNRELEASED, evidencePath: repo.evidencePath });
   const contrast = result.envelope.uiCompliance.results.find((r) => r.ruleId === CONTRAST);
   assert.equal(contrast.disposition, "stale-evidence");
   assert.equal(contrast.status, "skipped");
@@ -290,7 +298,7 @@ const brokenContract = [
 for (const [name, expected] of brokenContract) {
   test(`${name} is a broken evidence contract: exit 2, no verdict`, async () => {
     const repo = await repoWith(name);
-    await assert.rejects(() => runValidate(repo.dir, { evidencePath: repo.evidencePath }), (error) => {
+    await assert.rejects(() => runValidate(repo.dir, { ...UNRELEASED, evidencePath: repo.evidencePath }), (error) => {
       assert.ok(error instanceof EvidenceError);
       assert.match(error.message, expected);
       return true;
@@ -300,6 +308,7 @@ for (const [name, expected] of brokenContract) {
     const code = await runCli(["validate", repo.dir, `--evidence=${repo.evidencePath}`], {
       write: (s) => (out.stdout += s),
       fail: (s) => (out.stderr += s),
+      ...UNRELEASED,
     });
     assert.equal(code, 2);
     assert.equal(out.stdout, "", "a broken record produces no envelope to read a verdict out of");
@@ -321,7 +330,7 @@ test("an evidence path that does not exist is exit 2, not an absent-evidence run
 test("a producer may not measure a narrower subject than the project declared", async () => {
   const repo = await repoWith("valid-fresh.json", { evidencePaths: ["index.html", "styles.css", "src", "package.json"] });
   await assert.rejects(
-    () => runValidate(repo.dir, { evidencePath: repo.evidencePath }),
+    () => runValidate(repo.dir, { ...UNRELEASED, evidencePath: repo.evidencePath }),
     /paths the project did not declare/,
   );
   await rm(repo.dir, { recursive: true, force: true });
@@ -329,7 +338,7 @@ test("a producer may not measure a narrower subject than the project declared", 
 
 test("a declaration the producer matches is accepted", async () => {
   const repo = await repoWith("valid-fresh.json", { evidencePaths: EVIDENCE_PATHS });
-  const result = await runValidate(repo.dir, { evidencePath: repo.evidencePath });
+  const result = await runValidate(repo.dir, { ...UNRELEASED, evidencePath: repo.evidencePath });
   assert.equal(result.envelope.uiCompliance.results.find((r) => r.ruleId === CONTRAST).status, "passed");
   await rm(repo.dir, { recursive: true, force: true });
 });
@@ -363,7 +372,7 @@ test("the four axes stay independent through the whole mutation sequence", async
 
   const step = async () => {
     try {
-      const result = await runValidate(repo.dir, { evidencePath: repo.evidencePath });
+      const result = await runValidate(repo.dir, { ...UNRELEASED, evidencePath: repo.evidencePath });
       const contrast = result.envelope.uiCompliance.results.find((r) => r.ruleId === CONTRAST);
       return { disposition: contrast.disposition, status: contrast.status };
     } catch (error) {

@@ -26,6 +26,14 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { runValidate, exitCodeFor, ValidationError } from "../scripts/uiux.mjs";
 
+/**
+ * The suite evaluates throwaway projects with the WORKING TREE, which between releases is the
+ * declared version plus unreleased commits — exactly what the version-identity guard refuses. The
+ * refusal is waived here and nowhere reachable from the CLI; the envelope still records that the
+ * executing tree was not the release, so no result here can claim otherwise.
+ */
+const UNRELEASED = { allowUnreleasedFramework: true };
+
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const fixture = (name) => path.join(ROOT, "test/fixtures", name);
 
@@ -63,7 +71,7 @@ test("APPLICABLE: both blocks are populated and the exit follows both", async ()
 test("NOT_APPLICABLE: uiCompliance is null and the framework block still answers", async () => {
   const dir = await copyOf("no-ui");
   try {
-    const result = await runValidate(dir);
+    const result = await runValidate(dir, UNRELEASED);
     const env = result.envelope;
     assert.equal(env.applicability.classification, "NOT_APPLICABLE");
     assert.equal(shape(env.uiCompliance), "null");
@@ -93,7 +101,7 @@ test("NOT_APPLICABLE does not exempt process governance: a failing framework blo
     ),
   );
   try {
-    const result = await runValidate(dir, { today: "2026-08-10" });
+    const result = await runValidate(dir, { ...UNRELEASED, today: "2026-08-10" });
     const env = result.envelope;
     assert.equal(env.applicability.classification, "NOT_APPLICABLE", "the UI gate is unchanged by a process failure");
     assert.equal(shape(env.uiCompliance), "null");
@@ -111,7 +119,7 @@ test("INDETERMINATE: uiCompliance is null and the exit is 1 whatever the framewo
     policy.replace("applicability: no-ui", "applicability: web-ui\n  platforms:\n    - web\n  viewportClasses:\n    - mobile\n  accessibility:\n    target: framework-baseline"),
   );
   try {
-    const result = await runValidate(dir);
+    const result = await runValidate(dir, UNRELEASED);
     const env = result.envelope;
     assert.equal(env.applicability.classification, "INDETERMINATE");
     assert.equal(shape(env.uiCompliance), "null");

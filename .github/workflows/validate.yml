@@ -1,0 +1,133 @@
+# The reusable validation workflow — central implementation, distributed invocation.
+#
+# A consuming repository calls this instead of writing its own standards logic in YAML. The rules,
+# the gates, and the verdict all live in this repository; the caller supplies a ref and a path. That
+# split is the whole point: a check expressed in two places diverges, and the copy that runs in CI is
+# the one nobody reads.
+#
+# WHAT THIS WORKFLOW ESTABLISHES, AND WHAT IT DOES NOT.
+#
+# It establishes that the standards pack at a given ref evaluated a given path and produced a given
+# verdict. It does NOT establish that this check runs on every pull request, that it is configured as
+# required, that branch protection covers it, or who may bypass it. Those are facts about the Git
+# hosting platform, not about this file — a committed workflow is not proof that enforcement exists.
+# Establishing that belongs to the adoption controller (plan section 16).
+#
+# PIN BY SHA. `standards-ref` accepts a tag, but a tag is a mutable human-readable alias and a commit
+# sha is not. A consumer that pins `v1.0.0` is trusting that nobody moves it. The version-identity
+# guard below is what makes that trust unnecessary rather than merely discouraged: it refuses to
+# produce a verdict unless the executing tree IS the release the caller's policy names.
+
+name: UI/UX standards
+
+on:
+  workflow_call:
+    inputs:
+      standards-ref:
+        description: >-
+          Immutable ref of UIUXDesignStandards to execute. A commit sha is the guarantee; a tag is an
+          alias for one. Whatever is passed, the run refuses to produce a verdict unless the resulting
+          tree is the release the consumer's project-policy.yml declares.
+        required: true
+        type: string
+      target-path:
+        description: Path within the calling repository to evaluate.
+        required: false
+        type: string
+        default: "."
+      evidence-path:
+        description: Optional browser-evidence document to ingest. Absent means no browser evidence was produced, which is reported rather than assumed clean.
+        required: false
+        type: string
+        default: ""
+      node-version:
+        required: false
+        type: string
+        default: "20"
+
+jobs:
+  standards:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out the project being evaluated
+        uses: actions/checkout@v4
+
+      - name: Check out the standards pack at the requested ref
+        uses: actions/checkout@v4
+        with:
+          repository: mikeycdavis/UIUXDesignStandards
+          ref: ${{ inputs.standards-ref }}
+          path: .uiux-standards
+          # THE TAGS ARE THE POINT, not history for its own sake.
+          #
+          # Version identity is established by comparing the executing tree against the release tag it
+          # claims to be, and a shallow checkout has no tags to compare against. With fetch-depth 1 the
+          # guard would resolve UNVERIFIED on every run — not a false pass, but a permanently
+          # unanswered question, which is the same as having no guard.
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ inputs.node-version }}
+
+      # THERE IS DELIBERATELY NO INSTALL STEP for the standards pack: zero dependencies, no lockfile
+      # (ADR 0001). The calling repository's own dependencies are its business and are not installed
+      # here — nothing in this workflow executes the caller's code.
+
+      - name: Gate 1 — applicability
+        id: applicability
+        run: node .uiux-standards/scripts/uiux.mjs applicability "${{ inputs.target-path }}" --json > applicability.json
+        # Exit 0 covers APPLICABLE, NOT_APPLICABLE, and INDETERMINATE alike: a classification was
+        # produced, and a classification is evidence rather than a verdict. Only a classifier that
+        # could not execute exits non-zero here.
+
+      - name: Gate 0 and 2 — validate
+        id: validate
+        run: |
+          set +e
+          if [ -n "${{ inputs.evidence-path }}" ]; then
+            node .uiux-standards/scripts/uiux.mjs validate "${{ inputs.target-path }}" --json --evidence="${{ inputs.evidence-path }}" > envelope.json 2> validate.err
+          else
+            node .uiux-standards/scripts/uiux.mjs validate "${{ inputs.target-path }}" --json > envelope.json 2> validate.err
+          fi
+          echo "exit=$?" >> "$GITHUB_OUTPUT"
+          cat validate.err >&2
+
+      # The artifacts are uploaded BEFORE the gate decides, so a failing run still leaves the evidence
+      # a governance layer needs. A gate that destroys the reason it failed is a gate nobody can audit.
+      - name: Upload the applicability classification and the compliance envelope
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: uiux-standards-evidence
+          path: |
+            applicability.json
+            envelope.json
+            validate.err
+          if-no-files-found: warn
+
+      # THE GATE.
+      #
+      # Three outcomes, kept distinct because collapsing them teaches a consumer to weaken the check:
+      #
+      #   0  the pack ran and the project satisfied it
+      #   1  the pack ran and the project has problems
+      #   2  no verdict was reached — a broken policy, a broken evidence document, or a framework
+      #      whose identity does not match what the policy pinned
+      #
+      # Exit 2 fails the check with an infrastructure annotation rather than a compliance one. A
+      # misconfigured project must not read as a failing project, and must never read as a passing one.
+      - name: Report the outcome
+        if: always()
+        run: |
+          code="${{ steps.validate.outputs.exit }}"
+          if [ "$code" = "0" ]; then
+            echo "::notice title=UI/UX standards::The project satisfied the standards pack at ${{ inputs.standards-ref }}."
+            exit 0
+          elif [ "$code" = "1" ]; then
+            echo "::error title=UI/UX standards::The project did not satisfy the standards pack at ${{ inputs.standards-ref }}. See the uiux-standards-evidence artifact."
+            exit 1
+          else
+            echo "::error title=UI/UX standards (configuration)::No verdict was produced. This is a configuration or evaluation-identity failure, not a compliance result -- the pack has NOT established that this project violates anything. See validate.err in the uiux-standards-evidence artifact."
+            exit 1
+          fi

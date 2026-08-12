@@ -26,6 +26,14 @@ import {
 } from "../scripts/uiux.mjs";
 import { loadCatalog } from "../scripts/catalog.mjs";
 
+/**
+ * The suite evaluates throwaway projects with the WORKING TREE, which between releases is the
+ * declared version plus unreleased commits — exactly what the version-identity guard refuses. The
+ * refusal is waived here and nowhere reachable from the CLI; the envelope still records that the
+ * executing tree was not the release, so no result here can claim otherwise.
+ */
+const UNRELEASED = { allowUnreleasedFramework: true };
+
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const fixture = (name) => path.join(ROOT, "test/fixtures", name);
 
@@ -60,7 +68,7 @@ test("uiCompliance is null in exactly the non-APPLICABLE cases", async () => {
   assert.equal(applicable.envelope.applicability.classification, "APPLICABLE");
   assert.notEqual(applicable.envelope.uiCompliance, null);
 
-  const exempt = await runValidate(ROOT);
+  const exempt = await runValidate(ROOT, UNRELEASED);
   assert.equal(exempt.envelope.applicability.classification, "NOT_APPLICABLE");
   assert.equal(exempt.envelope.uiCompliance, null);
   assert.notEqual(exempt.envelope.frameworkCompliance, null);
@@ -82,7 +90,7 @@ test("the two blocks are computed over disjoint, exhaustive rule sets", async ()
 });
 
 test("no UI rule acquires a result when Gate 1 did not admit the UI surface", async () => {
-  const result = await runValidate(ROOT);
+  const result = await runValidate(ROOT, UNRELEASED);
   assert.equal(result.envelope.uiCompliance, null);
   assert.equal(result.statics.findings.length, 0, "the detectors did not run at all");
   assert.deepEqual(result.statics.examined, []);
@@ -110,7 +118,7 @@ test("an incoherent policy stops the run at Gate 0, and produces no compliance b
 test("an absent policy is an absent configuration, not a broken one", async () => {
   const dir = await scratch("compliant");
   await rm(path.join(dir, "project-policy.yml"));
-  const result = await runValidate(dir);
+  const result = await runValidate(dir, UNRELEASED);
   assert.equal(result.policyStatus, "absent");
   assert.equal(result.envelope.uiCompliance.status, "NOT_EVALUATED");
   assert.equal(exitCodeFor(result.envelope, result.policyFindings), 1);
@@ -141,7 +149,7 @@ test("INDETERMINATE exits 1 even when frameworkCompliance is COMPLIANT", async (
   );
   await writeFile(path.join(dir, "README.md"), "A service with no interface in this repository.\n");
 
-  const result = await runValidate(dir);
+  const result = await runValidate(dir, UNRELEASED);
   assert.equal(result.envelope.applicability.classification, "INDETERMINATE");
   assert.equal(result.envelope.uiCompliance, null);
   assert.equal(result.envelope.frameworkCompliance.status, "COMPLIANT");
@@ -152,7 +160,7 @@ test("INDETERMINATE exits 1 even when frameworkCompliance is COMPLIANT", async (
 });
 
 test("a NOT_APPLICABLE project with satisfied process rules exits 0", async () => {
-  const result = await runValidate(ROOT);
+  const result = await runValidate(ROOT, UNRELEASED);
   assert.equal(result.envelope.frameworkCompliance.status, "COMPLIANT");
   assert.equal(exitCodeFor(result.envelope, result.policyFindings), 0);
 });
@@ -212,7 +220,7 @@ test("an unresolved class leaves a forbidden web-ui rule unestablished rather th
   const dir = await scratch("compliant");
   // index.html is what proves `web-ui`. Without it the components still establish an interface.
   await rm(path.join(dir, "index.html"));
-  const result = await runValidate(dir);
+  const result = await runValidate(dir, UNRELEASED);
   const env = result.envelope;
 
   assert.equal(env.applicability.classification, "APPLICABLE");
@@ -228,7 +236,7 @@ test("an unresolved class leaves a forbidden web-ui rule unestablished rather th
 test("class-unresolved is not folded into not-applicable: it stays in the applicable denominator", async () => {
   const dir = await scratch("compliant");
   await rm(path.join(dir, "index.html"));
-  const ui = (await runValidate(dir)).envelope.uiCompliance;
+  const ui = (await runValidate(dir, UNRELEASED)).envelope.uiCompliance;
   const unresolved = ui.results.filter((r) => r.disposition === "class-unresolved");
   assert.ok(unresolved.length > 0);
   assert.equal(ui.denominator.applicable, ui.results.length);
@@ -243,7 +251,7 @@ test("class-unresolved is not folded into not-applicable: it stays in the applic
 test("the boundary between UI existence, UI class, and rule applicability holds under mutation", async () => {
   const dir = await scratch("compliant");
   const step = async () => {
-    const result = await runValidate(dir);
+    const result = await runValidate(dir, UNRELEASED);
     const ui = result.envelope.uiCompliance;
     return {
       classification: result.envelope.applicability.classification,
@@ -286,7 +294,7 @@ test("the boundary between UI existence, UI class, and rule applicability holds 
 // --- The framework's own process rule --------------------------------------------------------------------
 
 test("evidence.surfaces-declared is evaluated on every run, including exempt ones", async () => {
-  const result = await runValidate(ROOT);
+  const result = await runValidate(ROOT, UNRELEASED);
   const declared = result.envelope.frameworkCompliance.results.find(
     (r) => r.ruleId === "evidence.surfaces-declared",
   );
@@ -317,7 +325,7 @@ test("the structural assertion is bound to Standard 35 R8's text, not merely to 
 });
 
 test("stripping any R8 clause from the evidence surface fails the rule that requires it", async () => {
-  const complete = (await runValidate(ROOT)).envelope.evidenceSurface;
+  const complete = (await runValidate(ROOT, UNRELEASED)).envelope.evidenceSurface;
   assert.deepEqual(assertSurfacesDeclared(complete), []);
 
   for (const key of SURFACE_KEYS) {

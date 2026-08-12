@@ -149,10 +149,21 @@ export const FALSIFIERS = [
     // post-release development stops failing. It also accepts a tree that has rewritten every file
     // since the release. Ancestry proves the release is behind us, never that this IS it.
     invariant: "release.identity-is-equality-never-ancestry",
-    file: "scripts/release-readiness.mjs",
+    file: "scripts/version-identity.mjs",
     find: `  if (at === now) {`,
     replace: `  if (at === now || git(["merge-base", "--is-ancestor", \`\${tag}^{commit}\`, "HEAD"]).status === 0) {`,
-    suite: "test/release.test.mjs",
+    suite: "test/version-identity.test.mjs",
+  },
+  {
+    // The version-identity guard, weakened to the comparison every inherited implementation makes:
+    // declared version against executing VERSION. Under this family's release convention both read
+    // "1.0.0" on a post-release branch, so the consumer that pinned the release is handed a verdict
+    // from unreleased code and told it came from the release.
+    invariant: "identity.a-verdict-names-the-framework-that-produced-it",
+    file: "scripts/version-identity.mjs",
+    find: `  if (release.tree === "RELEASE_TREE") {`,
+    replace: `  if (true) {`,
+    suite: "test/version-identity.test.mjs",
   },
   {
     // Let every criterion grant itself an accepted limitation, and RECORDED_GAP stops meaning "this

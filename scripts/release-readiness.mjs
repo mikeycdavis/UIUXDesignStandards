@@ -51,6 +51,9 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 
 import { loadCatalog } from "./catalog.mjs";
 import { resolveChronology } from "./chronology.mjs";
+// One owner for "is this tree the released artifact?" — scripts/version-identity.mjs. A second copy
+// here would be a second answer to one question, which is the defect the one-owner rule prevents.
+import { resolveRelease } from "./version-identity.mjs";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const SNAPSHOT = "artifacts/release/catalog-v1.0.0.json";
@@ -108,77 +111,6 @@ const GAP_POLICY = {
 const read = (root, file) => readFileSync(path.join(root, file), "utf8");
 const has = (root, file) => existsSync(path.join(root, file));
 
-/**
- * Where this tree stands relative to the release its `VERSION` names.
- *
- * TWO PROPOSITIONS, TWO GIT RELATIONS, AND THEY MAY NOT SUBSTITUTE FOR EACH OTHER.
- *
- *   "is this the release tree?"           equality    HEAD == tag^{commit}
- *   "does this line descend from it?"     ancestry    merge-base --is-ancestor tag HEAD
- *
- * The first version of this function knew only equality, which was correct for verifying the v1.0.0
- * artifact and wrong for every commit afterwards: `VERSION` in this family names the LAST RELEASED
- * version and stays there while development continues, so an ordinary post-release commit would have
- * reported a failure forever. The tempting repair — accept an ancestor tag as agreement — was
- * rejected, because ancestry proves only that the release is somewhere behind us. It would pass a
- * tree that had rewritten every file since the tag. Equality establishes artifact identity; ancestry
- * establishes historical continuity; neither answers the other's question. ADR 0015.
- *
- * So the tag is resolved into two independent facts:
- *
- *   release   RELEASED | NOT_RELEASED | UNKNOWN
- *             a property of the VERSION, not of this checkout. v1.0.0 is released no matter which
- *             commit happens to be checked out.
- *
- *   tree      RELEASE_TREE              HEAD is exactly the released commit
- *             POST_RELEASE_DEVELOPMENT  the release is an ancestor; ordinary work continues
- *             RELEASE_HISTORY_DIVERGED  the tag exists and is NOT behind us — history was rewritten,
- *                                       or the tag was moved. Always a failure.
- *             UNRELEASED_CANDIDATE      no tag yet. Not a failure: demanding the tag in order to
- *                                       permit the tag is the circular gate this file refuses.
- *             UNKNOWN                   git could not answer, which is never "no tag".
- */
-export function resolveRelease(root, version) {
-  const tag = `v${version}`;
-  const git = (args) => spawnSync("git", args, { cwd: root, encoding: "utf8" });
-  const unknown = (reason) => ({ release: "UNKNOWN", tree: "UNKNOWN", tag, reason });
-
-  // "Not a repository" and "no such tag" both make `rev-parse` exit non-zero, and collapsing them
-  // would turn "I could not look" into "I looked and there was nothing".
-  const repo = git(["rev-parse", "--git-dir"]);
-  if (repo.error) return unknown(`git is unavailable: ${repo.error.message}`);
-  if (repo.status !== 0) return unknown("not a git repository, so no tag could be looked for");
-
-  const exists = git(["rev-parse", "--verify", "--quiet", `refs/tags/${tag}`]);
-  if (exists.status !== 0) {
-    return { release: "NOT_RELEASED", tree: "UNRELEASED_CANDIDATE", tag, reason: `no tag ${tag} exists yet` };
-  }
-
-  const head = git(["rev-parse", "HEAD^{commit}"]);
-  const tagged = git(["rev-parse", `${tag}^{commit}`]);
-  if (head.status !== 0 || tagged.status !== 0) return unknown(`${tag} exists but could not be resolved to a commit`);
-
-  const at = tagged.stdout.trim();
-  const now = head.stdout.trim();
-  if (at === now) {
-    return { release: "RELEASED", tree: "RELEASE_TREE", tag, at, ahead: 0, reason: `${tag} points at ${at.slice(0, 12)}, which is this tree` };
-  }
-
-  const descends = git(["merge-base", "--is-ancestor", `${tag}^{commit}`, "HEAD"]).status === 0;
-  if (!descends) {
-    return { release: "RELEASED", tree: "RELEASE_HISTORY_DIVERGED", tag, at, reason: `${tag} points at ${at.slice(0, 12)}, which is not an ancestor of HEAD — history was rewritten or the tag was moved` };
-  }
-
-  const ahead = Number(git(["rev-list", "--count", `${tag}^{commit}..HEAD`]).stdout.trim()) || 0;
-  return {
-    release: "RELEASED",
-    tree: "POST_RELEASE_DEVELOPMENT",
-    tag,
-    at,
-    ahead,
-    reason: `${tag} points at ${at.slice(0, 12)}; HEAD is ${ahead} commit(s) ahead of it, so this tree is not the released one`,
-  };
-}
 
 function run(root, args, { env = {} } = {}) {
   // NODE_TEST_CONTEXT is deleted for the same reason `test/falsifiers.test.mjs` deletes it: a

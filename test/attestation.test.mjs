@@ -29,6 +29,14 @@ import { assessScope, requiredSubject, resolveAttestations } from "../scripts/at
 import { checkPolicy } from "../scripts/policy.mjs";
 import { evaluate } from "../scripts/compliance.mjs";
 
+/**
+ * The suite evaluates throwaway projects with the WORKING TREE, which between releases is the
+ * declared version plus unreleased commits — exactly what the version-identity guard refuses. The
+ * refusal is waived here and nowhere reachable from the CLI; the envelope still records that the
+ * executing tree was not the release, so no result here can claim otherwise.
+ */
+const UNRELEASED = { allowUnreleasedFramework: true };
+
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const fixture = (name) => path.join(ROOT, "test/fixtures", name);
 const SCHEMA = path.join(ROOT, "schemas/project-policy.schema.json");
@@ -147,7 +155,7 @@ async function approved(r, over = {}) {
 }
 
 async function resultOf(r, options = {}) {
-  const result = await runValidate(r.dir, options);
+  const result = await runValidate(r.dir, { ...UNRELEASED, ...options });
   return {
     result,
     of: (ruleId) =>
@@ -571,7 +579,7 @@ test("an unestablished review never changes the exit code from 1 to 0", async ()
   const r = await repo();
   try {
     await r.write({ [FORBIDDEN_RULE]: await approved(r, { expires: "2026-01-01" }) });
-    const result = await runValidate(r.dir, { today: "2026-08-10" });
+    const result = await runValidate(r.dir, { ...UNRELEASED, today: "2026-08-10" });
     assert.equal(exitCodeFor(result.envelope, result.policyFindings), 1);
   } finally {
     await r.cleanup();

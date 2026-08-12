@@ -729,6 +729,7 @@ export function envelope({
   repo,
   frameworkCoverage,
   evidenceSurface,
+  versionIdentity,
 }) {
   const block = (verdict) =>
     verdict === null || verdict === undefined
@@ -748,6 +749,11 @@ export function envelope({
   return {
     schemaVersion: "1.0",
     standardVersion: standardVersion ?? null,
+    // WHICH framework produced this envelope, as evidence rather than as a reference string.
+    // `standardVersion` above is what the POLICY asked for; this block is what actually ran, resolved
+    // from the executing checkout. A governance layer reading a verdict needs to know the difference,
+    // and `identity` is never MATCH on the strength of a version string alone (ADR 0016).
+    versionIdentity: versionIdentity ?? null,
     project: project ?? repo ?? null,
     applicability: applicability ?? null,
     uiCompliance: block(uiVerdict),

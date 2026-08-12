@@ -313,4 +313,30 @@ export const INVARIANTS = [
     tests: ["NOT_APPLICABLE is not available to a criterion with no recorded applicability condition"],
     falsifier: null,
   },
+  {
+    id: "identity.a-verdict-names-the-framework-that-produced-it",
+    statement:
+      "A verdict labelled with a standards version is produced by that released version. Where the executing " +
+      "framework is not the release the policy names, no verdict is produced at all — a configuration and " +
+      "evaluation-identity failure at exit 2, never NON_COMPLIANT, because nothing established that the project " +
+      "violates anything.",
+    record: { file: "artifacts/adr/0016-a-verdict-names-the-framework-that-produced-it.md", quote: "a provenance lie" },
+    tests: [
+      "the positive: a released framework and a policy naming it match, and name the commit",
+      "declaring a version the framework is not is a mismatch, in either direction",
+      "THE ONE A VERSION STRING CANNOT SEE: post-release main is not the release it names",
+      "consumer: THE FALSIFIER — a workflow running main instead of the tag gets no verdict",
+      "a provenance refusal is never reported as a failing project",
+    ],
+    falsifier: "identity.a-verdict-names-the-framework-that-produced-it",
+  },
+  {
+    id: "identity.unverifiable-is-never-a-match",
+    statement:
+      "Where which artifact is executing cannot be established, identity is UNVERIFIED and the executed commit is " +
+      "null. An unanswered question is never recorded as a match.",
+    record: { file: "artifacts/adr/0016-a-verdict-names-the-framework-that-produced-it.md", quote: "never becomes" },
+    tests: ["a vendored copy with no git is UNVERIFIED — never MATCH, and never a mismatch"],
+    falsifier: null,
+  },
 ];

@@ -265,7 +265,54 @@ Semver, with the increments meaning what they say:
 Pin a commit sha rather than a tag when you consume this repository from CI. Tags are mutable; the sha
 is the guarantee.
 
-## 13. What not to do
+## 13. Consuming this pack from CI
+
+`.github/workflows/validate.yml` is callable with `workflow_call`. Your repository invokes it; it
+does not reimplement any rule, and your YAML must not either.
+
+```yaml
+jobs:
+  uiux:
+    uses: mikeycdavis/UIUXDesignStandards/.github/workflows/validate.yml@8353469
+    with:
+      standards-ref: 8353469        # a sha, or the tag it aliases
+```
+
+The exit contract the caller sees is the framework's own: `0` the project satisfied the pack, `1` it
+did not, `2` no verdict was reached. The third fails the check with a configuration annotation rather
+than a compliance one, because a misconfigured project is not a failing project — and must never read
+as a passing one.
+
+**Your `standardVersion` and the ref must agree, and the framework checks.** A policy declaring
+`1.0.0` evaluated by anything that is not the released 1.0.0 produces no verdict at all, at exit 2.
+That includes a ref pointing at a *branch* whose `VERSION` file happens to read `1.0.0` — in this
+family `VERSION` names the last release and stays there during development, so a branch can carry a
+released version number while being a different framework. The envelope records what actually ran:
+
+```json
+"versionIdentity": {
+  "pack": "UIUXDesignStandards", "declaredVersion": "1.0.0", "executedVersion": "1.0.0",
+  "executedCommit": "8353469...", "executedTree": "RELEASE_TREE", "identity": "MATCH"
+}
+```
+
+Read that block rather than the workflow's `uses:` line. The line states an intention; the block is a
+record of what happened.
+
+### What installing this workflow does not establish
+
+Adding this workflow establishes that the workflow file exists in your repository, and nothing more.
+
+Whether the check actually runs on every pull request, whether it is configured as a required check,
+whether branch protection covers the branches you care about, and who is permitted to bypass it are
+all facts about your Git hosting platform. None of them are visible from this repository, none are
+checked by anything here, and a committed workflow file is not evidence of any of them. Establishing
+those is the job of an organization adoption controller, which this framework does not yet have.
+
+If you need to state that this pack is *enforced* on a repository, that claim requires evidence from
+the host platform's settings, not a link to a YAML file.
+
+## 14. What not to do
 
 - **Do not treat a clean `audit` as compliance.** It consults no policy and reaches no verdict.
 - **Do not read the exit code as the classification.** `INDETERMINATE` is a produced classification at
@@ -281,7 +328,7 @@ is the guarantee.
   "evaluate me against this framework's supported representation of that target". It is never a claim
   that your project conforms to WCAG.
 
-## 14. What this framework cannot currently do
+## 15. What this framework cannot currently do
 
 Read this before quoting a result.
 

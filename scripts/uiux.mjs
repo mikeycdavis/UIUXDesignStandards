@@ -46,6 +46,7 @@ import { readFile, stat } from "node:fs/promises";
 import path from "node:path";
 import process from "node:process";
 import { fileURLToPath } from "node:url";
+import { resolveVersionIdentity } from "./version-identity.mjs";
 import { loadCatalog, assertBindings, coverage, CatalogError } from "./catalog.mjs";
 import { evaluate, envelope } from "./compliance.mjs";
 import {
@@ -63,6 +64,13 @@ import { runCli as runInit } from "./init.mjs";
 const EXIT_OK = 0;
 const EXIT_FINDINGS = 1;
 const EXIT_INVOCATION = 2;
+
+/**
+ * The framework root — the checkout whose rules are about to run. Resolved from this file rather than
+ * from the working directory, because the working directory is the CONSUMER and the two are only the
+ * same repository while the framework is its own only consumer.
+ */
+const FRAMEWORK_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const SCHEMA = path.join(ROOT, "schemas/project-policy.schema.json");
@@ -1184,7 +1192,26 @@ export class ValidationError extends Error {}
  * reason the classifier's non-execution envelope carries no classification. There must be nothing
  * there for a consumer to misread as a result.
  */
-export async function runValidate(target, { maxFiles = MAX_FILES, today = null, evidencePath = null } = {}) {
+/**
+ * `allowUnreleasedFramework` exists for this repository's own suite and is deliberately UNREACHABLE
+ * FROM THE CLI — there is no flag and no environment variable for it, and a test asserts that.
+ *
+ * The suite is the framework's first real consumer: it builds throwaway projects that pin a version
+ * and evaluates them with the working tree, which between releases is that version plus unreleased
+ * commits. That is precisely the state the guard refuses, and the guard is right to — a verdict
+ * labelled 1.0.0 produced by 1.0.0-plus-changes misstates its provenance whether the consumer is a
+ * real repository or a temporary directory.
+ *
+ * So the escape is an argument at each call site rather than a switch somebody can set once. A CLI
+ * flag would end up pasted into a workflow and never removed; an environment variable would be worse,
+ * because it would be invisible in the run that used it. Passing this from library code is a choice a
+ * caller makes in source, in view of a reviewer. The identity block still records what actually ran,
+ * so even a permitted run cannot claim MATCH.
+ */
+export async function runValidate(
+  target,
+  { maxFiles = MAX_FILES, today = null, evidencePath = null, allowUnreleasedFramework = false } = {},
+) {
   const catalog = await loadCatalog();
   assertBindings(catalog, DETECTOR_RULES.concat(["evidence.surfaces-declared"]));
 
@@ -1216,6 +1243,33 @@ export async function runValidate(target, { maxFiles = MAX_FILES, today = null, 
     );
   }
   const policy = policyResult.document ?? null;
+
+  // ---- Gate 0b — version identity ---------------------------------------------------------------
+  //
+  // Between "is this policy valid?" and "does this project have a UI?" sits a question neither
+  // answers: is the framework about to evaluate this project the one the policy asked for? A pinned
+  // `standardVersion` and a checked-out framework ref are independent, and when they disagree the
+  // envelope would carry a version beside a verdict that version never produced.
+  //
+  // This runs BEFORE Gate 1, so a mismatch reaches no classifier and no rule. It is a
+  // configuration/evaluation-identity failure, never NON_COMPLIANT: nothing has established that the
+  // project violates anything, only that this run cannot truthfully issue the verdict it was asked
+  // for. `ValidationError` carries that to exit 2, and no envelope is emitted — an envelope carries a
+  // `status`, and that status is exactly the claim being refused.
+  const identity = resolveVersionIdentity(policy?.standardVersion ?? null, FRAMEWORK_ROOT, { target });
+  // A permitted unreleased run is still recorded as one. `allowUnreleasedFramework` waives the
+  // REFUSAL, never the finding — the envelope keeps `EXECUTED_TREE_IS_NOT_THE_RELEASE`, so nothing
+  // downstream can read the result as having been produced by the release it names.
+  const waived = allowUnreleasedFramework && identity.identity === "EXECUTED_TREE_IS_NOT_THE_RELEASE";
+  if (identity.blocking && !waived) {
+    throw new ValidationError(
+      `${identity.identity}\n  ${identity.reason}\n\n` +
+        `  Resolving a historical rule set is not implemented, so this run cannot evaluate ` +
+        `${identity.declaredVersion}.\n  Either execute the framework at ${identity.declaredVersion} — ` +
+        `check out the immutable tag, not a branch — or update\n  project-policy.yml deliberately and review ` +
+        `what the different rule set reports. Changing the governing\n  version is an engineering event, not a default.`,
+    );
+  }
 
   // ---- Gate 1 — applicability -------------------------------------------------------------------
   let applicability;
@@ -1315,6 +1369,7 @@ export async function runValidate(target, { maxFiles = MAX_FILES, today = null, 
       totalStandards: 40,
     }),
     evidenceSurface,
+    versionIdentity: identity,
   });
 
   return {
@@ -1564,7 +1619,15 @@ function parseArgs(argv) {
 
 export async function runCli(
   argv,
-  { write = (s) => process.stdout.write(s), fail = (s) => process.stderr.write(s) } = {},
+  {
+    write = (s) => process.stdout.write(s),
+    fail = (s) => process.stderr.write(s),
+    // Not parsed from `argv`, and never passed by `main()` below — see runValidate's note. A caller
+    // holding a reference to this function can waive the unreleased-framework refusal; a caller
+    // holding a shell cannot, which is the boundary that matters, because the shell is where a
+    // workflow lives.
+    allowUnreleasedFramework = false,
+  } = {},
 ) {
   const [command, ...rest] = argv;
 
@@ -1630,7 +1693,7 @@ export async function runCli(
 
   let result;
   try {
-    result = await runValidate(options.target, { evidencePath: options.evidence });
+    result = await runValidate(options.target, { evidencePath: options.evidence, allowUnreleasedFramework });
   } catch (error) {
     if (error instanceof EvidenceError) {
       fail(
