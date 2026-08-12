@@ -88,6 +88,50 @@ required. Establishing that is `16-portfolio-integration.md`.
   ```
 - **Dependencies:** the reusable workflow.
 
+### Phase 13A — external distribution canary
+
+- **Status:** `READY` — unblocked by publishing the section-13 development commit
+- **Purpose:** Establish that the distribution boundary works, using the one outcome that is honestly
+  available before the next release: a **refusal**.
+- **Deliverables:** a genuinely separate repository invoking the reusable workflow **pinned to an
+  exact development sha**, never to `main`, with a policy declaring `1.0.0`. The expected and correct
+  result is `EXECUTED_TREE_IS_NOT_THE_RELEASE`, exit 2, no compliance envelope.
+- **Acceptance Criteria:** seven things no in-repository test can establish —
+  1. GitHub can invoke the reusable workflow across repositories at all.
+  2. The standards checkout carries enough history for tags to resolve.
+  3. The consumer's policy reaches the framework.
+  4. The framework identifies its exact executing commit.
+  5. The machine-readable identity error survives the workflow boundary intact.
+  6. A workflow pinned to unreleased code cannot masquerade as the last release.
+  7. No compliance envelope is manufactured after an identity failure.
+- **Verification:** the canary run's `validate.err` names `EXECUTED_TREE_IS_NOT_THE_RELEASE`, and the
+  uploaded `envelope.json` contains no `status`.
+- **Dependencies:** publication of the section-13 development commit.
+- **Naming:** this is an *external distribution canary*, never "successful adoption". A pass here is
+  a proven refusal.
+
+### Phase 13B — first successful external consumer
+
+- **Status:** `BLOCKED` — on `v2.0.0` existing (ADR 0017). Recorded as blocked rather than pending,
+  because the work is not waiting on effort.
+- **Purpose:** Prove that the reusable workflow can be consumed as an immutable released dependency.
+- **Deliverables:** the same external consumer, switched to `@v2.0.0` with `standardVersion: "2.0.0"`,
+  reaching `identity: MATCH`, `executedTree: RELEASE_TREE`, Gate 1, and a real verdict. Then both
+  negative controls repeated against the *released* workflow rather than a branch: a policy naming
+  `1.0.0` against `@v2.0.0` → `VERSION_MISMATCH`; a post-2.0.0 development sha against a policy naming
+  `2.0.0` → `EXECUTED_TREE_IS_NOT_THE_RELEASE`.
+- **Acceptance Criteria:**
+  - The positive case runs against a tag, not a branch.
+  - Both negative controls use real published artifacts on both sides.
+- **Dependencies:** `v2.0.0`, which requires generalising the v1.0.0-specific release machinery and
+  promoting the identity block to a versioned contract.
+
+**Why this is two items and not one.** There is no honest ref today that can both expose the new
+workflow and produce a `MATCH` for a released version: `v1.0.0` contains neither the guard nor the
+workflow, and the tree that contains them correctly refuses to be called `1.0.0`. A single status
+would have to describe both a proven transport boundary and an unproven released consumption, and
+"partially complete" reads as "mostly working".
+
 ---
 
 ## Gotchas this section discovered
@@ -116,6 +160,13 @@ tree, which is the refusable state again. The waiver is an argument in library c
 into a workflow and never removed, and an environment variable would be invisible in the run that
 used it. The waiver suppresses the refusal and never the finding — the envelope still records
 `EXECUTED_TREE_IS_NOT_THE_RELEASE`.
+
+**The milestone that was supposed to prove this section was circular, and the circularity is the
+finding.** The plan called for proving the reusable workflow against the published `v1.0.0` artifact.
+`v1.0.0` predates both the workflow and the guard, and the tree that has them refuses to impersonate
+`v1.0.0` — which is the guard working, not a defect. The only ways out were to weaken the guard, to
+manufacture a tag, or to split the milestone; the first two are the failure modes this repository
+exists to refuse. ADR 0017 splits it, and records that the resolution never involved an escape hatch.
 
 **A shallow checkout has no tags, so the workflow sets `fetch-depth: 0`.** Without it the guard
 resolves `UNVERIFIED` on every run — not a false pass, but a permanently unanswered question, which

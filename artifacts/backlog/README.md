@@ -5,10 +5,10 @@
 Work on this project classified with the Extended Agile Hierarchy. Every item is a file in
 [`items/`](./items/); its YAML frontmatter is the source of truth and this page is derived from it.
 
-**14 of 17 leaf items complete — 82%**
+**13 of 17 leaf items complete — 76%**
 
 ```
-█████████████████████████████████░░░░░░░  82%
+██████████████████████████████░░░░░░░░░░  76%
 ```
 
 ## Status
@@ -17,9 +17,10 @@ Work on this project classified with the Extended Agile Hierarchy. Every item is
 | --- | ---: |
 | ○ Not started | 3 |
 | ◔ Ready | 2 |
-| ◑ In progress | 3 |
-| ● Complete | 17 |
-| **Total** | **25** |
+| ◑ In progress | 4 |
+| ◒ Blocked | 1 |
+| ● Complete | 16 |
+| **Total** | **26** |
 
 ## The hierarchy
 
@@ -29,19 +30,21 @@ Work on this project classified with the Extended Agile Hierarchy. Every item is
 | Initiative | `IN-` | 2 | What outcome are we pursuing there? |
 | Epic | `EP-` | 5 | What large body of work delivers it? |
 | Feature | `FE-` | 17 | What shippable slice of that epic? |
-| Story | `ST-` | 0 | What user-visible change, roughly one PR? |
+| Story | `ST-` | 1 | What user-visible change, roughly one PR? |
 | Task | `TA-` | 0 | What technical step inside a story? |
 
 ## Progress by theme
 
 | Theme | Progress | Done | Remaining |
 | --- | --- | ---: | ---: |
-| [TH-01 Enforceable UI/UX design standards](./items/TH-01.md) | `███████████░░░` 82% | 14 | 3 |
+| [TH-01 Enforceable UI/UX design standards](./items/TH-01.md) | `███████████░░░` 76% | 13 | 4 |
 
 ## In flight
 
 - ◑ [EP-04](./items/EP-04.md) — Assurance, documentation, and release
+- ◑ [FE-14](./items/FE-14.md) — Version identity and reusable workflow (13A transport)
 - ◑ [IN-01](./items/IN-01.md) — A releasable v1.0.0 framework
+- ◒ [ST-01](./items/ST-01.md) — First successful external consumption of a released pack
 - ◑ [TH-01](./items/TH-01.md) — Enforceable UI/UX design standards
 
 ## Ready to pick up
@@ -51,7 +54,7 @@ Work on this project classified with the Extended Agile Hierarchy. Every item is
 
 ## Everything
 
-- ◑ **[TH-01](./items/TH-01.md)** Enforceable UI/UX design standards _(14/17)_
+- ◑ **[TH-01](./items/TH-01.md)** Enforceable UI/UX design standards _(13/17)_
   - ◑ **[IN-01](./items/IN-01.md)** A releasable v1.0.0 framework _(13/13)_
     - ● **[EP-01](./items/EP-01.md)** Normative corpus and frozen rule identity _(4/4)_
       - ● **[FE-01](./items/FE-01.md)** Process bootstrap
@@ -70,9 +73,10 @@ Work on this project classified with the Extended Agile Hierarchy. Every item is
       - ● **[FE-11](./items/FE-11.md)** Invariant registry and falsifier harness
       - ● **[FE-12](./items/FE-12.md)** CI and documentation
       - ● **[FE-13](./items/FE-13.md)** Release readiness and v1.0.0
-  - ◔ **[IN-02](./items/IN-02.md)** Adoption beyond v1.0.0 _(1/4)_
-    - ◔ **[EP-05](./items/EP-05.md)** Deferred adoption work _(1/4)_
-      - ● **[FE-14](./items/FE-14.md)** Version identity and reusable workflow
+  - ◔ **[IN-02](./items/IN-02.md)** Adoption beyond v1.0.0 _(0/4)_
+    - ◔ **[EP-05](./items/EP-05.md)** Deferred adoption work _(0/4)_
+      - ◑ **[FE-14](./items/FE-14.md)** Version identity and reusable workflow (13A transport) _(0/1)_
+        - ◒ **[ST-01](./items/ST-01.md)** First successful external consumption of a released pack
       - ○ **[FE-15](./items/FE-15.md)** Real-project dogfood
       - ○ **[FE-16](./items/FE-16.md)** Browser-evidence producer
       - ○ **[FE-17](./items/FE-17.md)** Portfolio integration

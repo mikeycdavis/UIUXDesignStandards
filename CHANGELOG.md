@@ -10,7 +10,16 @@ about what adopting the new version obliges a consumer to do:
 | Removing a rule alias | MAJOR | A policy naming that alias stops resolving |
 | Deprecating a rule (lifecycle metadata only) | MINOR | The rule still resolves and still evaluates |
 | Strengthening a detector so it finds more instances of the same rule | MINOR | The rule did not change; the coverage of it did |
+| A change to what an existing command accepts or refuses | MAJOR | An invocation that produced a verdict may now produce none |
+| A new command, flag, or output field that nothing depended on | MINOR | Additive; no existing invocation changes behaviour |
 | Prose clarification with no rule change | PATCH | Nothing mechanical moved |
+
+The fifth row was added on 2026-08-11 (ADR 0017) because the table only described rule changes, and
+the version-identity guard is a change to what `validate` *does* while every rule stands still. The
+test is not whether anything in the catalog moved: it is whether an existing, valid consumer can get
+a materially different outcome without changing its project. **A bug fix can still be breaking** — the
+argument that the old behaviour never deserved to work is an argument about merit, and the increment
+describes the consequence for adopters instead.
 
 The tooling's version is `package.json`; the envelope's is `schemaVersion`. All three travel
 independently and are checked for internal consistency by `npm run release:readiness`.

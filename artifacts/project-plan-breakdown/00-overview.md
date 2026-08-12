@@ -49,8 +49,8 @@ ran.
 - **Known risks:** the detector set is the least certain part of the plan; false positives are the
   failure mode this family has shipped most often, and no external UI project has exercised these
   detectors yet (see `14-real-project-dogfood.md`).
-- **Known blockers:** none.
-- **Next recommended work:** `14-real-project-dogfood.md`, which needs an owner-nominated target repository.
+- **Known blockers:** plan section 13B — the first successful external consumption of the reusable workflow — is blocked on `v2.0.0` existing. The published `v1.0.0` predates both the workflow and the version-identity guard (ADR 0017).
+- **Next recommended work:** plan section 13A — the external distribution canary — then the v2.0.0 release candidate, which unblocks 13B.
 
 ## Sections
 
@@ -69,7 +69,7 @@ ran.
 | [`10-tests-and-fixtures.md`](10-tests-and-fixtures.md) | Full suite, fixtures, mutation and meta-tests | `COMPLETE` |
 | [`11-ci-and-docs.md`](11-ci-and-docs.md) | CI, README, INSTRUCTIONS, PROJECT, architecture | `COMPLETE` |
 | [`12-release-readiness-and-v1.md`](12-release-readiness-and-v1.md) | Readiness checker, frozen snapshot, tag | `COMPLETE` — v1.0.0 tagged and published |
-| [`13-version-identity-and-reusable-workflow.md`](13-version-identity-and-reusable-workflow.md) | Version-identity guard, reusable workflow | `COMPLETE` |
+| [`13-version-identity-and-reusable-workflow.md`](13-version-identity-and-reusable-workflow.md) | Version-identity guard, reusable workflow | `IN_PROGRESS` — implemented; 13A canary ready, 13B blocked on v2.0.0 |
 | [`14-real-project-dogfood.md`](14-real-project-dogfood.md) | Deferred — needs an owner-nominated target | `NOT_STARTED` |
 | [`15-browser-evidence-producer.md`](15-browser-evidence-producer.md) | Deferred — the runner half of ADR 0002 | `NOT_STARTED` |
 | [`16-portfolio-integration.md`](16-portfolio-integration.md) | Deferred — Orchestrator/Enforcer wiring | `NOT_STARTED` |
@@ -79,7 +79,7 @@ recorded here so that deferral is visible rather than becoming silent scope loss
 
 ## Decisions on record
 
-Sixteen ADRs, all `Accepted`. The four that most constrain later work:
+Seventeen ADRs, all `Accepted`. The four that most constrain later work:
 
 - [ADR 0003](../adr/0003-ui-applicability-is-established-by-evidence-in-this-repository.md) — two-gate
   applicability, classifier in this repository, ships in v1.0.0, three separate envelope blocks.

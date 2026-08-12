@@ -108,6 +108,9 @@ const GAP_POLICY = {
     "shown, so the invariant is defended even though its historical proof is not recoverable.",
 };
 
+/** Compare two semver triples as number arrays. Positive when `a` is the later version. */
+const compareVersions = (a, b) => a[0] - b[0] || a[1] - b[1] || a[2] - b[2];
+
 const read = (root, file) => readFileSync(path.join(root, file), "utf8");
 const has = (root, file) => existsSync(path.join(root, file));
 
@@ -362,14 +365,39 @@ export async function assess(root = ROOT, { runSuite = defaultSuiteRunner } = {}
   try {
     const dir = path.join(root, "artifacts", "project-plan-breakdown");
     const blocked = [];
+    const deferred = [];
+    const releasing = read(root, "VERSION").trim().split(".").map(Number);
     for (const file of readdirSync(dir).filter((f) => f.endsWith(".md"))) {
       const body = readFileSync(path.join(dir, file), "utf8");
       // The status marker, not the word: `**Status:** \`BLOCKED\`` is a status, and a sentence
       // about something having been recorded BLOCKED is a mention. Third time this distinction has
       // mattered, so it is written down rather than rediscovered.
-      if (/\*\*Status:\*\*\s*`BLOCKED`/.test(body)) blocked.push(file);
+      // A BLOCKED item must say what it is blocked ON, and the answer decides whether it is this
+      // release's problem. An item blocked on a FUTURE release is not a carried obligation — it is
+      // work that is not due yet, and failing the release for it makes that release impossible to
+      // cut, which makes the blocked item permanent. That trap is not hypothetical: plan section 13B
+      // is blocked on v2.0.0 existing, so a criterion that failed on any BLOCKED status would have
+      // made v2.0.0 unreleasable forever.
+      //
+      // Fail-closed, and the escape cannot be used to hide finished-looking work: the named version
+      // must be STRICTLY GREATER than the version being released. Blocking on the current or a past
+      // version is an open obligation wearing a forward-looking sentence.
+      for (const match of body.matchAll(/\*\*Status:\*\*\s*`BLOCKED`([^\n]*)/g)) {
+        const on = /\bon\s+`v(\d+)\.(\d+)\.(\d+)`/.exec(match[1]);
+        const future = on && compareVersions(on.slice(1, 4).map(Number), releasing) > 0;
+        (future ? deferred : blocked).push(future ? `${file} (until v${on[1]}.${on[2]}.${on[3]})` : file);
+      }
     }
-    add("obligations.nothing-is-still-blocked", "No plan item is still recorded BLOCKED.", blocked.length === 0 ? SATISFIED : FAILED, blocked.length === 0 ? "no BLOCKED status in the plan breakdown" : `still BLOCKED: ${blocked.join(", ")}`);
+    add(
+      "obligations.nothing-is-still-blocked",
+      "No plan item is blocked on work this release was supposed to contain.",
+      blocked.length === 0 ? SATISFIED : FAILED,
+      blocked.length > 0
+        ? `still BLOCKED: ${blocked.join(", ")}`
+        : deferred.length > 0
+          ? `no obligation of this release is blocked. Blocked on a later release, and therefore not due: ${deferred.join(", ")}`
+          : "no BLOCKED status in the plan breakdown",
+    );
   } catch (error) {
     add("obligations.nothing-is-still-blocked", "No plan item is still recorded BLOCKED.", FAILED, error.message);
   }

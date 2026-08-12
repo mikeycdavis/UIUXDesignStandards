@@ -24,7 +24,7 @@
 
 import { strict as assert } from "node:assert";
 import { test } from "node:test";
-import { cp, mkdtemp, mkdir, rm, symlink, writeFile } from "node:fs/promises";
+import { cp, mkdtemp, mkdir, readFile, rm, symlink, writeFile } from "node:fs/promises";
 import { spawnSync } from "node:child_process";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -267,6 +267,37 @@ test("consumer: THE FALSIFIER — a workflow running main instead of the tag get
     assert.doesNotMatch(run.stdout + run.stderr, /"status"\s*:/, "a verdict was produced by a framework that is not the pinned release");
     assert.match(run.stderr, /EXECUTED_TREE_IS_NOT_THE_RELEASE/);
     assert.match(run.stderr, /not the v1\.0\.0 release/);
+  } finally {
+    await cleanup(framework, consumer);
+  }
+});
+
+test("no command line can weaken the guard", async () => {
+  // The escape hatches this framework must never grow, listed so the absence is asserted rather than
+  // assumed: a flag gets pasted into a workflow and never removed, an environment variable is
+  // invisible in the run that used it, and a policy value would let the subject of the check decide
+  // whether it applies. The only suppression is a function argument, which lives in source where a
+  // reviewer sees it — and it waives the refusal, never the finding.
+  const framework = await frameworkAt("post-release");
+  const consumer = await consumerDeclaring("1.0.0");
+  try {
+    for (const flag of ["--allow-unreleased", "--allow-unreleased-framework", "--ignore-version-identity", "--no-version-identity"]) {
+      const run = validateFrom(framework, consumer, flag);
+      assert.equal(run.code, 2, `${flag} did not exit 2`);
+      assert.match(run.stderr, /unknown flag/, `${flag} was accepted as a flag`);
+    }
+
+    for (const name of ["ALLOW_UNRELEASED", "UIUX_ALLOW_UNRELEASED", "UIUX_STANDARDS_ALLOW_UNRELEASED", "ALLOW_UNRELEASED_FRAMEWORK"]) {
+      const env = { ...process.env, [name]: "true", "1": "true" };
+      delete env.NODE_TEST_CONTEXT;
+      const run = spawnSync(process.execPath, [path.join(framework, "scripts", "uiux.mjs"), "validate", consumer, "--json"], { encoding: "utf8", env });
+      assert.equal(run.status, 2, `${name}=true weakened the guard`);
+      assert.match(run.stderr, /EXECUTED_TREE_IS_NOT_THE_RELEASE/);
+    }
+
+    // And the source itself reads no environment variable on this path.
+    const source = await readFile(path.join(ROOT, "scripts", "version-identity.mjs"), "utf8");
+    assert.doesNotMatch(source, /process\.env/, "version identity must not be configurable by the environment");
   } finally {
     await cleanup(framework, consumer);
   }

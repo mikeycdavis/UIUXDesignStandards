@@ -164,6 +164,36 @@ test("a changelog naming a different version from VERSION fails the release", as
   assert.equal(assessment.verdict, "NOT_READY");
 });
 
+test("an obligation blocked on a LATER release is not due, and does not fail this one", async () => {
+  // The trap this avoids: plan section 13B is blocked on v2.0.0 existing. A criterion that failed on
+  // any BLOCKED status would have made v2.0.0 unreleasable, which would make the blocked item
+  // permanent — a gate that guarantees the thing it is waiting for can never arrive.
+  const assessment = await assessWith(async (dir) => {
+    await edit(dir, "artifacts/project-plan-breakdown/11-ci-and-docs.md", (body) =>
+      body.replace("**Status:** `COMPLETE`", "**Status:** `BLOCKED` — on `v9.9.9` existing"),
+    );
+  });
+  const obligations = assessment.byId.get("obligations.nothing-is-still-blocked");
+  assert.equal(obligations.state, "SATISFIED");
+  assert.match(obligations.detail, /not due/, "a deferred obligation must still be named, not hidden");
+  assert.match(obligations.detail, /v9\.9\.9/);
+});
+
+test("blocking on the version being released, or an earlier one, is an open obligation", async () => {
+  // The escape is fail-closed on purpose: a forward-looking sentence must name a version that has
+  // not happened. Blocking on the current release would let any item defer itself forever.
+  for (const on of ["v1.0.0", "v0.9.0"]) {
+    const assessment = await assessWith(async (dir) => {
+      await edit(dir, "artifacts/project-plan-breakdown/11-ci-and-docs.md", (body) =>
+        body.replace("**Status:** `COMPLETE`", `**Status:** \`BLOCKED\` — on \`${on}\` existing`),
+      );
+    });
+    const obligations = assessment.byId.get("obligations.nothing-is-still-blocked");
+    assert.equal(obligations.state, "FAILED", `blocking on ${on} was accepted as not-yet-due`);
+    assert.equal(assessment.verdict, "NOT_READY");
+  }
+});
+
 test("a carried obligation still recorded BLOCKED fails the release", async () => {
   const assessment = await assessWith(async (dir) => {
     await edit(dir, "artifacts/project-plan-breakdown/11-ci-and-docs.md", (body) =>
