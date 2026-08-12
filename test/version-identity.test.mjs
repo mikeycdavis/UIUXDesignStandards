@@ -24,7 +24,7 @@
 
 import { strict as assert } from "node:assert";
 import { test } from "node:test";
-import { cp, mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
+import { cp, mkdtemp, mkdir, rm, symlink, writeFile } from "node:fs/promises";
 import { spawnSync } from "node:child_process";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -173,6 +173,41 @@ test("the framework evaluating its own tree is a state of its own, established b
     assert.equal(resolveVersionIdentity("1.0.0", framework, { target: other }).identity, "EXECUTED_TREE_IS_NOT_THE_RELEASE");
   } finally {
     await cleanup(framework, other);
+  }
+});
+
+test("a link into the framework tree does not make a consumer part of it", async (t) => {
+  // Containment is the one branch that waives the version guard, and in the reusable workflow the
+  // framework is checked out UNDERNEATH the consumer with a consumer-supplied target path. Deciding
+  // containment on normalised strings rather than canonical real paths would let a symlink or a
+  // Windows junction choose which framework a verdict claims to come from.
+  const framework = await frameworkAt("post-release");
+  const consumer = await consumerDeclaring("1.0.0");
+  try {
+    const link = path.join(framework, "inside-me");
+    try {
+      await symlink(consumer, link, "junction");
+    } catch {
+      t.skip("this platform does not permit creating links without elevation");
+      return;
+    }
+    // By string, `<framework>/inside-me` is inside the framework. By real path it is the consumer.
+    assert.ok(path.resolve(link).startsWith(path.resolve(framework)), "the string form must look contained, or this proves nothing");
+    const identity = resolveVersionIdentity("1.0.0", framework, { target: link });
+    assert.equal(identity.identity, "EXECUTED_TREE_IS_NOT_THE_RELEASE", "a link was accepted as self-evaluation");
+    assert.equal(identity.blocking, true);
+  } finally {
+    await cleanup(framework, consumer);
+  }
+});
+
+test("a target that cannot be canonicalised is not contained", async () => {
+  const framework = await frameworkAt("post-release");
+  try {
+    const identity = resolveVersionIdentity("1.0.0", framework, { target: path.join(framework, "does-not-exist") });
+    assert.notEqual(identity.identity, "SELF_EVALUATION", "an unresolvable path was answered optimistically");
+  } finally {
+    await cleanup(framework);
   }
 });
 

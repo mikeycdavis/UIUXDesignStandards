@@ -38,10 +38,40 @@
  */
 
 import { spawnSync } from "node:child_process";
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, readFileSync, realpathSync } from "node:fs";
 import path from "node:path";
 
 export const PACK = "UIUXDesignStandards";
+
+/**
+ * Is `inner` the same directory as `outer`, or inside it — decided on CANONICAL REAL PATHS.
+ *
+ * `path.resolve` normalises a string. It does not follow a symlink or a Windows junction, so
+ * `<framework>/link → <consumer>` resolves to a path that merely *looks* contained. Containment is
+ * the self-evaluation trust boundary — the one branch that waives the version guard — and the
+ * framework checkout lives underneath the consumer checkout in the reusable workflow, where
+ * `target-path` is consumer-controlled input. Deciding that on raw strings would let a link decide
+ * which framework a verdict claims to come from.
+ *
+ * `realpathSync` resolves links on both platforms. A path that cannot be canonicalised is NOT
+ * contained: an unresolvable target is an unanswered question, and this is the wrong branch to
+ * answer one optimistically. The remaining case is a link created between this check and the read,
+ * which no userland check can close; it is out of scope here and named rather than implied away.
+ */
+function contains(outer, inner) {
+  let from;
+  let to;
+  try {
+    from = realpathSync(path.resolve(outer));
+    to = realpathSync(path.resolve(inner));
+  } catch {
+    return false;
+  }
+  const relative = path.relative(from, to);
+  // "" is the same directory. Anything starting `..` escapes it, and an absolute result means the
+  // two are not comparable at all — a different drive on Windows.
+  return relative === "" || (!relative.startsWith("..") && !path.isAbsolute(relative));
+}
 
 /**
  * Where a tree stands relative to the release its version names. See ADR 0015 — equality
@@ -130,11 +160,6 @@ export function resolveVersionIdentity(declaredVersion, frameworkRoot, { target 
    * framework and never reaches this branch. The reverse — a project placed inside a framework
    * checkout — is not a distribution arrangement; it is one working copy.
    */
-  const contains = (outer, inner) => {
-    const from = path.resolve(outer);
-    const to = path.resolve(inner);
-    return to === from || to.startsWith(from + path.sep);
-  };
   const selfEvaluation = target !== null && contains(frameworkRoot, target);
 
   if (!executedVersion) {
