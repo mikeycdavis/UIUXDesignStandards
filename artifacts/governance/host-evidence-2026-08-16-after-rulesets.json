@@ -1,0 +1,110 @@
+{
+  "state": "GOVERNED",
+  "controls": [
+    {
+      "id": "main.pr_required",
+      "title": "Changes to main arrive by pull request",
+      "required": true,
+      "result": "SATISFIED",
+      "evidenceRead": true,
+      "source": "rulesets"
+    },
+    {
+      "id": "main.standards_check_required",
+      "title": "The hosted `standards` check is required, on the commit being merged",
+      "required": true,
+      "result": "SATISFIED",
+      "evidenceRead": true,
+      "source": "rulesets"
+    },
+    {
+      "id": "main.force_push_prohibited",
+      "title": "Force pushes to main are prohibited",
+      "required": true,
+      "result": "SATISFIED",
+      "evidenceRead": true,
+      "source": "rulesets"
+    },
+    {
+      "id": "main.deletion_prohibited",
+      "title": "Deletion of main is prohibited",
+      "required": true,
+      "result": "SATISFIED",
+      "evidenceRead": true,
+      "source": "rulesets"
+    },
+    {
+      "id": "tags.v_star_immutable",
+      "title": "Published `v*` tags cannot be updated or deleted",
+      "required": true,
+      "result": "SATISFIED",
+      "evidenceRead": true,
+      "source": "rulesets"
+    },
+    {
+      "id": "bypass.policy",
+      "title": "No routine bypass; any emergency bypass is observable",
+      "required": true,
+      "result": "SATISFIED",
+      "evidenceRead": true,
+      "source": "rulesets"
+    },
+    {
+      "id": "main.review_required",
+      "title": "At least one approving review before merge",
+      "required": false,
+      "result": "ABSENT",
+      "evidenceRead": true,
+      "source": "branch-protection + rulesets"
+    }
+  ],
+  "missing": [],
+  "unreadable": [],
+  "absent": [],
+  "reason": "all 6 required controls were read and established",
+  "observations": [
+    {
+      "id": "main.pr_required",
+      "result": "SATISFIED",
+      "evidenceRead": true,
+      "source": "rulesets"
+    },
+    {
+      "id": "main.standards_check_required",
+      "result": "SATISFIED",
+      "evidenceRead": true,
+      "source": "rulesets"
+    },
+    {
+      "id": "main.force_push_prohibited",
+      "result": "SATISFIED",
+      "evidenceRead": true,
+      "source": "rulesets"
+    },
+    {
+      "id": "main.deletion_prohibited",
+      "result": "SATISFIED",
+      "evidenceRead": true,
+      "source": "rulesets"
+    },
+    {
+      "id": "tags.v_star_immutable",
+      "result": "SATISFIED",
+      "evidenceRead": true,
+      "source": "rulesets"
+    },
+    {
+      "id": "bypass.policy",
+      "result": "SATISFIED",
+      "evidenceRead": true,
+      "source": "rulesets"
+    },
+    {
+      "id": "main.review_required",
+      "result": "ABSENT",
+      "evidenceRead": true,
+      "source": "branch-protection + rulesets"
+    }
+  ],
+  "readAt": "2026-08-16T18:31:24.483Z"
+}

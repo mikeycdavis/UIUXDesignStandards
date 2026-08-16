@@ -46,7 +46,7 @@ and record their provenance in their headers (ADR 0001).
 ## Commands
 
 ```bash
-npm test                    # the full suite, including 25 architectural falsifiers (~85s)
+npm test                    # the full suite, including 29 architectural falsifiers (~85s)
 ```
 
 | | |

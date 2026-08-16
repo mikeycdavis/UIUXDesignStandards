@@ -3,7 +3,9 @@
   "version": "1.0.0",
   "description": "Numbered UI/UX/design standards, the rule catalog they bind to, and the commands that establish whether they apply to a repository and whether that repository satisfies them.",
   "type": "module",
-  "bin": { "uiux-standards": "scripts/uiux.mjs" },
+  "bin": {
+    "uiux-standards": "scripts/uiux.mjs"
+  },
   "scripts": {
     "test": "node --test test/*.test.mjs",
     "audit": "node scripts/uiux.mjs audit .",
@@ -19,9 +21,14 @@
     "diagrams": "node scripts/diagrams.mjs",
     "release:readiness": "node scripts/release-readiness.mjs",
     "ci": "node scripts/ci.mjs",
-    "submit-pr": "node scripts/submit-pr.mjs"
+    "submit-pr": "node scripts/submit-pr.mjs",
+    "governance": "node scripts/host-evidence.mjs",
+    "governance:drift": "node scripts/governance-drift.mjs",
+    "governance:baseline": "node scripts/governance-drift.mjs --record"
   },
-  "engines": { "node": ">=18" },
+  "engines": {
+    "node": ">=18"
+  },
   "license": "UNLICENSED",
   "private": true
 }

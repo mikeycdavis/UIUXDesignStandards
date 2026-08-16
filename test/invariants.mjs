@@ -389,4 +389,61 @@ export const INVARIANTS = [
     ],
     falsifier: "submission.updating-an-existing-pull-request-is-success",
   },
+  {
+    id: "governance.unreadable-is-not-ungoverned",
+    statement:
+      "A host whose controls could not be read is INDETERMINATE, never UNGOVERNED and never GOVERNED. Unreadability " +
+      "outranks absence, because UNGOVERNED is a positive finding about a host that was fully read.",
+    record: { file: "docs/host-enforcement.md", quote: "Unreadability outranks absence" },
+    tests: [
+      "an unreadable required control is INDETERMINATE, never UNGOVERNED",
+      "unreadability outranks absence: one missing and one unreadable is INDETERMINATE",
+      "SATISFIED claimed over a source that was not read is not believed",
+      "an unrecognised result value is treated as unreadable, not as satisfied",
+    ],
+    falsifier: "governance.unreadable-is-not-ungoverned",
+  },
+  {
+    id: "governance.silence-does-not-shrink-the-conjunction",
+    statement:
+      "A required control no observation mentions is unreadable, not skipped. The aggregate is derived from the full " +
+      "contract, so it can never improve because the collector reported less.",
+    record: { file: "docs/host-enforcement.md", quote: "Silence must not shrink the conjunction" },
+    tests: [
+      "a required control nobody reported is INDETERMINATE, not silently dropped",
+      "reporting no observations at all is INDETERMINATE, not GOVERNED",
+      "a control the contract does not define cannot satisfy the contract",
+      "a caller cannot hand in its own aggregate state",
+    ],
+    falsifier: "governance.silence-does-not-shrink-the-conjunction",
+  },
+  {
+    id: "governance.a-regression-is-observed-not-inferred",
+    statement:
+      "Drift detection measures current enforcement. A control that was established and is now absent is reported as " +
+      "drift, and a past successful check run is never evidence that a check is still required.",
+    record: { file: "docs/host-enforcement.md", quote: "the durable claim is that the six controls remain established" },
+    tests: [
+      "the required standards check being removed is DRIFTED, even though the workflow still exists",
+      "a satisfied control becoming absent is DRIFTED",
+      "a bypass actor appearing is DRIFTED",
+      "a satisfied control becoming unreadable is INDETERMINATE, not DRIFTED",
+      "a confirmed regression is not filed under 'could not tell' by an unreadable neighbour",
+    ],
+    falsifier: "governance.a-regression-is-observed-not-inferred",
+  },
+  {
+    id: "governance.the-policy-moving-is-not-the-host-moving",
+    statement:
+      "A change to the required-control set is CONTRACT_CHANGED, never drift. Drift is a claim about the host, and the " +
+      "contract is identified independently of it.",
+    record: { file: "docs/host-enforcement.md", quote: "the policy changed; the host may not have" },
+    tests: [
+      "a changed required-control set is CONTRACT_CHANGED, never drift",
+      "the contract digest covers the required set and ignores everything else",
+      "ruleset id and name may change while the six controls remain satisfied",
+      "no baseline at all is INDETERMINATE, never NO_DRIFT",
+    ],
+    falsifier: "governance.the-policy-moving-is-not-the-host-moving",
+  },
 ];

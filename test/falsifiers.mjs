@@ -220,6 +220,44 @@ export const FALSIFIERS = [
     suite: "test/local-ci.test.mjs",
   },
   {
+    // The state that exists so a failed inspection cannot be read as a finding. Collapsing it into
+    // UNGOVERNED sounds conservative — it reports the less favourable state — and is still the
+    // prohibited move: it claims to know the full set of what is missing on a host it could not read.
+    invariant: "governance.unreadable-is-not-ungoverned",
+    file: "scripts/governance.mjs",
+    find: `  if (unreadable.length > 0) {`,
+    replace: `  if (false) { // falsifier: an unreadable host falls through to a positive finding`,
+    suite: "test/governance.test.mjs",
+  },
+  {
+    // The quiet version of the same disease: a required control nobody reported simply vanishes from
+    // the conjunction, so the aggregate improves as the evidence gets worse.
+    invariant: "governance.silence-does-not-shrink-the-conjunction",
+    file: "scripts/governance.mjs",
+    find: `  for (const id of REQUIRED_IDS) {`,
+    replace: `  for (const id of []) { // falsifier: an unreported control is silently dropped`,
+    suite: "test/governance.test.mjs",
+  },
+  {
+    // A regression that no longer registers as one. The detector still runs, still reads the host,
+    // still prints a state — and never reports that anything was lost.
+    invariant: "governance.a-regression-is-observed-not-inferred",
+    file: "scripts/governance-drift.mjs",
+    find: `    if (now === CONTROL_RESULT.ABSENT) drifted.push(id);`,
+    replace: `    if (false) drifted.push(id); // falsifier: a control that vanished is no longer noticed`,
+    suite: "test/governance-drift.test.mjs",
+  },
+  {
+    // Blame the host for a decision made in this repository: adding a required control would then
+    // read as GitHub having silently dropped one, which is how a real regression gets dismissed as
+    // "oh, that's just the new control".
+    invariant: "governance.the-policy-moving-is-not-the-host-moving",
+    file: "scripts/governance-drift.mjs",
+    find: `  if (baseline.contractDigest !== currentDigest) {`,
+    replace: `  if (false) { // falsifier: a changed contract is compared as though it were the old one`,
+    suite: "test/governance-drift.test.mjs",
+  },
+  {
     invariant: "fixtures.the-known-negative-drawer-is-load-bearing",
     file: "test/fixtures/never-clean",
     replace: null,
