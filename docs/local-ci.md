@@ -382,6 +382,10 @@ Stated rather than left to be discovered:
   it is not mounted, and the test asserts both branches.
 - **Anything requiring the network.** Nothing in the eleven checks does, and the container is not
   given credentials for anything if a future check tried.
+- **The hosting platform's own behaviour under `submit-pr`.** The end-to-end test drives submission
+  against a local bare repository. That proves the sha arithmetic and the refusals; it cannot model
+  a remote that acknowledges a write before a separate read surface reflects it, and it cannot model
+  a pull request that already exists. See *The real host is a test surface of its own*, below.
 
 ### Four defects this arrangement found on its first runs
 
@@ -407,6 +411,43 @@ None of the four was a failure of the checks. All four were failures of the *onl
 ever run*, which is the thing a container is for. Two of them — 2 and 3 — were the same one-line
 assumption about which reporter Node's test runner defaults to, in two files, and both had been
 sitting behind a green local build.
+
+### The real host is a test surface of its own
+
+Three further defects appeared later, in `submit-pr`, and they are a different kind. The four above
+were found by running the checks somewhere new. These were found by *publishing for real* — none of
+them could occur against the local bare repository the end-to-end test uses as its remote.
+
+1. **The container was asked what it was named, never what it held.** Found by review, not by running.
+   Recorded here because the fix — [the fourth comparison](#why-the-fourth-comparison-exists) — is the
+   one that makes the other two worth having.
+2. **A wholly successful submission exited 1.** `gh pr create` fails when the pull request already
+   exists, and the second real submission was an update, not an opening. The local remote is a bare
+   repository with no pull requests, so no local run could ever reach that state.
+3. **A correct check refused a correct submission.** The push reported its update and succeeded; the
+   pull-request read immediately after still named the previous head. GitHub had acknowledged a write
+   that a separate read surface had not yet caught up with. Seconds later both agreed.
+
+The generalisation, which is not GitHub-specific and belongs to any repository reusing this pattern:
+
+> **A publication workflow is not fully verified against a local fake remote.** Its first interaction
+> with the real hosting system is itself an integration test. A real host can acknowledge a write
+> before a separate read surface reflects it, and it distinguishes success states — created versus
+> updated, open versus closed, mergeable versus blocked — that a local Git server does not model at
+> all. A local remote proves the arithmetic. It cannot prove the protocol.
+
+The correction for the third defect is worth stating precisely, because it looks like a relaxation and
+is not. Confirmation became a bounded wait rather than a single read, but the target never moves: only
+the verified commit is ever accepted. A head that settles on some *other* commit — someone else pushed
+— never matches however long it is watched; exhausting the attempts is a refusal; an unreadable head is
+a refusal. Waiting is granted to the evidence surface to converge, never to the answer to change. The
+distinction between those two is the whole difference between a bounded wait and retrying until the
+remote says something agreeable.
+
+What this costs a reusing repository is one honest caveat: the first real submission is not covered by
+the local gate, and should be treated as an observation to check rather than a formality. Its outcome —
+which pull request, which head, which typed result — is written to `artifacts/local-ci/submission.json`
+precisely so that it can be checked against the host afterwards rather than trusted.
 
 ---
 
