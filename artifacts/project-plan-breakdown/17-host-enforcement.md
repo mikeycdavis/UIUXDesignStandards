@@ -148,16 +148,35 @@ repository that is not yet governed.
 
 ### Negative controls proving the settings cannot silently drift
 
-- **Status:** `NOT_STARTED` (D1-F)
+- **Status:** `COMPLETE` — 2026-08-16 (D1-F)
 - **Purpose:** A control that was true once is not a control that is true now. Host state changes
   without any repository changing, which is the property that makes it unlike everything else this
   framework verifies.
-- **Deliverables:** governance observations carrying the time they were read, and a check that fails
-  when a required control has silently reverted.
+- **Deliverables:** [scripts/governance-drift.mjs](../../scripts/governance-drift.mjs),
+  `npm run governance:drift` and `npm run governance:baseline`, over the semantic baseline at
+  [artifacts/governance/baseline.json](../governance/baseline.json). Four outcomes: `NO_DRIFT`,
+  `DRIFTED`, `INDETERMINATE`, `CONTRACT_CHANGED`. It is not a second governance evaluator — it
+  consumes the same `CONTROLS` and the same collector, and pins no ruleset id, name, or JSON shape,
+  because the durable claim is the control rather than the identifier GitHub assigned it.
 - **Acceptance Criteria:**
-  - Removing any single required control from the host flips the aggregate away from `GOVERNED`.
-  - A stale reading is distinguishable from a fresh one, since host facts expire in a way file facts
-    do not.
+  - A required control that was `SATISFIED` and is now `ABSENT` is `DRIFTED`; one that became
+    `UNREADABLE` is `INDETERMINATE`, since a failed read is not evidence that anything changed.
+  - A change to the required-control set is `CONTRACT_CHANGED`, never drift. The policy moved; the
+    host may not have.
+  - A change in the deferred review control is reported and never causes drift.
+  - Recreating an equivalent ruleset under a new id or name is `NO_DRIFT`.
+  - The baseline stores normalized control results, never raw API bodies, so a field GitHub adds
+    later cannot manufacture drift no control experienced.
+- **Verification:**
+  ```bash
+  node --test test/governance-drift.test.mjs    # → 13 pass
+  npm run governance:drift                      # → NO_DRIFT, exit 0
+  ```
+- **Exit semantics, deliberately unlike the collector's:** the collector reports state and exits 0 for
+  all three, because reporting is its job. This command is asked whether governance *remains*
+  established, so it uses the exit triple — 0 established, 1 regressed, 2 no verdict reached. That is
+  a new enforcement decision belonging to this command; it was not smuggled into the collector, and
+  the command is **not** part of the container gate, which has no network by construction.
 - **Dependencies:** the re-read.
 
 ---

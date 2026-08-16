@@ -239,6 +239,25 @@ export const FALSIFIERS = [
     suite: "test/governance.test.mjs",
   },
   {
+    // A regression that no longer registers as one. The detector still runs, still reads the host,
+    // still prints a state — and never reports that anything was lost.
+    invariant: "governance.a-regression-is-observed-not-inferred",
+    file: "scripts/governance-drift.mjs",
+    find: `    if (now === CONTROL_RESULT.ABSENT) drifted.push(id);`,
+    replace: `    if (false) drifted.push(id); // falsifier: a control that vanished is no longer noticed`,
+    suite: "test/governance-drift.test.mjs",
+  },
+  {
+    // Blame the host for a decision made in this repository: adding a required control would then
+    // read as GitHub having silently dropped one, which is how a real regression gets dismissed as
+    // "oh, that's just the new control".
+    invariant: "governance.the-policy-moving-is-not-the-host-moving",
+    file: "scripts/governance-drift.mjs",
+    find: `  if (baseline.contractDigest !== currentDigest) {`,
+    replace: `  if (false) { // falsifier: a changed contract is compared as though it were the old one`,
+    suite: "test/governance-drift.test.mjs",
+  },
+  {
     invariant: "fixtures.the-known-negative-drawer-is-load-bearing",
     file: "test/fixtures/never-clean",
     replace: null,

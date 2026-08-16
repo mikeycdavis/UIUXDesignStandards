@@ -148,7 +148,57 @@ the deferred control is still read and still reported.
 
 ---
 
-## 6. What this document does not establish
+## 6. Drift: a control that was true once
+
+Host facts are unlike every other fact this framework verifies. They change with no commit, no author,
+and no diff — so a governance result is true *as of when it was read*, and nothing in the repository
+records its expiry. `npm run governance:drift` compares a recorded baseline against a fresh reading.
+
+It consumes the same contract and the same collector, and deliberately pins no ruleset id, name, or
+JSON shape: the durable claim is that the six controls remain established, not that a ruleset keeps
+the identifier GitHub happened to assign it. A detector pinned to an id would cry drift the day
+someone recreated an equivalent ruleset, and stay silent the day its rules were emptied.
+
+Four outcomes:
+
+```text
+NO_DRIFT           every required control remains SATISFIED
+DRIFTED            evidence was readable, and a satisfied control is now ABSENT
+INDETERMINATE      current host evidence cannot establish the controls
+CONTRACT_CHANGED   the required-control set itself changed since the baseline
+```
+
+`CONTRACT_CHANGED` exists because **the policy changed; the host may not have**. Comparing a
+seven-control contract against a six-control baseline and calling the difference drift would blame
+GitHub for a decision made in this repository — and, worse, would teach a reader to dismiss real
+regressions as "just the new control". The contract digest covers the sorted required-control ids and
+nothing else, so prose edits do not move it and promoting a deferred control does.
+
+The baseline stores normalized control results rather than raw API bodies. Keeping GitHub's responses
+would let a renamed node id or a property added next quarter manufacture drift no control experienced.
+
+### The one case the four-state model left open
+
+`DRIFTED` outranks `INDETERMINATE` here — the reverse of the precedence in §3, where unreadability
+outranks absence. The two questions are not the same one. There, `UNGOVERNED` is a claim about the
+complete set of what is missing, which a partial read cannot support. Here, a control observed to have
+regressed is established evidence, and one unreadable neighbour does not unestablish it. Filing a
+confirmed regression under "could not tell" would convert a known bad into an unknown. Both lists are
+reported either way, so the headline never hides the remainder.
+
+### Exit codes, and why they differ from the collector's
+
+The collector exits 0 for all three states because reporting is its job. The drift command is asked
+whether governance *remains* established, so it answers with the exit triple: 0 established, 1 it ran
+and governance regressed, 2 no verdict reached. That is a deliberate enforcement decision belonging to
+this command, and it was not smuggled into the collector.
+
+It is **not** part of the container gate, which has no network by construction. Whether a governance
+regression should fail CI is a separate decision, not yet taken.
+
+---
+
+## 7. What this document does not establish
 
 It defines the contract, and `npm run governance` collects against it — read-only, using the
 developer's existing `gh` session, storing no token anywhere. Reporting is not gating: `UNGOVERNED`

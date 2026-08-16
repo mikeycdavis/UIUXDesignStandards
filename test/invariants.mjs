@@ -417,4 +417,33 @@ export const INVARIANTS = [
     ],
     falsifier: "governance.silence-does-not-shrink-the-conjunction",
   },
+  {
+    id: "governance.a-regression-is-observed-not-inferred",
+    statement:
+      "Drift detection measures current enforcement. A control that was established and is now absent is reported as " +
+      "drift, and a past successful check run is never evidence that a check is still required.",
+    record: { file: "docs/host-enforcement.md", quote: "the durable claim is that the six controls remain established" },
+    tests: [
+      "the required standards check being removed is DRIFTED, even though the workflow still exists",
+      "a satisfied control becoming absent is DRIFTED",
+      "a bypass actor appearing is DRIFTED",
+      "a satisfied control becoming unreadable is INDETERMINATE, not DRIFTED",
+      "a confirmed regression is not filed under 'could not tell' by an unreadable neighbour",
+    ],
+    falsifier: "governance.a-regression-is-observed-not-inferred",
+  },
+  {
+    id: "governance.the-policy-moving-is-not-the-host-moving",
+    statement:
+      "A change to the required-control set is CONTRACT_CHANGED, never drift. Drift is a claim about the host, and the " +
+      "contract is identified independently of it.",
+    record: { file: "docs/host-enforcement.md", quote: "the policy changed; the host may not have" },
+    tests: [
+      "a changed required-control set is CONTRACT_CHANGED, never drift",
+      "the contract digest covers the required set and ignores everything else",
+      "ruleset id and name may change while the six controls remain satisfied",
+      "no baseline at all is INDETERMINATE, never NO_DRIFT",
+    ],
+    falsifier: "governance.the-policy-moving-is-not-the-host-moving",
+  },
 ];

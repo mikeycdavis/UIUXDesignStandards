@@ -22,7 +22,9 @@
     "release:readiness": "node scripts/release-readiness.mjs",
     "ci": "node scripts/ci.mjs",
     "submit-pr": "node scripts/submit-pr.mjs",
-    "governance": "node scripts/host-evidence.mjs"
+    "governance": "node scripts/host-evidence.mjs",
+    "governance:drift": "node scripts/governance-drift.mjs",
+    "governance:baseline": "node scripts/governance-drift.mjs --record"
   },
   "engines": {
     "node": ">=18"

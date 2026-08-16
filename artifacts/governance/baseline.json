@@ -1,0 +1,17 @@
+{
+  "contractDigest": "7e14a13c01f28c134c6bbef4eb877938",
+  "observedAt": "2026-08-16T19:57:30.264Z",
+  "repository": "mikeycdavis/UIUXDesignStandards",
+  "state": "GOVERNED",
+  "controls": {
+    "main.pr_required": "SATISFIED",
+    "main.standards_check_required": "SATISFIED",
+    "main.force_push_prohibited": "SATISFIED",
+    "main.deletion_prohibited": "SATISFIED",
+    "tags.v_star_immutable": "SATISFIED",
+    "bypass.policy": "SATISFIED"
+  },
+  "deferred": {
+    "main.review_required": "ABSENT"
+  }
+}
