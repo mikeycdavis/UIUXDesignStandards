@@ -295,6 +295,43 @@ and all three must agree before anything is pushed:
 3. `result.environment.verifiedCommit == before` — the sha reported *from inside the container that
    ran the checks*. A host-side comparison alone would miss a build context that silently disagreed
    with the working tree.
+4. `result.environment.containerWorkingTree == "clean"` — the container's own files matched the commit
+   the container names.
+
+### Why the fourth comparison exists
+
+The first three are all statements about *metadata*. `git rev-parse HEAD` inside the container reads
+the copied `.git/HEAD`; it establishes which commit the copied repository **names**, and it cannot
+establish that the copied **files** are that commit's tree. The image is built by `COPY .`, so its
+files are whatever the build context held when Docker read it — and the host's cleanliness check
+happens strictly before that read. An edit landing in between is tested, is never pushed, and leaves
+all three sha comparisons satisfied.
+
+So container identity is established as a conjunction, and never as half of one:
+
+```
+container HEAD == the sha about to be pushed
+  AND
+container files == container HEAD
+```
+
+Only then does `verifiedCommit` get written at all. This is checked by asking the container's own git
+to compare its own files against its own HEAD, which makes it **a property of the artifact that was
+tested rather than an observation about a moment in time**. Re-checking the host's cleanliness after
+CI would only narrow the window; it would not close it. Reported by [scripts/ci.mjs](../scripts/ci.mjs)
+as the typed reason `CONTAINER_TREE_DIRTY`, kept distinct from `HOST_TREE_DIRTY`, `CONTAINER_HEAD_MISMATCH`,
+and a stage failure, because those are audited differently and prose is a poor index.
+
+Found by review on the first pull request this workflow ever opened, and fixed by strengthening the
+gate rather than by relaxing it.
+
+### Which branch the pull request targets
+
+`--base` decides alone, and no discovery runs when it is given. Otherwise the base comes from
+`git ls-remote --symref origin HEAD` — **the remote owns its own default branch**. The local
+`refs/remotes/origin/HEAD` is a cache written at clone time and refreshed by nothing, so after a rename
+it keeps naming the old branch, usually one that still exists; it is used only as a last resort ahead
+of a bare guess, and says so when it is.
 
 The push is by explicit refspec on the sha. `git push origin <branch>` would publish whatever the
 branch points at when the command runs, which is the exact substitution the comparisons just ruled out.

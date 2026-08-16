@@ -111,7 +111,7 @@ export function checkTree(porcelain) {
 }
 
 /**
- * The exact-commit comparison. Three ways it can fail, and they are reported differently on purpose.
+ * The exact-commit comparison. Four ways it can fail, and they are reported differently on purpose.
  *
  * @param before   HEAD as resolved BEFORE the pipeline ran
  * @param after    HEAD as resolved AFTER it finished
@@ -142,6 +142,19 @@ export function verifyCommitIdentity(before, after, evidence) {
       };
     }
   }
+  // Naming the right commit is half of it. The container's files must also have BEEN that commit —
+  // otherwise the checks ran against a tree that exists nowhere, and the sha agreement above is three
+  // pieces of metadata agreeing with each other about something none of them looked at. A result
+  // document that does not record this establishes nothing, which is why the test is for the word
+  // "clean" rather than for the absence of "dirty".
+  if (evidence.environment?.containerWorkingTree !== "clean") {
+    return {
+      ok: false,
+      message:
+        `The container's files were not established to match ${before}. Nothing was pushed.\n` +
+        `  container working tree: ${evidence.environment?.containerWorkingTree ?? "unrecorded"}`,
+    };
+  }
   return { ok: true };
 }
 
@@ -155,13 +168,35 @@ function run(command, args, { capture = true } = {}) {
 
 const git = (...args) => run("git", args);
 
-/** The remote's default branch, asked of the remote rather than assumed to be `main`. */
+/** `ref: refs/heads/<branch>\tHEAD` — what the remote itself says its default branch is, right now. */
+export function parseSymrefHead(out) {
+  const named = /^ref:\s+refs\/heads\/(\S+)\s+HEAD$/m.exec(out ?? "");
+  return named ? named[1] : null;
+}
+
+/**
+ * Which branch the pull request is opened against, and on whose authority.
+ *
+ * The order is the point. An explicit `--base` decides alone and no discovery runs at all. Otherwise
+ * the REMOTE decides, because it is the only thing that knows its own default branch. The local
+ * `refs/remotes/origin/HEAD` is a cache written at clone time and refreshed by nothing — after a
+ * default-branch rename it keeps naming the old branch indefinitely, and `git remote set-head --auto`
+ * exists precisely because that ref does not maintain itself. It is kept here only as a last resort
+ * ahead of a bare guess, and labelled so the caller can see the claim is unverified.
+ */
+export function chooseBase({ explicit, remote, cached }) {
+  if (explicit) return { base: explicit, source: "explicit" };
+  if (remote) return { base: remote, source: "remote" };
+  if (cached) return { base: cached, source: "cached-unverified" };
+  return { base: "main", source: "fallback" };
+}
+
+/** The remote's default branch, asked of the remote rather than of a local cache of it. */
 export function defaultBranch() {
+  const remote = parseSymrefHead(git("ls-remote", "--symref", "origin", "HEAD").out);
   const symbolic = git("symbolic-ref", "--quiet", "--short", "refs/remotes/origin/HEAD");
-  if (symbolic.code === 0) return symbolic.out.trim().replace(/^origin\//, "");
-  const remote = git("remote", "show", "origin");
-  const named = /HEAD branch:\s*(\S+)/.exec(remote.out ?? "");
-  return named ? named[1] : "main";
+  const cached = symbolic.code === 0 ? symbolic.out.trim().replace(/^origin\//, "") : null;
+  return chooseBase({ explicit: null, remote, cached });
 }
 
 /**
@@ -205,7 +240,16 @@ export async function submit(options) {
   if (git("rev-parse", "--git-dir").code !== 0) return refuse("Not a git repository.", EXIT.NOT_RUN);
 
   const branch = git("rev-parse", "--abbrev-ref", "HEAD").out.trim();
-  const base = options.base ?? defaultBranch();
+  // Discovery is skipped entirely when the caller named a base — `defaultBranch` reaches the network,
+  // and a command told where to open its pull request has no question to ask.
+  const chosen = options.base ? { base: options.base, source: "explicit" } : defaultBranch();
+  const base = chosen.base;
+  if (chosen.source === "cached-unverified") {
+    process.stderr.write(
+      `Warning: the remote did not report a default branch, so '${base}' comes from the local ` +
+        `refs/remotes/origin/HEAD cache, which is not refreshed after a rename. Pass --base to be certain.\n`,
+    );
+  }
 
   const branchCheck = checkBranch(branch, base);
   if (!branchCheck.ok) return refuse(branchCheck.message, EXIT.NOT_RUN);

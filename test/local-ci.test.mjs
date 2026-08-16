@@ -23,8 +23,8 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { CI_SERVICE, COMPOSE_FILE, IMAGE_TAG, STAGES, stageCommand, stageWorkflowStep } from "../scripts/ci-pipeline.mjs";
-import { EXIT, parseArgs, UsageError } from "../scripts/ci.mjs";
-import { PROTECTED_BRANCHES, checkBranch, checkTree, verificationBlock, verifyCommitIdentity } from "../scripts/submit-pr.mjs";
+import { EXIT, REASON, establishContainerIdentity, parseArgs, UsageError } from "../scripts/ci.mjs";
+import { PROTECTED_BRANCHES, checkBranch, checkTree, chooseBase, parseSymrefHead, verificationBlock, verifyCommitIdentity } from "../scripts/submit-pr.mjs";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const read = (relative) => readFile(path.join(ROOT, relative), "utf8");
@@ -186,12 +186,97 @@ test("the runner keeps the framework's three exit codes distinct", () => {
 const SHA_A = "a".repeat(40);
 const SHA_B = "b".repeat(40);
 
-const passingEvidence = (commit = SHA_A, verified = commit) => ({
+const passingEvidence = (commit = SHA_A, verified = commit, containerWorkingTree = "clean") => ({
   result: "passed",
   commit,
   completedAt: "2026-08-15T00:00:00.000Z",
-  environment: { verifiedCommit: verified },
+  environment: { verifiedCommit: verified, containerWorkingTree },
   checks: STAGES.map((s) => ({ id: s.id, result: "passed" })),
+});
+
+// --- What the container is: both halves of the conjunction ------------------------------------------
+//
+// The property under test is not "a concurrent edit was noticed". Racing a real filesystem write
+// against a real image build would be a test whose result depends on which side won, and a flaky
+// guard is a guard nobody believes. The property is a statement about the artifact:
+//
+//     container HEAD == expected sha   AND   container files == container HEAD
+//
+// so it is decided by a pure function over two probe results, and injected rather than raced.
+
+const probeOk = (sha) => ({ code: 0, out: `${sha}\n` });
+
+test("container identity is established when the container names the right commit AND its files are that commit", () => {
+  // The positive twin. Without it, every refusal below is satisfied by a function that never
+  // establishes anything.
+  const verdict = establishContainerIdentity({ expected: SHA_A, head: probeOk(SHA_A), status: { code: 0, out: "" } });
+  assert.deepEqual(verdict, { ok: true, verifiedCommit: SHA_A });
+});
+
+test("container identity is withheld when the container's files do not match the commit it names", () => {
+  // The defect this closes. HEAD is right, the host was clean when it was asked, and the image still
+  // holds something the commit does not — because `COPY .` reads the working tree, and it reads it
+  // strictly after the host-side cleanliness check.
+  const verdict = establishContainerIdentity({
+    expected: SHA_A,
+    head: probeOk(SHA_A),
+    status: { code: 0, out: " M scripts/ci.mjs\n" },
+  });
+  assert.equal(verdict.ok, false, "a container whose files disagreed with its own HEAD established an identity");
+  assert.equal(verdict.code, REASON.CONTAINER_TREE_DIRTY);
+  assert.equal(verdict.verifiedCommit, undefined, "a verified commit was reported for a tree that was never verified");
+  assert.match(verdict.message, /scripts\/ci\.mjs/, "the refusal does not say what differed");
+});
+
+test("the container's failure modes stay distinct from one another", () => {
+  // Four different things go wrong here and they are audited differently. A single boolean would make
+  // "the image had no git history" and "somebody edited a file mid-build" the same entry in a log.
+  const cases = [
+    [{ expected: SHA_A, head: { code: 1, out: "" }, status: { code: 0, out: "" } }, REASON.CONTAINER_HEAD_UNREADABLE],
+    [{ expected: SHA_A, head: probeOk(SHA_B), status: { code: 0, out: "" } }, REASON.CONTAINER_HEAD_MISMATCH],
+    [{ expected: SHA_A, head: probeOk(SHA_A), status: { code: 128, out: "" } }, REASON.CONTAINER_TREE_UNREADABLE],
+    [{ expected: SHA_A, head: probeOk(SHA_A), status: { code: 0, out: "?? new.txt\n" } }, REASON.CONTAINER_TREE_DIRTY],
+  ];
+  const seen = new Set();
+  for (const [input, expected] of cases) {
+    const verdict = establishContainerIdentity(input);
+    assert.equal(verdict.ok, false);
+    assert.equal(verdict.code, expected);
+    assert.equal(verdict.verifiedCommit, undefined, `${expected} still reported a verified commit`);
+    seen.add(verdict.code);
+  }
+  assert.equal(seen.size, cases.length, "two distinct container failures share one reason code");
+});
+
+test("the runner asks the container to compare its own files against its own HEAD", async () => {
+  // The wiring, asserted at the source. `establishContainerIdentity` can be perfect and irrelevant if
+  // nothing ever hands it a status probe.
+  const source = await read("scripts/ci.mjs");
+  assert.match(source, /"git", "status", "--porcelain"/, "the container probe never asks whether its files match HEAD");
+  assert.match(source, /establishContainerIdentity\(\{/, "the runner does not use the identity function");
+  assert.match(
+    source,
+    /evidence\.environment\.verifiedCommit = identity\.verifiedCommit;/,
+    "the verified commit is not taken from the established identity, so it could be recorded without one",
+  );
+});
+
+test("submission refuses when the container's files were never established to match the commit", () => {
+  // The end of the chain: a result document that records a half-established identity must not be
+  // enough to push. Both the proved-dirty case and the never-recorded case are refusals, because a
+  // missing field is an absent measurement rather than a clean tree.
+  const unrecorded = passingEvidence();
+  delete unrecorded.environment.containerWorkingTree;
+  for (const [evidence, why] of [
+    [passingEvidence(SHA_A, SHA_A, "dirty"), "a proved-dirty container"],
+    [passingEvidence(SHA_A, SHA_A, "unknown"), "a container that could not be read"],
+    [unrecorded, "a result document that never looked"],
+  ]) {
+    const verdict = verifyCommitIdentity(SHA_A, SHA_A, evidence);
+    assert.equal(verdict.ok, false, `${why} was accepted as verification`);
+    assert.match(verdict.message, /Nothing was pushed/);
+    assert.match(verdict.message, /container working tree/);
+  }
 });
 
 test("submission proceeds when the verified commit, the container's commit, and HEAD all agree", () => {
@@ -259,6 +344,50 @@ test("submission refuses a dirty working tree, and has no override for it", asyn
   for (const hatch of ["--allow-dirty", "--skip-ci", "--no-verify", "--force"]) {
     assert.equal(source.includes(`"${hatch}"`), false, `submit-pr parses ${hatch}, which is an escape from the invariant it exists to enforce`);
   }
+});
+
+// --- Which branch the pull request is opened against ------------------------------------------------
+
+test("a stale local origin/HEAD never decides the base", () => {
+  // `refs/remotes/origin/HEAD` is written at clone time and refreshed by nothing. After a default-branch
+  // rename it keeps naming the old branch, and a submission that trusted it would target a branch the
+  // remote no longer considers default — silently, since the old branch usually still exists.
+  assert.deepEqual(
+    chooseBase({ explicit: null, remote: "main", cached: "master" }),
+    { base: "main", source: "remote" },
+    "the cached ref outvoted the remote's own answer",
+  );
+  // The cache is a last resort ahead of a guess, and says so rather than passing itself off as fact.
+  assert.deepEqual(chooseBase({ explicit: null, remote: null, cached: "master" }), { base: "master", source: "cached-unverified" });
+  assert.deepEqual(chooseBase({ explicit: null, remote: null, cached: null }), { base: "main", source: "fallback" });
+});
+
+test("an explicit base decides alone, whatever discovery would have said", () => {
+  assert.deepEqual(
+    chooseBase({ explicit: "release-2", remote: "main", cached: "master" }),
+    { base: "release-2", source: "explicit" },
+    "discovery overrode the base the caller named",
+  );
+});
+
+test("naming a base skips remote discovery entirely rather than merely outranking it", async () => {
+  // A caller who said where the pull request goes has no question outstanding, and `defaultBranch`
+  // reaches the network to answer one. Asserted at the source because the difference between "asked
+  // and ignored the answer" and "never asked" is invisible in the return value.
+  const source = await read("scripts/submit-pr.mjs");
+  assert.match(
+    source,
+    /options\.base\s*\?\s*\{ base: options\.base, source: "explicit" \}\s*:\s*defaultBranch\(\)/,
+    "submit() calls defaultBranch() unconditionally, so an explicit --base still triggers remote discovery",
+  );
+});
+
+test("the remote's default branch is read from the remote's own symbolic ref", () => {
+  const out = "ref: refs/heads/main\tHEAD\n1234567890abcdef1234567890abcdef12345678\tHEAD\n";
+  assert.equal(parseSymrefHead(out), "main");
+  assert.equal(parseSymrefHead("ref: refs/heads/release/2.x\tHEAD\n"), "release/2.x");
+  assert.equal(parseSymrefHead(""), null, "an empty answer was read as a branch name");
+  assert.equal(parseSymrefHead("fatal: could not read from remote\n"), null, "an error was read as a branch name");
 });
 
 test("the pull-request body reports local Docker verification and never claims hosted Actions passed", () => {

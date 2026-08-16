@@ -339,4 +339,34 @@ export const INVARIANTS = [
     tests: ["a vendored copy with no git is UNVERIFIED — never MATCH, and never a mismatch"],
     falsifier: null,
   },
+  {
+    id: "ci.container-identity-is-a-conjunction",
+    statement:
+      "A container establishes an identity only when it names the expected commit AND its own files match the commit " +
+      "it names. `rev-parse HEAD` reads metadata and cannot speak for the tree, so half of the conjunction is never " +
+      "recorded as the whole of it.",
+    record: { file: "docs/local-ci.md", quote: "container files == container HEAD" },
+    tests: [
+      "container identity is established when the container names the right commit AND its files are that commit",
+      "container identity is withheld when the container's files do not match the commit it names",
+      "the container's failure modes stay distinct from one another",
+      "the runner asks the container to compare its own files against its own HEAD",
+      "submission refuses when the container's files were never established to match the commit",
+    ],
+    falsifier: "ci.container-identity-is-a-conjunction",
+  },
+  {
+    id: "submission.the-remote-owns-its-own-default-branch",
+    statement:
+      "The base branch comes from the caller or from the remote itself. A local refs/remotes/origin/HEAD cache, which " +
+      "nothing refreshes after a rename, never decides where a pull request is opened.",
+    record: { file: "docs/local-ci.md", quote: "the remote owns its own default branch" },
+    tests: [
+      "a stale local origin/HEAD never decides the base",
+      "an explicit base decides alone, whatever discovery would have said",
+      "naming a base skips remote discovery entirely rather than merely outranking it",
+      "the remote's default branch is read from the remote's own symbolic ref",
+    ],
+    falsifier: "submission.the-remote-owns-its-own-default-branch",
+  },
 ];
