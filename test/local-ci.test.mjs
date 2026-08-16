@@ -24,7 +24,7 @@ import { fileURLToPath } from "node:url";
 
 import { CI_SERVICE, COMPOSE_FILE, IMAGE_TAG, STAGES, stageCommand, stageWorkflowStep } from "../scripts/ci-pipeline.mjs";
 import { EXIT, REASON, establishContainerIdentity, parseArgs, UsageError } from "../scripts/ci.mjs";
-import { OUTCOME, PROTECTED_BRANCHES, checkBranch, checkTree, chooseBase, choosePrAction, parseSymrefHead, verificationBlock, verifyCommitIdentity } from "../scripts/submit-pr.mjs";
+import { OUTCOME, PROTECTED_BRANCHES, checkBranch, checkTree, chooseBase, choosePrAction, confirmPrHead, parseSymrefHead, verificationBlock, verifyCommitIdentity } from "../scripts/submit-pr.mjs";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const read = (relative) => readFile(path.join(ROOT, relative), "utf8");
@@ -418,13 +418,40 @@ test("no existing pull request leaves the creation path exactly as it was", () =
   assert.deepEqual(choosePrAction({ existing: [], branch: "topic", base: "main", verifiedSha: SHA_A }), { action: "create" });
 });
 
-test("an existing pull request that does not point at the verified commit is refused", () => {
-  // The reuse path is held to the same standard as creation. If the push did not move the pull
-  // request to the verified commit, reporting "submitted" would name a verification that does not
-  // describe what a reviewer would see.
-  const decision = choosePrAction({ existing: [openPr({ headRefOid: SHA_B })], branch: "topic", base: "main", verifiedSha: SHA_A });
-  assert.equal(decision.action, "refuse");
-  assert.match(decision.message, /points at a different commit/);
+test("a pull request whose head lags the push is confirmed once GitHub catches up", async () => {
+  // Not hypothetical. The first real run of this path pushed 40dd49c..d33d3f8 successfully and the
+  // API, read immediately afterwards, still named the old head — so a correct check refused a correct
+  // submission. The observation is repeated until it converges.
+  const observations = [SHA_B, SHA_B, SHA_A];
+  let slept = 0;
+  const verdict = await confirmPrHead({
+    read: () => observations.shift(),
+    expected: SHA_A,
+    sleep: async () => { slept += 1; },
+  });
+  assert.equal(verdict.ok, true, "a head that caught up was still refused");
+  assert.equal(verdict.attempts, 3);
+  assert.equal(slept, 2, "the wait did not actually wait between observations");
+});
+
+test("waiting for the head is a wait, never a retry until the answer is agreeable", async () => {
+  // The distinction that keeps this from being an escape hatch. A head that settles on a DIFFERENT
+  // commit — somebody else pushed — never matches, however long it is watched, and running out of
+  // attempts is a refusal rather than a shrug.
+  const settled = await confirmPrHead({ read: () => SHA_B, expected: SHA_A, attempts: 4, sleep: async () => {} });
+  assert.equal(settled.ok, false, "a pull request pointing at another commit was accepted after enough attempts");
+  assert.equal(settled.observed, SHA_B);
+  assert.match(settled.message, /does not point at the verified commit/);
+
+  const unreadable = await confirmPrHead({ read: () => null, expected: SHA_A, attempts: 2, sleep: async () => {} });
+  assert.equal(unreadable.ok, false, "an unreadable head was treated as agreement");
+  assert.match(unreadable.message, /unreadable/);
+});
+
+test("both submission paths confirm the head, so a created pull request gets an existing one's scrutiny", async () => {
+  const source = await read("scripts/submit-pr.mjs");
+  const confirmations = [...source.matchAll(/await confirmPrHead\(\{/g)];
+  assert.equal(confirmations.length, 2, `confirmPrHead is awaited ${confirmations.length} time(s) — both the reuse and the creation path must confirm`);
 });
 
 test("an existing pull request onto another base is never silently reused or retargeted", () => {

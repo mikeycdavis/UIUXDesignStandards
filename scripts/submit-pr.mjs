@@ -212,19 +212,42 @@ export function choosePrAction({ existing, branch, base, verifiedSha }) {
     return { action: "refuse", message: `More than one open pull request from '${branch}' onto '${base}': ${onThisBase.map((pr) => `#${pr.number}`).join(", ")}. Resolve that first.` };
   }
 
-  const [pr] = onThisBase;
-  // The same standard the creation path is held to. An existing pull request is only a successful
-  // submission if it now points at the commit that just passed; if the push did not move it there,
-  // saying "submitted" would name a verification that does not describe what reviewers would see.
-  if (pr.headRefOid !== verifiedSha) {
-    return {
-      action: "refuse",
-      message:
-        `Pull request #${pr.number} still points at a different commit than the one verified. Nothing further was done.\n` +
-        `  pull request head: ${pr.headRefOid ?? "unknown"}\n  verified:          ${verifiedSha}`,
-    };
+  // Which pull request is the target — not yet whether it points at the right commit. That question
+  // is asked identically of both paths by `confirmPrHead` below, because a freshly created pull
+  // request deserves exactly the scrutiny an existing one gets.
+  return { action: "reuse", pr: onThisBase[0], outcome: OUTCOME.PR_UPDATED };
+}
+
+/**
+ * Confirm a pull request's head is the verified commit, allowing for GitHub to catch up.
+ *
+ * One read is not enough, and that is not a theoretical worry — it is what happened the first time
+ * this path ran. `git push` reported `40dd49c..d33d3f8`, and the API asked immediately afterwards
+ * still named the old head. The push had succeeded; the read had not yet seen it, and a correct check
+ * refused a correct submission.
+ *
+ * So the observation is repeated until it converges, and this is a WAIT rather than a
+ * retry-until-agreeable. It succeeds only on the verified sha: a head that settles on some other
+ * commit — because somebody else pushed — never matches and is refused exactly as before, and so is
+ * one that never converges at all. The bound is real, and exhausting it is a refusal, not a shrug.
+ *
+ * @param read  returns the currently observed head sha, or null if it could not be read
+ * @param sleep injected, so the tests do not spend real seconds proving this
+ */
+export async function confirmPrHead({ read, expected, attempts = 10, waitMs = 3000, sleep }) {
+  let observed = null;
+  for (let attempt = 1; attempt <= attempts; attempt += 1) {
+    observed = await read();
+    if (observed === expected) return { ok: true, attempts: attempt };
+    if (attempt < attempts) await sleep(waitMs);
   }
-  return { action: "reuse", pr, outcome: OUTCOME.PR_UPDATED };
+  return {
+    ok: false,
+    observed,
+    message:
+      `The pull request does not point at the verified commit, after ${attempts} attempt(s).\n` +
+      `  pull request head: ${observed ?? "unreadable"}\n  verified:          ${expected}`,
+  };
 }
 
 // --- Process helpers -------------------------------------------------------------------------------
@@ -384,10 +407,23 @@ export async function submit(options) {
     );
   };
 
+  const readHead = (number) => {
+    const seen = run("gh", ["pr", "view", String(number), "--json", "headRefOid"]);
+    if (seen.code !== 0) return null;
+    try {
+      return JSON.parse(seen.out || "null")?.headRefOid ?? null;
+    } catch {
+      return null;
+    }
+  };
+  const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
   if (decision.action === "reuse") {
     // A successful submission, and not a creation. The commit is published and the open pull request
     // points at it — which is exactly what was asked for — so this exits 0 and says which of the two
     // things happened rather than inventing a third meaning for the exit code.
+    const confirmed = await confirmPrHead({ read: () => readHead(decision.pr.number), expected: before, sleep });
+    if (!confirmed.ok) return refuse(`Pull request #${decision.pr.number}: ${confirmed.message}`, EXIT.FAILED);
     recordSubmission(decision.outcome, decision.pr);
     say(
       `\nSubmitted (${decision.outcome}). Verified commit ${before}, verified locally in Docker, pushed to '${branch}'.\n` +
@@ -407,9 +443,9 @@ export async function submit(options) {
   const created = run("gh", args, { capture: false });
   if (created.code !== 0) return refuse("The push succeeded but `gh pr create` failed. The verified commit is published; open the pull request manually.", EXIT.FAILED);
 
-  // Read the created pull request back rather than trusting that it points where it should. Same
-  // standard the reuse path is held to: a submission is only successful if what reviewers will see
-  // is the commit that passed.
+  // Read the created pull request back rather than trusting that it points where it should. The same
+  // standard the reuse path is held to: a submission is only successful if what reviewers will see is
+  // the commit that passed.
   const opened = run("gh", ["pr", "view", "--json", "number,url,headRefOid"]);
   let head = null;
   try {
@@ -420,13 +456,9 @@ export async function submit(options) {
   if (opened.code !== 0 || !head) {
     return refuse("The pull request was created but could not be read back, so nothing confirms which commit it proposes.", EXIT.FAILED);
   }
-  if (head.headRefOid !== before) {
-    return refuse(
-      `The pull request was created but proposes a different commit than the one verified.\n` +
-        `  pull request head: ${head.headRefOid}\n  verified:          ${before}`,
-      EXIT.FAILED,
-    );
-  }
+
+  const confirmed = await confirmPrHead({ read: () => readHead(head.number), expected: before, sleep });
+  if (!confirmed.ok) return refuse(`Pull request #${head.number} was created, but ${confirmed.message}`, EXIT.FAILED);
 
   recordSubmission(OUTCOME.PR_CREATED, head);
   say(`\nSubmitted (${OUTCOME.PR_CREATED}). Verified commit ${before}, verified locally in Docker, pushed and proposed against '${base}': ${head.url}`);
