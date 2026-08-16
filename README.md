@@ -33,6 +33,7 @@ satisfied.
 | Understand how a run works | [docs/architecture.md](docs/architecture.md) |
 | Consume the JSON output | [docs/integration-contract.md](docs/integration-contract.md) |
 | Work *in* this repository | [PROJECT.md](PROJECT.md) |
+| Run CI, or open a verified pull request | [docs/local-ci.md](docs/local-ci.md) |
 | Know why something is the way it is | [artifacts/adr/](artifacts/adr/) |
 | Know what is built and what is not | [artifacts/project-plan-breakdown/00-overview.md](artifacts/project-plan-breakdown/00-overview.md) |
 
@@ -71,7 +72,7 @@ to rule authoring, because metadata is one mistake away from a false pass.
 
 ## Decisions on record
 
-Thirteen ADRs in [`artifacts/adr/`](artifacts/adr/), all accepted. The ones that constrain the most:
+Eighteen ADRs in [`artifacts/adr/`](artifacts/adr/), all accepted. The ones that constrain the most:
 
 - [0002](artifacts/adr/0002-browser-evidence-arrives-by-ingestion-contract.md) — browser evidence
   arrives by an ingestion contract. This repository defines and verifies it and produces none.
@@ -83,6 +84,26 @@ Thirteen ADRs in [`artifacts/adr/`](artifacts/adr/), all accepted. The ones that
   — freshness is committed-content identity with path-scoped working-subject integrity.
 - [0012](artifacts/adr/0012-schema-validates-shape-policy-validates-cross-field-semantics.md) — the
   schema validates shape; `policy.mjs` owns cross-field semantics, at exit 2.
+- [0018](artifacts/adr/0018-local-containerised-ci-gates-pull-request-submission.md) — CI runs
+  locally in Docker and gates submission; the commit pushed is exactly the commit that passed.
+
+## CI, and pull requests
+
+The complete pipeline runs in a container before anything is pushed. GitHub-hosted Actions remain
+enabled and remain useful, but are not required to prove a branch.
+
+```bash
+npm run ci                               # every check, in an ephemeral Docker environment
+```
+
+```bash
+npm run submit-pr                        # verify, then push the verified commit and open the PR
+```
+
+The invariant `submit-pr` enforces: **the commit pushed for a pull request is exactly the commit that
+passed the complete local Docker pipeline** — checked three ways, including against the sha reported
+from inside the container that ran the checks. Full details, including what local CI deliberately does
+not reproduce, are in [docs/local-ci.md](docs/local-ci.md).
 
 ## Layout
 
@@ -92,7 +113,9 @@ rules/           15 catalog files — rule identity and metadata
 schemas/         project-policy and browser-evidence JSON Schemas
 scripts/         the tooling; zero dependencies, Node ≥ 18
 templates/       what `init` scaffolds, plus the design-review evidence pack
-docs/            architecture, and the integration contract for consumers
+docs/            architecture, the integration contract for consumers, and local CI
+docker/          the CI image — node 20 and git, and nothing from the developer's machine
+compose.ci.yml   the ephemeral CI environment
 artifacts/
   adr/           decisions, never rewritten
   design/        the frozen rule catalog — identity, fixed before implementation
