@@ -46,7 +46,7 @@ and record their provenance in their headers (ADR 0001).
 ## Commands
 
 ```bash
-npm test                    # the full suite, including 22 architectural falsifiers (~85s)
+npm test                    # the full suite, including 25 architectural falsifiers (~85s)
 ```
 
 | | |
@@ -60,6 +60,8 @@ npm test                    # the full suite, including 22 architectural falsifi
 | `npm run rule-identity` | that prose, freeze, catalog, and provenance name one set of identities |
 | `npm run diagrams` | that the architecture diagrams match their canonical source |
 | `npm run release:readiness` | the v1.0.0 gate: aggregates every criterion above and reports recorded gaps |
+| `npm run ci` | **all of the above**, in an ephemeral Docker environment — see [docs/local-ci.md](docs/local-ci.md) |
+| `npm run submit-pr` | run `ci`, then push the exact verified commit and open the pull request |
 
 There is deliberately **no** `init` npm script: every other script targets this repository, and one that
 scaffolded over the framework's own policy is a footgun with no use. Run
@@ -80,6 +82,9 @@ scaffolded over the framework's own policy is a footgun with no use. Run
   plan file, defended by named tests, and — where a failure would convert an inability into a pass —
   broken on purpose by `test/falsifiers.mjs` with the suite required to notice.
 - **Nothing is committed without the owner asking.** The working tree is the current state.
+- **A pull request carries a verified commit.** `npm run submit-pr` pushes the exact sha that passed
+  the containerised pipeline, by refspec, and refuses if `HEAD` moved. Local Docker verification is
+  never described as a hosted-Actions result (ADR 0018).
 
 ## Artifact locations
 

@@ -185,6 +185,41 @@ export const FALSIFIERS = [
     suite: "test/content-identity.test.mjs",
   },
   {
+    // The half of the conjunction that used to be missing, put back the way it was missing.
+    //
+    // `rev-parse HEAD` inside the container proves the copied repository NAMES the expected commit. It
+    // cannot prove the copied files ARE that commit, because it reads `.git/HEAD` rather than comparing
+    // trees — and the image is built by `COPY .`, from a working tree read strictly after the host's
+    // cleanliness check. Dropping the status probe restores exactly that gap, and the suite must object.
+    //
+    // Without this entry the new tests would pass merely by exercising a new code path; with it, they
+    // are pinned to defending the property that was actually absent.
+    invariant: "ci.container-identity-is-a-conjunction",
+    file: "scripts/ci.mjs",
+    find: `    status: compose(["run", "--rm", "--no-TTY", service, "git", "status", "--porcelain"], { capture: true }),`,
+    replace: `    status: { code: 0, out: "" }, // falsifier: the container is asked only what it is named, never what it holds`,
+    suite: "test/local-ci.test.mjs",
+  },
+  {
+    // A base chosen from a cache the remote does not maintain is a pull request opened at a branch
+    // nobody selected. The cache outranking the remote is the whole defect, so that is the mutation.
+    invariant: "submission.the-remote-owns-its-own-default-branch",
+    file: "scripts/submit-pr.mjs",
+    find: `  if (remote) return { base: remote, source: "remote" };`,
+    replace: `  if (cached) return { base: cached, source: "remote" }; // falsifier: a stale local cache decides`,
+    suite: "test/local-ci.test.mjs",
+  },
+  {
+    // Back to creating unconditionally, which is how a wholly successful submission came to exit 1.
+    // A false red rather than a false green, and the same disease: an exit code that does not mean
+    // what it says. The suite must object to losing the state check.
+    invariant: "submission.updating-an-existing-pull-request-is-success",
+    file: "scripts/submit-pr.mjs",
+    find: `  if (decision.action === "reuse") {`,
+    replace: `  if (false) { // falsifier: always create, so an existing pull request is a failure again`,
+    suite: "test/local-ci.test.mjs",
+  },
+  {
     invariant: "fixtures.the-known-negative-drawer-is-load-bearing",
     file: "test/fixtures/never-clean",
     replace: null,

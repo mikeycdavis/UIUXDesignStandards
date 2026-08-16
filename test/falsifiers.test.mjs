@@ -56,6 +56,11 @@ async function sandbox() {
     "scripts", "rules", "schemas", "standards", "templates", "test", "artifacts", "docs", ".github",
     "package.json", "project-policy.yml", "README.md", "INSTRUCTIONS.md", "PROJECT.md",
     "VERSION", "CHANGELOG.md",
+    // The local-CI environment. Here because docs/local-ci.md links to these paths and
+    // test/instructions.test.mjs resolves every relative link a document names — a sandbox missing one
+    // would fail that suite unmutated, which the baseline below would report as the harness being
+    // broken rather than as the missing file it is.
+    "compose.ci.yml", "docker", ".dockerignore", ".gitignore",
   ];
   for (const entry of contents) {
     await cp(path.join(ROOT, entry), path.join(dir, entry), { recursive: true });
@@ -78,7 +83,14 @@ function runSuite(dir, suite) {
   const result = spawnSync(process.execPath, ["--test", suite], { cwd: dir, encoding: "utf8", env });
   const output = `${result.stdout ?? ""}${result.stderr ?? ""}`;
   // A run that produced no output ran no tests, whatever it exited with.
-  if (!/^ℹ tests \d+/m.test(output)) {
+  //
+  // BOTH REPORTER SPELLINGS, because the default reporter is a function of the Node version rather
+  // than of anything this repository controls: Node 20 defaults a non-TTY run to `tap` and prints
+  // `# tests N`, Node 22 and later default to `spec` and print `ℹ tests N`. Matching only the second
+  // made this guard fire on every entry under the very Node version CI pins — a harness built to
+  // detect false greens, reporting that nothing ran when everything had. The assertion is unchanged:
+  // a run must show a test count before its exit code is believed.
+  if (!/^(?:ℹ|#) tests \d+/m.test(output)) {
     throw new Error(`${suite} produced no test output in the sandbox; the harness is not running anything:\n${output.slice(0, 500)}`);
   }
   return { code: result.status, output };

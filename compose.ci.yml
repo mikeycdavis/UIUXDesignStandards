@@ -1,0 +1,60 @@
+# The CI environment, as compose sees it.
+#
+# One service today, because this repository has one need: a Node 20 runtime with git in it. Compose
+# is still the right shape rather than a bare `docker run`, for three reasons that all outlive the
+# single-service case:
+#
+#   1. PROJECT SCOPING. `scripts/ci.mjs` runs every command under a unique `--project-name`, so
+#      teardown is `compose down` against that project. It can only remove containers, networks, and
+#      volumes this run created. There is no `docker rm` by pattern anywhere in this workflow, and
+#      therefore no way for CI to reach a developer's unrelated containers or a sibling repository's.
+#   2. CONCURRENCY. Two runs, or two repositories using this pattern, get different project names and
+#      different networks. Nothing is shared except the image layer cache, which is read-only.
+#   3. THE SLOT FOR DEPENDENCIES. When a repository adopting this pattern needs a database, it is
+#      added here as a second service with a `healthcheck`, and the runner already waits on it. See
+#      docs/local-ci.md §5 for what that looks like and why this repository has none.
+#
+# NO SECRETS AND NO HOST PATHS. There are no `volumes`, no `env_file`, no ports published, and no
+# credentials — the source is baked into the image by docker/ci.Dockerfile, and nothing in CI reaches
+# a network. The docker socket is not mounted: nothing here needs to start containers.
+
+name: uiux-standards-ci # A default. scripts/ci.mjs always overrides it with a unique per-run name.
+
+services:
+  ci:
+    build:
+      context: .
+      dockerfile: docker/ci.Dockerfile
+    image: uiux-standards-ci:local # Stable on purpose — see IMAGE_TAG in scripts/ci-pipeline.mjs.
+    working_dir: /work
+    # No restart policy. A CI container that restarts itself turns a failing check into a hang.
+    init: true
+
+    # NO NETWORK AT ALL, for two independent reasons that happen to want the same line.
+    #
+    # The security one: nothing in these checks reaches a network, and a container that cannot reach
+    # one cannot be made to by a future check, an accident, or code under review. This is the engine
+    # enforcing what §5 of docs/local-ci.md merely claims.
+    #
+    # The practical one, which is what actually found it: a unique compose project per run means a new
+    # bridge network per run, and Docker's default address pool is finite. On a machine with a few
+    # dozen compose projects standing — which is what a repository-per-project developer machine looks
+    # like — the pool is already fully subnetted, and every CI run fails at network creation with an
+    # error about address pools that says nothing about CI. Creating no network cannot exhaust one.
+    #
+    # A REPOSITORY THAT ADDS DEPENDENCY SERVICES MUST REMOVE THIS LINE: the runner and its database
+    # have to share a network to talk. That repository is then subject to the pool limit, and the
+    # answer there is a project name stable across runs rather than unique per run.
+    network_mode: none
+    environment:
+      # Marks the run as CI for anything that asks. Nothing in this repository branches on it today;
+      # it is set because a check that behaves differently under CI without saying so is the defect
+      # this whole arrangement is arranged against, and the variable is how a future check would say so.
+      CI: "true"
+    # NOTHING ELSE IS PASSED IN, and the omission is the point. A container receives only what is
+    # declared here, so a variable set on the developer's machine cannot change what CI does. The one
+    # that would have mattered is NODE_TEST_CONTEXT: a `node --test` process that inherits it decides
+    # it is a reporting subprocess of an outer run, executes nothing, and exits 0 — a test runner
+    # reporting success for tests it never ran. The falsifier harness already scrubs it in-process
+    # because that failure actually happened once; not declaring it here is the same guard at the
+    # environment boundary.

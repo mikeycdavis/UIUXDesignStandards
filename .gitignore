@@ -1,0 +1,7 @@
+# Local CI writes its result document to artifacts/local-ci/. That document is evidence about one
+# machine at one moment, and it is deliberately NOT retained: this repository does retain evidence —
+# artifacts/release/ holds frozen release records that are committed on purpose — and the difference
+# is that a release record is a decision while a local CI run is a measurement somebody took. Committing
+# the measurement would put a "passed" file in the tree that outlives the commit it described, which is
+# the stale-evidence failure the framework refuses everywhere else.
+artifacts/local-ci/

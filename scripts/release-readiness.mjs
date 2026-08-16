@@ -470,9 +470,20 @@ export async function assess(root = ROOT, { runSuite = defaultSuiteRunner } = {}
 
 /** Runs the real suite. Injectable so tests can exercise `assess` without recursing into it. */
 function defaultSuiteRunner(root) {
-  const result = run(root, ["--test", "test/*.test.mjs"]);
-  const ran = Number(result.out.match(/^ℹ tests (\d+)/m)?.[1] ?? NaN);
-  const failed = Number(result.out.match(/^ℹ fail (\d+)/m)?.[1] ?? NaN);
+  // THE FILES ARE ENUMERATED HERE rather than handed over as a glob, and both halves of the next two
+  // lines were found the same way: by running this gate somewhere other than the machine that wrote
+  // it. `run` spawns node directly, so no shell expands a glob, and node's own glob support arrived
+  // in Node 21 — on the Node 20 the workflow pins, a glob argument is a literal path that does not
+  // exist, and the release gate measures a suite that ran nothing. It reported NOT_EVALUATED rather
+  // than a pass, which is the framework behaving correctly and is still a gate establishing nothing.
+  const files = readdirSync(path.join(root, "test")).filter((f) => f.endsWith(".test.mjs")).sort().map((f) => `test/${f}`);
+  if (files.length === 0) return { ran: null, detail: "no test files were found, so nothing was measured" };
+  const result = run(root, ["--test", ...files]);
+  // BOTH REPORTER SPELLINGS. Node 20 defaults a non-TTY run to `tap` and prints `# tests N`; Node 22
+  // and later default to `spec` and print `ℹ tests N`. Matching one of them makes this criterion a
+  // property of the Node version rather than of the suite.
+  const ran = Number(result.out.match(/^(?:ℹ|#) tests (\d+)/m)?.[1] ?? NaN);
+  const failed = Number(result.out.match(/^(?:ℹ|#) fail (\d+)/m)?.[1] ?? NaN);
   if (!Number.isFinite(ran)) {
     return { ran: null, detail: "the suite produced no test summary, so nothing was measured" };
   }

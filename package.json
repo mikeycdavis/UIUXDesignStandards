@@ -5,7 +5,7 @@
   "type": "module",
   "bin": { "uiux-standards": "scripts/uiux.mjs" },
   "scripts": {
-    "test": "node --test \"test/*.test.mjs\"",
+    "test": "node --test test/*.test.mjs",
     "audit": "node scripts/uiux.mjs audit .",
     "audit:strict": "node scripts/uiux.mjs audit . --strict",
     "validate": "node scripts/uiux.mjs validate .",
@@ -17,7 +17,9 @@
     "rule-identity": "node scripts/rule-identity.mjs",
     "provenance": "node scripts/provenance.mjs",
     "diagrams": "node scripts/diagrams.mjs",
-    "release:readiness": "node scripts/release-readiness.mjs"
+    "release:readiness": "node scripts/release-readiness.mjs",
+    "ci": "node scripts/ci.mjs",
+    "submit-pr": "node scripts/submit-pr.mjs"
   },
   "engines": { "node": ">=18" },
   "license": "UNLICENSED",

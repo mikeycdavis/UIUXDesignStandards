@@ -339,4 +339,54 @@ export const INVARIANTS = [
     tests: ["a vendored copy with no git is UNVERIFIED — never MATCH, and never a mismatch"],
     falsifier: null,
   },
+  {
+    id: "ci.container-identity-is-a-conjunction",
+    statement:
+      "A container establishes an identity only when it names the expected commit AND its own files match the commit " +
+      "it names. `rev-parse HEAD` reads metadata and cannot speak for the tree, so half of the conjunction is never " +
+      "recorded as the whole of it.",
+    record: { file: "docs/local-ci.md", quote: "container files == container HEAD" },
+    tests: [
+      "container identity is established when the container names the right commit AND its files are that commit",
+      "container identity is withheld when the container's files do not match the commit it names",
+      "the container's failure modes stay distinct from one another",
+      "the runner asks the container to compare its own files against its own HEAD",
+      "submission refuses when the container's files were never established to match the commit",
+    ],
+    falsifier: "ci.container-identity-is-a-conjunction",
+  },
+  {
+    id: "submission.the-remote-owns-its-own-default-branch",
+    statement:
+      "The base branch comes from the caller or from the remote itself. A local refs/remotes/origin/HEAD cache, which " +
+      "nothing refreshes after a rename, never decides where a pull request is opened.",
+    record: { file: "docs/local-ci.md", quote: "the remote owns its own default branch" },
+    tests: [
+      "a stale local origin/HEAD never decides the base",
+      "an explicit base decides alone, whatever discovery would have said",
+      "naming a base skips remote discovery entirely rather than merely outranking it",
+      "the remote's default branch is read from the remote's own symbolic ref",
+    ],
+    falsifier: "submission.the-remote-owns-its-own-default-branch",
+  },
+  {
+    id: "submission.updating-an-existing-pull-request-is-success",
+    statement:
+      "A verified commit pushed to a branch whose pull request is already open, and now points at that commit, is a " +
+      "successful submission and exits 0. Whether one already exists is read from repository state, never from the " +
+      "wording of a CLI error, and PR_UPDATED is reported distinctly from PR_CREATED.",
+    record: { file: "docs/local-ci.md", quote: "is a successful submission, not a failure" },
+    tests: [
+      "an existing pull request already pointing at the verified commit is a successful submission",
+      "creating and updating are distinct outcomes even though both succeed",
+      "no existing pull request leaves the creation path exactly as it was",
+      "a pull request whose head lags the push is confirmed once GitHub catches up",
+      "waiting for the head is a wait, never a retry until the answer is agreeable",
+      "both submission paths confirm the head, so a created pull request gets an existing one's scrutiny",
+      "an existing pull request onto another base is never silently reused or retargeted",
+      "a failed discovery is refused rather than assumed to mean no pull request exists",
+      "submission consults the repository's state before creating, and never the wording of an error",
+    ],
+    falsifier: "submission.updating-an-existing-pull-request-is-success",
+  },
 ];

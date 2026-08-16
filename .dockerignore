@@ -1,0 +1,15 @@
+# The build context is the repository. Almost nothing is excluded, and the exclusions are listed
+# rather than assumed.
+#
+# `.git` IS INCLUDED, and that is the one line to read before editing this file. Version identity is
+# established by comparing the executing tree against the release tag it claims to be, the release
+# gate reads commit ancestry, and the content-identity primitive resolves blobs from the committed
+# tree at a revision. Excluding `.git` here would not fail those checks — it would make them report
+# that they could not tell, which is worse, because the pipeline would stay green.
+#
+# There is no `node_modules` line either. This repository has none (ADR 0001); adding a defensive
+# exclusion for a directory that must never exist would quietly normalise its existence.
+
+# The local-CI result document. Excluded so that a previous run's output is not part of the context
+# that produces the next one, which is what makes a rebuild deterministic.
+artifacts/local-ci/
