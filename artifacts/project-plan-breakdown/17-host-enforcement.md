@@ -98,31 +98,52 @@ repository that is not yet governed.
 
 ### Change the host settings, with explicit authorization
 
-- **Status:** `NOT_STARTED` (D1-D)
+- **Status:** `COMPLETE` — 2026-08-16 (D1-D), on explicit owner authorization scoped to exactly two
+  rulesets and nothing else.
 - **Purpose:** Make the controls real.
-- **Gated on, and this is a dependency rather than a `BLOCKED` status:** an owner decision on
-  `main.review_required`, and explicit owner authorization to change repository settings. `BLOCKED`
-  in this plan's vocabulary means a carried obligation of the release being cut, and is excused only
-  by naming a strictly later version — see the obligations criterion in
-  [scripts/release-readiness.mjs](../../scripts/release-readiness.mjs). This item is neither: it is
-  ordinary not-yet-started work whose start condition is a human decision. Recording it as `BLOCKED`
-  would have failed the release gate honestly, and writing "blocked on `v2.0.0`" to clear that would
-  have been a false statement made to turn a check green.
-- **Deliverables:** branch protection or rulesets on `main`, a tag ruleset for `v*`, the `standards`
-  check required against the merge head, and an explicit bypass configuration.
+- **Deliverables:** two active repository rulesets, no bypass actors on either.
+  - **`main`** (id 20914072, target `branch`, `~DEFAULT_BRANCH`): `pull_request` with 0 required
+    approvals — GitHub supports requiring a pull request *without* requiring approval, which is what
+    makes the single-maintainer decision expressible without a routine bypass —
+    `required_status_checks` naming `standards` with `strict_required_status_checks_policy: false`,
+    `non_fast_forward`, and `deletion`.
+  - **`released-tags`** (id 20914075, target `tag`, `refs/tags/v*`): `deletion`, `non_fast_forward`,
+    and `update`. Classic branch protection cannot express this half of the contract at all, which is
+    why rulesets were chosen over it.
+  - Strict "branch must be up to date" was deliberately **not** enabled. It is a concurrency policy,
+    not one of the six controls, and it triggers reruns caused only by an unrelated merge.
 - **Acceptance Criteria:**
   - Performed only on explicit owner authorization, and never as a side effect of any other task.
-  - The `review_required` question is settled first — see `docs/host-enforcement.md` §5, where option
-    C is recorded as not recommended because it makes admin bypass the routine merge path.
+  - The required check name is **read back from what GitHub recorded**, not assumed from what was
+    submitted: the ruleset's stored context is `standards`, and the check run this repository actually
+    produces is also named `standards`. A required check whose name resolves to nothing is a required
+    check that can never block anything, and it looks identical to a working one in the UI.
+  - Nothing else changed: no collaborator, Actions setting, merge method, visibility, or tag.
 - **Dependencies:** the dogfood run.
 
 ### Re-read the host, and prove the same code says GOVERNED
 
-- **Status:** `NOT_STARTED` (D1-E)
+- **Status:** `COMPLETE` — 2026-08-16 (D1-E)
 - **Purpose:** Both sides of the mechanism, from one implementation.
+- **Deliverables:** [before](../governance/host-evidence-2026-08-16.json) — `UNGOVERNED`, six
+  `ABSENT`; [after](../governance/host-evidence-2026-08-16-after-rulesets.json) — `GOVERNED`, six
+  `SATISFIED`. The collector was not modified between the two runs; only the host changed.
 - **Acceptance Criteria:**
   - The same collector, unmodified between the two runs, reports `UNGOVERNED` before and `GOVERNED`
     after. If it required a change to report the second, the second result is not evidence.
+- **Observed enforcement, beyond configuration:** a direct push of a throwaway commit to `main` was
+  attempted and **rejected by GitHub** — `GH013`, naming both *"Changes must be made through a pull
+  request"* and *"Required status check `standards` is expected"* — with `refs/heads/main` verified
+  unchanged before and after (`536438b` both times). That converts `main.pr_required` and
+  `main.standards_check_required` from *configuration says so* into *configuration plus observed
+  refusal*, which is the same gap this milestone exists to close one layer down.
+
+  Two probes were deliberately **not** run. A force-push or deletion probe against `main` is
+  redundant — the pull-request rule already refuses every direct ref update, as the rejection above
+  shows — and its failure mode is rewriting or removing the default branch. A tag-mutation probe is
+  worse than redundant: with no bypass actors, a probe tag matching `v*` could not afterwards be
+  deleted, so a successful test would leave permanent litter in the release namespace. `v1.0.0` was
+  never a candidate probe.
 - **Dependencies:** the settings change.
 
 ### Negative controls proving the settings cannot silently drift
