@@ -230,6 +230,24 @@ test("a cross-reference to a rule EngineeringStandards does not define is reject
   const { code, out } = await run(
     editText(FREEZE, (t) => t.replace("`errors.no-false-success`", "`errors.no-silent-success`")),
   );
+
+  // THIS CHECK NEEDS A SIBLING REPOSITORY, and therefore has two branches rather than one.
+  //
+  // `scripts/rule-identity.mjs` resolves the EngineeringStandards catalog from an absolute path on
+  // the machine it runs on. That path exists on the author's machine and nowhere else — not in the
+  // CI container, not on a hosted runner. Asserting only the resolvable branch made this test a
+  // property of one laptop, which is how it passed for months and failed the first time the suite
+  // ran anywhere else.
+  //
+  // The branch that runs elsewhere is not skipped, because the thing worth guarding is exactly what
+  // happens when the catalog is missing: an absent catalog must report an absent catalog. A run that
+  // announced "every cross-reference resolved" while having read nothing would be this framework's
+  // defining false green, committed by the tool that exists to forbid it.
+  if (/cross-references: NOT_EVALUATED/.test(out)) {
+    assert.doesNotMatch(out, /cross-references: \d+ cross-references resolved/, "a missing catalog was reported as resolved cross-references");
+    assert.equal(code, 0, `the mutation was reported as an unrelated failure rather than as an unevaluated check:\n${out}`);
+    return;
+  }
   assert.equal(code, 1, out);
   assert.match(out, /does not resolve in the EngineeringStandards catalog/);
 });
