@@ -220,6 +220,25 @@ export const FALSIFIERS = [
     suite: "test/local-ci.test.mjs",
   },
   {
+    // The state that exists so a failed inspection cannot be read as a finding. Collapsing it into
+    // UNGOVERNED sounds conservative — it reports the less favourable state — and is still the
+    // prohibited move: it claims to know the full set of what is missing on a host it could not read.
+    invariant: "governance.unreadable-is-not-ungoverned",
+    file: "scripts/governance.mjs",
+    find: `  if (unreadable.length > 0) {`,
+    replace: `  if (false) { // falsifier: an unreadable host falls through to a positive finding`,
+    suite: "test/governance.test.mjs",
+  },
+  {
+    // The quiet version of the same disease: a required control nobody reported simply vanishes from
+    // the conjunction, so the aggregate improves as the evidence gets worse.
+    invariant: "governance.silence-does-not-shrink-the-conjunction",
+    file: "scripts/governance.mjs",
+    find: `  for (const id of REQUIRED_IDS) {`,
+    replace: `  for (const id of []) { // falsifier: an unreported control is silently dropped`,
+    suite: "test/governance.test.mjs",
+  },
+  {
     invariant: "fixtures.the-known-negative-drawer-is-load-bearing",
     file: "test/fixtures/never-clean",
     replace: null,

@@ -389,4 +389,32 @@ export const INVARIANTS = [
     ],
     falsifier: "submission.updating-an-existing-pull-request-is-success",
   },
+  {
+    id: "governance.unreadable-is-not-ungoverned",
+    statement:
+      "A host whose controls could not be read is INDETERMINATE, never UNGOVERNED and never GOVERNED. Unreadability " +
+      "outranks absence, because UNGOVERNED is a positive finding about a host that was fully read.",
+    record: { file: "docs/host-enforcement.md", quote: "Unreadability outranks absence" },
+    tests: [
+      "an unreadable required control is INDETERMINATE, never UNGOVERNED",
+      "unreadability outranks absence: one missing and one unreadable is INDETERMINATE",
+      "SATISFIED claimed over a source that was not read is not believed",
+      "an unrecognised result value is treated as unreadable, not as satisfied",
+    ],
+    falsifier: "governance.unreadable-is-not-ungoverned",
+  },
+  {
+    id: "governance.silence-does-not-shrink-the-conjunction",
+    statement:
+      "A required control no observation mentions is unreadable, not skipped. The aggregate is derived from the full " +
+      "contract, so it can never improve because the collector reported less.",
+    record: { file: "docs/host-enforcement.md", quote: "Silence must not shrink the conjunction" },
+    tests: [
+      "a required control nobody reported is INDETERMINATE, not silently dropped",
+      "reporting no observations at all is INDETERMINATE, not GOVERNED",
+      "a control the contract does not define cannot satisfy the contract",
+      "a caller cannot hand in its own aggregate state",
+    ],
+    falsifier: "governance.silence-does-not-shrink-the-conjunction",
+  },
 ];

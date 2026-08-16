@@ -27,7 +27,7 @@ import { fileURLToPath } from "node:url";
 import { loadCatalog } from "../scripts/catalog.mjs";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
-const DOCS = ["README.md", "INSTRUCTIONS.md", "PROJECT.md", "docs/architecture.md", "docs/integration-contract.md", "docs/local-ci.md"];
+const DOCS = ["README.md", "INSTRUCTIONS.md", "PROJECT.md", "docs/architecture.md", "docs/integration-contract.md", "docs/local-ci.md", "docs/host-enforcement.md"];
 
 const read = (relative) => readFile(path.join(ROOT, relative), "utf8");
 const exists = async (relative) => {
