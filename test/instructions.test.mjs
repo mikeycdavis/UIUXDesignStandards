@@ -27,7 +27,7 @@ import { fileURLToPath } from "node:url";
 import { loadCatalog } from "../scripts/catalog.mjs";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
-const DOCS = ["README.md", "INSTRUCTIONS.md", "PROJECT.md", "docs/architecture.md", "docs/integration-contract.md"];
+const DOCS = ["README.md", "INSTRUCTIONS.md", "PROJECT.md", "docs/architecture.md", "docs/integration-contract.md", "docs/local-ci.md"];
 
 const read = (relative) => readFile(path.join(ROOT, relative), "utf8");
 const exists = async (relative) => {
@@ -78,7 +78,14 @@ test("every command the documentation names exists as a script the package decla
 });
 
 test("every flag the documentation names is one the tooling parses", async () => {
-  const sources = (await Promise.all(["scripts/uiux.mjs", "scripts/init.mjs", "scripts/applicability.mjs", "scripts/policy.mjs"].map(read))).join("\n");
+  // `ci.mjs` and `submit-pr.mjs` are here for the same reason the other four are: they are the
+  // scripts the documentation tells a developer to invoke, and a documented flag that no script parses
+  // is a documented flag that silently does nothing.
+  const sources = (
+    await Promise.all(
+      ["scripts/uiux.mjs", "scripts/init.mjs", "scripts/applicability.mjs", "scripts/policy.mjs", "scripts/ci.mjs", "scripts/submit-pr.mjs"].map(read),
+    )
+  ).join("\n");
   const flags = new Set();
   for (const { body } of await corpus()) {
     for (const [, flag] of body.matchAll(/(--[a-z][a-z-]+)(?:=|\b)/g)) flags.add(flag);
