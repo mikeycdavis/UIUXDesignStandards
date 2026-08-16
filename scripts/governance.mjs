@@ -100,7 +100,9 @@ export const CONTROLS = [
     // would turn the bypass signal into noise. Recorded as an open owner decision, not as satisfied.
     required: false,
     deferredReason:
-      "Single-maintainer repository: GitHub forbids self-approval, so requiring a review would make admin bypass the routine merge path and destroy the value of bypass.policy as a signal.",
+      "Single-maintainer repository. GitHub does not permit self-approval, so requiring one approval would force " +
+      "routine admin bypass. Revisit when a second active maintainer exists who can perform independent review.",
+    revisitWhen: "A second maintainer with merge/review responsibility is added.",
     source: "branch-protection-or-ruleset",
     why: "Separating author from merger is proportionate for a repository whose output other projects trust.",
   },

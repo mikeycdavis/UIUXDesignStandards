@@ -150,8 +150,13 @@ the deferred control is still read and still reported.
 
 ## 6. What this document does not establish
 
-It defines the contract. It does not collect evidence, and it does not change any setting. The
-collector, the dogfood run against this repository as it stands today — which should report
-`UNGOVERNED` with the missing controls enumerated, since that is currently the truth — the authorized
-settings change, the re-read, and the drift controls are all later steps in
+It defines the contract, and `npm run governance` collects against it — read-only, using the
+developer's existing `gh` session, storing no token anywhere. Reporting is not gating: `UNGOVERNED`
+and `INDETERMINATE` are findings the command was asked to produce, so it exits 0 for all three states
+and reserves exit 2 for not being able to run at all, exactly as the Gate 1 classifier does.
+
+What this document does **not** establish is any change to a setting. The dogfood run against this
+repository as it stands reports `UNGOVERNED` with six controls absent — the correct answer, and a
+success of the collector rather than a failure of it. The authorized settings change, the re-read, and
+the drift controls are later steps in
 [artifacts/project-plan-breakdown/17-host-enforcement.md](../artifacts/project-plan-breakdown/17-host-enforcement.md).

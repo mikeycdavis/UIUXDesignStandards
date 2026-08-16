@@ -56,9 +56,14 @@ repository that is not yet governed.
 
 ### Build the read-only host evidence collector
 
-- **Status:** `NOT_STARTED` (D1-B)
+- **Status:** `COMPLETE` — 2026-08-16 (D1-B)
 - **Purpose:** Turn GitHub's branch-protection, ruleset, and required-check state into control
   observations the state machine can decide over.
+- **Built as** [scripts/host-evidence.mjs](../../scripts/host-evidence.mjs), `npm run governance`,
+  with [test/host-evidence.test.mjs](../../test/host-evidence.test.mjs) driving it offline through an
+  injected request function. The HTTP status comes from the `status` field of GitHub's own JSON error
+  body rather than from gh's stderr sentence — API data, not CLI prose, for the reason `submit-pr`
+  already learned once. An undeterminable status is a failed read, never a not-found.
 - **Deliverables:** a collector reading branch protection, rulesets, tag rulesets, and bypass actors,
   emitting one observation per contract control with its source and whether that source was read. It
   mutates nothing. A 404 (`Branch not protected`) is a *successful read establishing absence*; a 403,
@@ -77,11 +82,13 @@ repository that is not yet governed.
 
 ### Dogfood the collector against the unprotected repository
 
-- **Status:** `NOT_STARTED` (D1-C)
+- **Status:** `COMPLETE` — 2026-08-16 (D1-C)
 - **Purpose:** Prove the mechanism reports the truth about a repository that is *not* governed, before
   any setting exists that would make the happy path available.
-- **Deliverables:** a recorded run against this repository as it stands, with the missing controls
-  enumerated individually.
+- **Deliverables:** [artifacts/governance/host-evidence-2026-08-16.json](../governance/host-evidence-2026-08-16.json)
+  — `UNGOVERNED`, six required controls `ABSENT`, each with `evidenceRead: true`, and nothing
+  `UNREADABLE`. The deferred `main.review_required` is observed and reported alongside, with its
+  reason and revisit trigger.
 - **Acceptance Criteria:**
   - The expected result is `UNGOVERNED`, and that is a **success of the collector**, not a failure of
     it. A run that reported `INDETERMINATE` here would mean the collector could not read a host it has

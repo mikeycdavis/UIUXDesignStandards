@@ -146,5 +146,9 @@ test("every control carries the evidence source it would be read from", () => {
       control.deferredReason,
       `${control.id} is outside the conjunction with no recorded reason — deferring is a decision, not a default`,
     );
+    assert.ok(
+      control.revisitWhen,
+      `${control.id} is deferred with no revisit trigger — a deferral with no way back is an abandonment`,
+    );
   }
 });
