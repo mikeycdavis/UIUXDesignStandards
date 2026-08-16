@@ -158,6 +158,75 @@ export function verifyCommitIdentity(before, after, evidence) {
   return { ok: true };
 }
 
+/**
+ * How a submission ended, when it ended successfully.
+ *
+ * Both are exit 0, and they are still not the same event. A branch that already had a pull request
+ * open and now points at a newly verified commit is a SUCCESSFUL submission — the commit is published
+ * and proposed — but it is not a creation, and a result artifact that called it one would be lying
+ * about which operation happened. Two names, one exit code, no third meaning invented.
+ */
+export const OUTCOME = { PR_CREATED: "PR_CREATED", PR_UPDATED: "PR_UPDATED" };
+
+/**
+ * Whether to reuse an open pull request or open one, decided from repository STATE rather than from
+ * the wording of a CLI error.
+ *
+ * The defect this replaces: `gh pr create` fails when a pull request for the branch already exists,
+ * and treating that failure as the submission's failure made a completely successful run — verified
+ * commit pushed, pull request pointing at it — exit 1. A command that returns failure on success
+ * teaches its callers to disregard its exit code, which for the tool whose job is auditable
+ * publication is worse than an ordinary bug.
+ *
+ * Recognising the state by matching the error text was rejected: it would make correctness depend on
+ * the CLI's phrasing, which is not a contract anyone has promised to keep.
+ *
+ * @param existing open pull requests whose head is this branch, or `null` if discovery itself failed
+ */
+export function choosePrAction({ existing, branch, base, verifiedSha }) {
+  if (!Array.isArray(existing)) {
+    return { action: "refuse", message: "Could not determine whether a pull request already exists for this branch. The verified commit is pushed; nothing was opened." };
+  }
+
+  const onThisBase = existing.filter((pr) => pr.baseRefName === base);
+  const elsewhere = existing.filter((pr) => pr.baseRefName !== base);
+
+  if (onThisBase.length === 0) {
+    if (elsewhere.length > 0) {
+      // Never silently retarget. An open pull request from this branch onto a DIFFERENT base is a
+      // proposal somebody made deliberately; reusing it would move a review to a base its reviewers
+      // never agreed to, and opening a second one from the same branch is rarely what was meant.
+      const named = elsewhere.map((pr) => `#${pr.number} onto '${pr.baseRefName}'`).join(", ");
+      return {
+        action: "refuse",
+        message:
+          `This branch already has an open pull request against a different base: ${named}. ` +
+          `The verified commit is pushed and those pull requests now point at it. ` +
+          `Re-run with --base to match one of them, or close it first — this command will not retarget a review nobody asked it to.`,
+      };
+    }
+    return { action: "create" };
+  }
+
+  if (onThisBase.length > 1) {
+    return { action: "refuse", message: `More than one open pull request from '${branch}' onto '${base}': ${onThisBase.map((pr) => `#${pr.number}`).join(", ")}. Resolve that first.` };
+  }
+
+  const [pr] = onThisBase;
+  // The same standard the creation path is held to. An existing pull request is only a successful
+  // submission if it now points at the commit that just passed; if the push did not move it there,
+  // saying "submitted" would name a verification that does not describe what reviewers would see.
+  if (pr.headRefOid !== verifiedSha) {
+    return {
+      action: "refuse",
+      message:
+        `Pull request #${pr.number} still points at a different commit than the one verified. Nothing further was done.\n` +
+        `  pull request head: ${pr.headRefOid ?? "unknown"}\n  verified:          ${verifiedSha}`,
+    };
+  }
+  return { action: "reuse", pr, outcome: OUTCOME.PR_UPDATED };
+}
+
 // --- Process helpers -------------------------------------------------------------------------------
 
 function run(command, args, { capture = true } = {}) {
@@ -291,6 +360,42 @@ export async function submit(options) {
     return EXIT.PASSED;
   }
 
+  // 6. Does a pull request for this branch already exist? Asked of the repository BEFORE creating one,
+  //    because "it already exists" is a state, and reading it off the wording of a `gh pr create`
+  //    failure would make this command's exit code depend on the CLI's phrasing.
+  const listed = run("gh", ["pr", "list", "--head", branch, "--state", "open", "--json", "number,url,baseRefName,headRefOid"]);
+  let existing = null;
+  if (listed.code === 0) {
+    try {
+      existing = JSON.parse(listed.out || "[]");
+    } catch {
+      existing = null;
+    }
+  }
+
+  const decision = choosePrAction({ existing, branch, base, verifiedSha: before });
+  if (decision.action === "refuse") return refuse(decision.message, EXIT.FAILED);
+
+  const recordSubmission = (outcome, pr) => {
+    mkdirSync(EVIDENCE_DIR, { recursive: true });
+    writeFileSync(
+      path.join(EVIDENCE_DIR, "submission.json"),
+      `${JSON.stringify({ outcome, commit: before, branch, base, pullRequest: pr ? { number: pr.number, url: pr.url } : null }, null, 2)}\n`,
+    );
+  };
+
+  if (decision.action === "reuse") {
+    // A successful submission, and not a creation. The commit is published and the open pull request
+    // points at it — which is exactly what was asked for — so this exits 0 and says which of the two
+    // things happened rather than inventing a third meaning for the exit code.
+    recordSubmission(decision.outcome, decision.pr);
+    say(
+      `\nSubmitted (${decision.outcome}). Verified commit ${before}, verified locally in Docker, pushed to '${branch}'.\n` +
+        `Pull request #${decision.pr.number} against '${base}' already existed and now points at it: ${decision.pr.url}`,
+    );
+    return EXIT.PASSED;
+  }
+
   const title = options.title ?? git("log", "-1", "--pretty=%s", before).out.trim();
   const body = [options.body?.trim(), verificationBlock(evidence)].filter(Boolean).join("\n\n");
   mkdirSync(EVIDENCE_DIR, { recursive: true });
@@ -302,7 +407,29 @@ export async function submit(options) {
   const created = run("gh", args, { capture: false });
   if (created.code !== 0) return refuse("The push succeeded but `gh pr create` failed. The verified commit is published; open the pull request manually.", EXIT.FAILED);
 
-  say(`\nSubmitted. Verified commit ${before}, verified locally in Docker, pushed and proposed against '${base}'.`);
+  // Read the created pull request back rather than trusting that it points where it should. Same
+  // standard the reuse path is held to: a submission is only successful if what reviewers will see
+  // is the commit that passed.
+  const opened = run("gh", ["pr", "view", "--json", "number,url,headRefOid"]);
+  let head = null;
+  try {
+    head = JSON.parse(opened.out || "null");
+  } catch {
+    head = null;
+  }
+  if (opened.code !== 0 || !head) {
+    return refuse("The pull request was created but could not be read back, so nothing confirms which commit it proposes.", EXIT.FAILED);
+  }
+  if (head.headRefOid !== before) {
+    return refuse(
+      `The pull request was created but proposes a different commit than the one verified.\n` +
+        `  pull request head: ${head.headRefOid}\n  verified:          ${before}`,
+      EXIT.FAILED,
+    );
+  }
+
+  recordSubmission(OUTCOME.PR_CREATED, head);
+  say(`\nSubmitted (${OUTCOME.PR_CREATED}). Verified commit ${before}, verified locally in Docker, pushed and proposed against '${base}': ${head.url}`);
   return EXIT.PASSED;
 }
 

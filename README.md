@@ -121,7 +121,7 @@ artifacts/
   design/        the frozen rule catalog — identity, fixed before implementation
   prompts/       the source prompts and the owner's recorded decisions
   project-plan-breakdown/   what is built, what is not, and what each section discovered
-test/            the suite, including 24 architectural falsifiers
+test/            the suite, including 25 architectural falsifiers
 ```
 
 ## Exit codes

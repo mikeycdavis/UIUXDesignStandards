@@ -369,4 +369,22 @@ export const INVARIANTS = [
     ],
     falsifier: "submission.the-remote-owns-its-own-default-branch",
   },
+  {
+    id: "submission.updating-an-existing-pull-request-is-success",
+    statement:
+      "A verified commit pushed to a branch whose pull request is already open, and now points at that commit, is a " +
+      "successful submission and exits 0. Whether one already exists is read from repository state, never from the " +
+      "wording of a CLI error, and PR_UPDATED is reported distinctly from PR_CREATED.",
+    record: { file: "docs/local-ci.md", quote: "is a successful submission, not a failure" },
+    tests: [
+      "an existing pull request already pointing at the verified commit is a successful submission",
+      "creating and updating are distinct outcomes even though both succeed",
+      "no existing pull request leaves the creation path exactly as it was",
+      "an existing pull request that does not point at the verified commit is refused",
+      "an existing pull request onto another base is never silently reused or retargeted",
+      "a failed discovery is refused rather than assumed to mean no pull request exists",
+      "submission consults the repository's state before creating, and never the wording of an error",
+    ],
+    falsifier: "submission.updating-an-existing-pull-request-is-success",
+  },
 ];

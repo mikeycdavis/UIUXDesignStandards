@@ -24,7 +24,7 @@ import { fileURLToPath } from "node:url";
 
 import { CI_SERVICE, COMPOSE_FILE, IMAGE_TAG, STAGES, stageCommand, stageWorkflowStep } from "../scripts/ci-pipeline.mjs";
 import { EXIT, REASON, establishContainerIdentity, parseArgs, UsageError } from "../scripts/ci.mjs";
-import { PROTECTED_BRANCHES, checkBranch, checkTree, chooseBase, parseSymrefHead, verificationBlock, verifyCommitIdentity } from "../scripts/submit-pr.mjs";
+import { OUTCOME, PROTECTED_BRANCHES, checkBranch, checkTree, chooseBase, choosePrAction, parseSymrefHead, verificationBlock, verifyCommitIdentity } from "../scripts/submit-pr.mjs";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const read = (relative) => readFile(path.join(ROOT, relative), "utf8");
@@ -388,6 +388,71 @@ test("the remote's default branch is read from the remote's own symbolic ref", (
   assert.equal(parseSymrefHead("ref: refs/heads/release/2.x\tHEAD\n"), "release/2.x");
   assert.equal(parseSymrefHead(""), null, "an empty answer was read as a branch name");
   assert.equal(parseSymrefHead("fatal: could not read from remote\n"), null, "an error was read as a branch name");
+});
+
+// --- Creating versus updating a pull request ---------------------------------------------------------
+//
+// The defect: `gh pr create` fails when the branch already has an open pull request, and treating
+// that as the submission's failure made a wholly successful run — verified commit pushed, pull
+// request pointing at it — exit 1. A false red, and for the tool whose job is auditable publication
+// that is worse than an ordinary bug: a caller who learns exit 1 sometimes means success will
+// disregard exit 1 when it means what it says.
+
+const openPr = (overrides = {}) => ({ number: 1, url: "https://example.invalid/pull/1", baseRefName: "main", headRefOid: SHA_A, ...overrides });
+
+test("an existing pull request already pointing at the verified commit is a successful submission", () => {
+  const decision = choosePrAction({ existing: [openPr()], branch: "topic", base: "main", verifiedSha: SHA_A });
+  assert.equal(decision.action, "reuse", "an already-open pull request was not recognised as a successful submission");
+  assert.equal(decision.outcome, OUTCOME.PR_UPDATED, "an update was reported as something other than an update");
+  assert.equal(decision.pr.number, 1);
+});
+
+test("creating and updating are distinct outcomes even though both succeed", () => {
+  // Two names, one exit code. A result artifact that called an update a creation would be describing
+  // an operation that did not happen.
+  assert.notEqual(OUTCOME.PR_CREATED, OUTCOME.PR_UPDATED);
+  assert.equal(new Set(Object.values(OUTCOME)).size, 2);
+});
+
+test("no existing pull request leaves the creation path exactly as it was", () => {
+  assert.deepEqual(choosePrAction({ existing: [], branch: "topic", base: "main", verifiedSha: SHA_A }), { action: "create" });
+});
+
+test("an existing pull request that does not point at the verified commit is refused", () => {
+  // The reuse path is held to the same standard as creation. If the push did not move the pull
+  // request to the verified commit, reporting "submitted" would name a verification that does not
+  // describe what a reviewer would see.
+  const decision = choosePrAction({ existing: [openPr({ headRefOid: SHA_B })], branch: "topic", base: "main", verifiedSha: SHA_A });
+  assert.equal(decision.action, "refuse");
+  assert.match(decision.message, /points at a different commit/);
+});
+
+test("an existing pull request onto another base is never silently reused or retargeted", () => {
+  const decision = choosePrAction({ existing: [openPr({ number: 7, baseRefName: "develop" })], branch: "topic", base: "main", verifiedSha: SHA_A });
+  assert.equal(decision.action, "refuse", "a review onto 'develop' was quietly treated as a submission onto 'main'");
+  assert.notEqual(decision.action, "create", "a second pull request from the same branch was opened alongside the first");
+  assert.match(decision.message, /#7 onto 'develop'/);
+});
+
+test("a failed discovery is refused rather than assumed to mean no pull request exists", () => {
+  // `null` is "the question was not answered". Reading it as an empty list would turn a broken `gh`
+  // into a second pull request.
+  for (const existing of [null, undefined]) {
+    const decision = choosePrAction({ existing, branch: "topic", base: "main", verifiedSha: SHA_A });
+    assert.equal(decision.action, "refuse");
+    assert.match(decision.message, /Could not determine/);
+  }
+});
+
+test("submission consults the repository's state before creating, and never the wording of an error", async () => {
+  const source = await read("scripts/submit-pr.mjs");
+  assert.match(source, /if \(decision\.action === "reuse"\)/, "submission has no reuse path, so an existing pull request would still be a failure");
+  assert.match(source, /"pr", "list", "--head", branch, "--state", "open"/, "submission never asks whether a pull request already exists");
+  for (const phrase of ["already exists", "already exist"]) {
+    assert.equal(source.includes(`"${phrase}`), false, `submission matches gh's error text (${phrase}), making correctness depend on CLI phrasing`);
+  }
+  // Every other gh failure still fails. The fix is narrower than "tolerate gh errors".
+  assert.match(source, /`gh pr create` failed/, "the ordinary gh-create failure path was removed along with the false red");
 });
 
 test("the pull-request body reports local Docker verification and never claims hosted Actions passed", () => {

@@ -333,6 +333,23 @@ gate rather than by relaxing it.
 it keeps naming the old branch, usually one that still exists; it is used only as a last resort ahead
 of a bare guess, and says so when it is.
 
+### Opening versus updating
+
+After the push, the command asks whether an open pull request already exists for the branch, and does
+so by reading repository state rather than by interpreting a `gh pr create` failure — matching the
+CLI's error wording would make correctness depend on a phrasing nobody has promised to keep.
+
+A branch whose pull request is already open, and which now points at the freshly verified commit,
+**is a successful submission, not a failure**: the commit is published and proposed, which is what was
+asked for. It exits 0 and reports `PR_UPDATED`; a newly opened one reports `PR_CREATED`. Two names,
+one exit code, no third meaning. Both paths read the pull request back and refuse if its head is not
+the verified commit. An open pull request from this branch onto a *different* base is refused rather
+than retargeted or duplicated, and a discovery that fails is refused rather than read as "none exists".
+
+Every other `gh` failure still exits 1. The correction is that a successful end state stopped
+reporting failure — a command that returns 1 on success teaches its callers to disregard its exit
+code, which for the tool whose job is auditable publication is worse than an ordinary bug.
+
 The push is by explicit refspec on the sha. `git push origin <branch>` would publish whatever the
 branch points at when the command runs, which is the exact substitution the comparisons just ruled out.
 

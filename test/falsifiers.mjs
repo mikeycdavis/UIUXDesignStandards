@@ -210,6 +210,16 @@ export const FALSIFIERS = [
     suite: "test/local-ci.test.mjs",
   },
   {
+    // Back to creating unconditionally, which is how a wholly successful submission came to exit 1.
+    // A false red rather than a false green, and the same disease: an exit code that does not mean
+    // what it says. The suite must object to losing the state check.
+    invariant: "submission.updating-an-existing-pull-request-is-success",
+    file: "scripts/submit-pr.mjs",
+    find: `  if (decision.action === "reuse") {`,
+    replace: `  if (false) { // falsifier: always create, so an existing pull request is a failure again`,
+    suite: "test/local-ci.test.mjs",
+  },
+  {
     invariant: "fixtures.the-known-negative-drawer-is-load-bearing",
     file: "test/fixtures/never-clean",
     replace: null,
