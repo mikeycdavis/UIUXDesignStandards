@@ -22,6 +22,7 @@
 import { strict as assert } from "node:assert";
 import { test } from "node:test";
 import { access, readdir, readFile } from "node:fs/promises";
+import { spawnSync } from "node:child_process";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { loadCatalog } from "../scripts/catalog.mjs";
@@ -291,4 +292,94 @@ test("the falsifier count the documentation states is the number that actually r
       assert.equal(count, FALSIFIERS.length, `${file} claims ${count} architectural falsifiers; ${FALSIFIERS.length} run`);
     }
   }
+});
+
+// --- Binding 8: a ref the docs tell adopters to pin is a ref that carries what they are pinning ----
+
+/**
+ * A documented `uses:` line is an instruction to a stranger's CI, and it is the one kind of
+ * documentation error that cannot be noticed by reading. `INSTRUCTIONS.md` pinned
+ * `validate.yml@8353469` for two releases: a real commit, correctly formatted, resolvable — and the
+ * v1.0.0 tree it names contains no `validate.yml`, because the workflow was written after the tag.
+ * An adopter following it got an unresolvable `uses:`, which is not the refusal this pack promises.
+ *
+ * Nothing caught it. Every other binding in this file asks whether a NAME exists; this one asks
+ * whether a REF CONTAINS a path, which is a question about a tree rather than about the checkout the
+ * suite happens to be running in.
+ *
+ * Placeholders are exempt and must stay unpasteable: a documented ref is checked only when it looks
+ * like a concrete git object, and the exemption is proved by asserting the placeholders do not
+ * resolve. Both directions are asserted, because a matcher that finds nothing would pass in silence.
+ */
+const CONCRETE_REF = /^(?:[0-9a-f]{7,40}|v\d+\.\d+\.\d+)$/;
+
+const gitAt = (...args) => spawnSync("git", args, { cwd: ROOT, encoding: "utf8" });
+const treeHas = (ref, filePath) => gitAt("cat-file", "-e", `${ref}:${filePath}`).status === 0;
+const resolves = (ref) => gitAt("rev-parse", "--verify", "--quiet", `${ref}^{commit}`).status === 0;
+
+/**
+ * Whether this checkout can answer questions about other commits at all.
+ *
+ * Three runners execute this suite and they do not agree. The containerised gate copies `.git`
+ * deliberately (`.dockerignore` says so in its first paragraph) and can answer. The falsifier
+ * sandbox copies source directories and NOT `.git`, because it mutates files rather than history.
+ * A shallow clone can resolve HEAD and no tag.
+ *
+ * Where history is absent the honest report is that the question was not asked. It is a visible
+ * skip naming what could not be established — never a pass, which would turn "I could not look"
+ * into "I looked and it was fine", the conversion this whole framework refuses.
+ */
+const historyAvailable = () => gitAt("rev-parse", "--git-dir").status === 0 && resolves("v1.0.0");
+const NO_HISTORY =
+  "this checkout carries no usable git history (no repository, or a shallow clone with no tags), " +
+  "so which files a documented ref contains could not be established here";
+
+test("every workflow ref the documentation tells an adopter to pin contains the workflow it names", async (t) => {
+  if (!historyAvailable()) return t.skip(NO_HISTORY);
+  const pinned = [];
+  const placeholders = [];
+
+  for (const { file, body } of await corpus()) {
+    for (const m of body.matchAll(/uses:\s*mikeycdavis\/UIUXDesignStandards\/(\S+?)@(\S+)/g)) {
+      const [, workflowPath, ref] = m;
+      (CONCRETE_REF.test(ref) ? pinned : placeholders).push({ file, ref, workflowPath });
+    }
+    // `standards-ref` is not a `uses:` line, but it is the ref the workflow checks the pack out at,
+    // and it must carry the entry point the workflow then executes.
+    for (const m of body.matchAll(/standards-ref:\s*(\S+)/g)) {
+      const ref = m[1];
+      (CONCRETE_REF.test(ref) ? pinned : placeholders).push({ file, ref, workflowPath: "scripts/uiux.mjs" });
+    }
+  }
+
+  assert.ok(pinned.length > 0, "no concrete ref was found in any document — this guard would pass vacuously");
+
+  for (const { file, ref, workflowPath } of pinned) {
+    assert.ok(resolves(ref), `${file} pins ${ref}, which does not resolve to a commit in this repository`);
+    assert.ok(
+      treeHas(ref, workflowPath),
+      `${file} tells an adopter to pin ${ref}, but the tree at ${ref} does not contain ${workflowPath} — ` +
+        `following that line yields an unresolvable reference, not a verdict and not a refusal`,
+    );
+  }
+
+  // The exemption is real: a placeholder must not be something a reader could mistake for a ref.
+  for (const { file, ref } of placeholders) {
+    assert.ok(!resolves(ref), `${file} uses ${ref} as a placeholder, but it resolves — so it is a pin, and unchecked`);
+  }
+});
+
+test("the pinned-ref guard can see the defect it was written for", (t) => {
+  if (!historyAvailable()) return t.skip(NO_HISTORY);
+  // The exact line that shipped: v1.0.0 is a real, resolvable commit whose tree predates the workflow.
+  const RELEASE = "v1.0.0";
+  assert.ok(resolves(RELEASE), "v1.0.0 does not resolve, so this control proves nothing");
+  assert.equal(
+    treeHas(RELEASE, ".github/workflows/validate.yml"),
+    false,
+    "v1.0.0 now contains validate.yml — this control is stale and no longer demonstrates the defect",
+  );
+  assert.equal(treeHas(RELEASE, "scripts/version-identity.mjs"), false, "v1.0.0 now contains the identity guard");
+  // And the ref the documentation does pin passes the same check, so the guard is not simply strict.
+  assert.equal(treeHas("54352e9a0dc0fb3ba0e4762663d341c46d8a3c89", ".github/workflows/validate.yml"), true);
 });

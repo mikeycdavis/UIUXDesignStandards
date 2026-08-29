@@ -17,6 +17,13 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          # THE TAGS ARE THE POINT, and this mirrors the same line in validate.yml for the same
+          # reason. Checks here ask what a documented ref CONTAINS — whether the commit an adopter is
+          # told to pin carries the workflow being pinned — and a shallow clone can resolve HEAD and
+          # no tag. Without this the guard reports a visible skip on every hosted run: not a false
+          # pass, but a permanently unasked question, which defends nothing.
+          fetch-depth: 0
       - uses: actions/setup-node@v4
         with:
           node-version: 20
