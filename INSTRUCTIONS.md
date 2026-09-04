@@ -270,13 +270,24 @@ is the guarantee.
 `.github/workflows/validate.yml` is callable with `workflow_call`. Your repository invokes it; it
 does not reimplement any rule, and your YAML must not either.
 
+> **There is no released ref to pin yet, and this section will not invent one.** `v1.0.0` was tagged
+> before this workflow and the version-identity guard existed, so the released tree contains neither
+> `.github/workflows/validate.yml` nor `scripts/version-identity.mjs`. Pinning `@v1.0.0` — or the
+> commit it names — does not resolve to a workflow at all, and never produced a verdict. Consuming
+> this pack as an immutable release becomes possible with `v2.0.0` ([ADR 0017](artifacts/adr/0017-the-next-release-is-2-0-0-and-the-consumer-milestone-splits.md)).
+> Until then the block below is the shape of the contract, not a recipe that runs.
+
 ```yaml
 jobs:
   uiux:
-    uses: mikeycdavis/UIUXDesignStandards/.github/workflows/validate.yml@8353469
+    uses: mikeycdavis/UIUXDesignStandards/.github/workflows/validate.yml@RELEASE_SHA
     with:
-      standards-ref: 8353469        # a sha, or the tag it aliases
+      standards-ref: RELEASE_SHA    # the same commit; a tag is only an alias for one
 ```
+
+`RELEASE_SHA` is a placeholder, and deliberately not a value that can be pasted into a working state.
+Substitute the commit of a release that actually contains this workflow, and pin the commit rather
+than the tag: a tag is a mutable human-readable alias, and a commit is not.
 
 The exit contract the caller sees is the framework's own: `0` the project satisfied the pack, `1` it
 did not, `2` no verdict was reached. The third fails the check with a configuration annotation rather
@@ -287,17 +298,46 @@ as a passing one.
 `1.0.0` evaluated by anything that is not the released 1.0.0 produces no verdict at all, at exit 2.
 That includes a ref pointing at a *branch* whose `VERSION` file happens to read `1.0.0` — in this
 family `VERSION` names the last release and stays there during development, so a branch can carry a
-released version number while being a different framework. The envelope records what actually ran:
+released version number while being a different framework.
+
+**When a verdict is produced**, the envelope records which framework produced it, and you read that
+block rather than the workflow's `uses:` line — the line states an intention, the block is a record
+of what happened:
 
 ```json
 "versionIdentity": {
-  "pack": "UIUXDesignStandards", "declaredVersion": "1.0.0", "executedVersion": "1.0.0",
-  "executedCommit": "8353469...", "executedTree": "RELEASE_TREE", "identity": "MATCH"
+  "pack": "UIUXDesignStandards", "declaredVersion": "2.0.0", "executedVersion": "2.0.0",
+  "executedCommit": "<the commit v2.0.0 names>", "executedTree": "RELEASE_TREE", "identity": "MATCH"
 }
 ```
 
-Read that block rather than the workflow's `uses:` line. The line states an intention; the block is a
-record of what happened.
+**When identity refuses, there is no envelope at all** — its `status` would be exactly the claim
+being refused. The refusal names the state on stderr and the run exits 2.
+
+### Pinning a development sha, and what it produces
+
+A ref that is not a release is not a way to adopt the pack early. Every development commit refuses,
+by construction:
+
+```yaml
+jobs:
+  uiux:
+    uses: mikeycdavis/UIUXDesignStandards/.github/workflows/validate.yml@54352e9a0dc0fb3ba0e4762663d341c46d8a3c89
+    with:
+      standards-ref: 54352e9a0dc0fb3ba0e4762663d341c46d8a3c89
+```
+
+With a policy declaring `1.0.0`, that pin produces:
+
+```text
+uiux-standards validate: EXECUTED_TREE_IS_NOT_THE_RELEASE
+  ... the executing framework's VERSION agrees, but its tree is not the v1.0.0 release ...
+exit 2 — and no envelope
+```
+
+That is the guard working, not a defect to route around. It is also the only outcome this pack can
+honestly demonstrate across a repository boundary before `v2.0.0` exists, which is why the
+distribution proof is a *refusal* rather than an adoption (ADR 0017, phase 13A).
 
 ### What installing this workflow does not establish
 
