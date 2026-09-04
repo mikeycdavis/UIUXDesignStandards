@@ -19,6 +19,13 @@
  */
 export const FALSIFIERS = [
   {
+    invariant: "identity.a-refusal-is-machine-readable",
+    file: "scripts/uiux.mjs",
+    find: `error: { code: error.identity.identity, message: error.message },`,
+    replace: `error: { code: "IDENTITY_REFUSED", message: error.message },`,
+    suite: "test/version-identity.test.mjs",
+  },
+  {
     invariant: "gate1.indeterminate-is-not-not-applicable",
     file: "scripts/applicability.mjs",
     find: `return { classification: "INDETERMINATE", agreement: "undeclared", applicabilityClasses: [], reasons };`,

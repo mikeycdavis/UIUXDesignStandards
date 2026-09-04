@@ -39,7 +39,7 @@ ran.
 | Remote | `origin` — github.com/mikeycdavis/UIUXDesignStandards. `main` and `v1.0.0` published 2026-08-11 |
 | Standards written | 40 of 40 |
 | Rules catalogued | 70 in 15 files, 15 forbidden |
-| Tooling | vendored core, content-identity primitive, inventory, provenance, rule-identity, and policy checkers; the Gate 1 classifier; the `audit` and `validate` pipelines with 13 static detectors; browser-evidence ingestion; the attestation model; the `init` bootstrap; CI and the documentation; the release-readiness checker and the frozen v1.0.0 catalog snapshot; the full suite, including 29 architectural falsifiers |
+| Tooling | vendored core, content-identity primitive, inventory, provenance, rule-identity, and policy checkers; the Gate 1 classifier; the `audit` and `validate` pipelines with 13 static detectors; browser-evidence ingestion; the attestation model; the `init` bootstrap; CI and the documentation; the release-readiness checker and the frozen v1.0.0 catalog snapshot; the full suite, including 30 architectural falsifiers |
 | Platform | Node ≥ 18, zero dependencies |
 | Own policy | `no-ui` declared, and classified `NOT_APPLICABLE` from evidence — complete scan, zero signals, `agreement: match`. `validate` exits 0: `uiCompliance: null`, `frameworkCompliance: COMPLIANT` |
 | Framework version | `1.0.0` — `RELEASED` at [`8353469`](../release/publication-v1.0.0.md), verified from a clone of the published tag. This tree is `POST_RELEASE_DEVELOPMENT`, not the release tree. One gap carried: the Git chronology is `NOT_ESTABLISHED` — the only kind a release may carry, evidence that cannot now be recovered honestly |

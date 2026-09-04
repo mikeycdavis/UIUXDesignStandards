@@ -207,6 +207,38 @@ without knowing anything about the other.
 process rules being satisfied says nothing about whether the UI rules were ever reachable. The
 top-level exit is not the framework-process verdict.
 
+### 3.3a Identity refusal — a record, and deliberately not an envelope
+
+When Gate 0b refuses — the executing framework is not the release the policy names — `validate
+--json` emits a record of the refusal rather than a compliance envelope:
+
+```json
+{
+  "schemaVersion": "1.0",
+  "tool": { "name": "uiux-standards", "version": "1.0.0" },
+  "target": "…",
+  "error": { "code": "EXECUTED_TREE_IS_NOT_THE_RELEASE", "message": "…" },
+  "versionIdentity": { "identity": "EXECUTED_TREE_IS_NOT_THE_RELEASE", "blocking": true, "…": "…" }
+}
+```
+
+`error.code` is the identity state itself — one of `VERSION_MISMATCH` or
+`EXECUTED_TREE_IS_NOT_THE_RELEASE` — so **an adapter reads a key and never parses a message.**
+`versionIdentity` is the same block a successful run carries, so one shape is parsed either way.
+
+**There is no `status`, no `score`, no `applicability`, no `uiCompliance`, and no
+`frameworkCompliance` — not even set to `null`.** A compliance envelope answering `null` is still a
+compliance envelope answering, and the whole point of the refusal is that this run may not answer.
+This is §2.2's argument on the other side of the gate: *"I could not measure"* must not be
+reachable as *"I measured"*.
+
+The refusal still exits 2, and it establishes nothing about the project. Without `--json` the record
+is not written at all, because stdout is then addressed to a person.
+
+Exit 2 by any **other** route — an unreadable policy, an invalid evidence document, an unknown rule
+id in ingested evidence — writes nothing to stdout today. An adapter must therefore treat *absence*
+of a record as a non-identity configuration failure, and read `validate.err` for it.
+
 ### 3.4 Per-rule dispositions an adapter will meet
 
 | Disposition | Status | What it means |
