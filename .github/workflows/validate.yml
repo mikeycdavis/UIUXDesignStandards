@@ -95,7 +95,14 @@ jobs:
 
       # The artifacts are uploaded BEFORE the gate decides, so a failing run still leaves the evidence
       # a governance layer needs. A gate that destroys the reason it failed is a gate nobody can audit.
-      - name: Upload the applicability classification and the compliance envelope
+      #
+      # `envelope.json` carries ONE OF TWO SHAPES, told apart by their keys rather than by the file
+      # name. A run that reached a verdict writes a compliance envelope, which has `status`. A run
+      # refused by the version-identity guard writes an error record, which has `error.code` naming
+      # the identity state and deliberately no `status` at all — the verdict is the claim being
+      # refused, so nothing readable as one may appear. Both are non-empty, which is the point: the
+      # refusal used to leave a zero-byte file, indistinguishable from a step that never ran.
+      - name: Upload the applicability classification and the validate record
         if: always()
         uses: actions/upload-artifact@v4
         with:

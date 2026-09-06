@@ -235,6 +235,11 @@ reachable as *"I measured"*.
 The refusal still exits 2, and it establishes nothing about the project. Without `--json` the record
 is not written at all, because stdout is then addressed to a person.
 
+Through the reusable workflow the record lands in the same `envelope.json` artifact a verdict would
+have used, because the redirect is chosen before the outcome is known. **An adapter must therefore
+discriminate on keys, not on the file name:** `status` present means a compliance envelope, `error`
+present means a refusal. Both files are non-empty, so an empty one still means the step never ran.
+
 Exit 2 by any **other** route — an unreadable policy, an invalid evidence document, an unknown rule
 id in ingested evidence — writes nothing to stdout today. An adapter must therefore treat *absence*
 of a record as a non-identity configuration failure, and read `validate.err` for it.
