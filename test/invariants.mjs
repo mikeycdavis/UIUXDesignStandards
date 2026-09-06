@@ -314,6 +314,24 @@ export const INVARIANTS = [
     falsifier: null,
   },
   {
+    id: "identity.a-refusal-is-machine-readable",
+    statement:
+      "An identity refusal emits a record whose code is the state that actually occurred, carrying no field a " +
+      "consumer could read as a verdict. The state name reaching a consumer only as the first token of an " +
+      "English sentence is not machine-readable, and neither is a zero-byte file, which cannot be told apart " +
+      "from a step that never ran.",
+    record: {
+      file: "artifacts/project-plan-breakdown/13-version-identity-and-reusable-workflow.md",
+      quote: "The machine-readable identity error survives the workflow boundary intact.",
+    },
+    tests: [
+      "consumer: an identity refusal emits a machine-readable record and no verdict",
+      "consumer: the record names the state that actually occurred, not one state always",
+      "the record is emitted only when a record was asked for",
+    ],
+    falsifier: "identity.a-refusal-is-machine-readable",
+  },
+  {
     id: "identity.a-verdict-names-the-framework-that-produced-it",
     statement:
       "A verdict labelled with a standards version is produced by that released version. Where the executing " +

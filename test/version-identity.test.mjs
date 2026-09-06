@@ -272,6 +272,74 @@ test("consumer: THE FALSIFIER — a workflow running main instead of the tag get
   }
 });
 
+// --- The refusal as a record, not as prose (ST-02) ----------------------------------------------
+//
+// Phase 13A's fifth acceptance criterion is that the machine-readable identity error survives the
+// workflow boundary intact. These tests are what "machine-readable" has to mean: a consumer reads a
+// KEY, never the first token of an English sentence, and reads nothing it could mistake for a
+// verdict.
+
+test("consumer: an identity refusal emits a machine-readable record and no verdict", async () => {
+  const framework = await frameworkAt("post-release");
+  const consumer = await consumerDeclaring("1.0.0");
+  try {
+    const run = validateFrom(framework, consumer, "--json");
+    assert.equal(run.code, 2);
+
+    // Anti-vacuity: an empty stdout would satisfy every "must not contain" below. The zero-byte
+    // envelope this replaced did exactly that, and was indistinguishable from a step that never ran.
+    assert.notEqual(run.stdout.trim(), "", "no record was emitted at all");
+    const record = JSON.parse(run.stdout);
+
+    assert.equal(record.error.code, "EXECUTED_TREE_IS_NOT_THE_RELEASE");
+    assert.equal(record.versionIdentity.identity, record.error.code, "the code and the block disagree");
+    assert.equal(record.versionIdentity.blocking, true);
+    assert.equal(record.versionIdentity.executedTree, "POST_RELEASE_DEVELOPMENT");
+    assert.equal(record.schemaVersion, "1.0");
+
+    // NOTHING a consumer could read as a result. The refused claim must not appear in any form,
+    // including an explicitly null one — `"uiCompliance": null` is a compliance envelope answering.
+    for (const key of ["status", "score", "applicability", "uiCompliance", "frameworkCompliance", "results"]) {
+      assert.ok(!(key in record), `the refusal record carries ${key}, which a consumer could read as a verdict`);
+    }
+  } finally {
+    await cleanup(framework, consumer);
+  }
+});
+
+test("consumer: the record names the state that actually occurred, not one state always", async () => {
+  // A code hardcoded to the headline case would pass the test above while telling every other
+  // refusal's consumer something false. Two different blocking states, two different codes.
+  const framework = await frameworkAt("released");
+  const consumer = await consumerDeclaring("1.1.0");
+  try {
+    const run = validateFrom(framework, consumer, "--json");
+    assert.equal(run.code, 2);
+    const record = JSON.parse(run.stdout);
+    assert.equal(record.error.code, "VERSION_MISMATCH");
+    assert.equal(record.versionIdentity.declaredVersion, "1.1.0");
+    assert.equal(record.versionIdentity.executedVersion, "1.0.0");
+    assert.ok(!("status" in record));
+  } finally {
+    await cleanup(framework, consumer);
+  }
+});
+
+test("the record is emitted only when a record was asked for", async () => {
+  // Without --json the CLI speaks to a person. Writing JSON to stdout there would corrupt the human
+  // output, and the classifier's non-execution envelope has the same guard for the same reason.
+  const framework = await frameworkAt("post-release");
+  const consumer = await consumerDeclaring("1.0.0");
+  try {
+    const run = validateFrom(framework, consumer);
+    assert.equal(run.code, 2);
+    assert.equal(run.stdout.trim(), "", "a JSON record was written to a human-facing stdout");
+    assert.match(run.stderr, /EXECUTED_TREE_IS_NOT_THE_RELEASE/, "the refusal must still be legible to a person");
+  } finally {
+    await cleanup(framework, consumer);
+  }
+});
+
 test("no command line can weaken the guard", async () => {
   // The escape hatches this framework must never grow, listed so the absence is asserted rather than
   // assumed: a flag gets pasted into a workflow and never removed, an environment variable is

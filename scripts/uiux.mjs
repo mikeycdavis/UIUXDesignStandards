@@ -1185,6 +1185,25 @@ export async function runAudit(target, { maxFiles = MAX_FILES } = {}) {
 export class ValidationError extends Error {}
 
 /**
+ * A Gate 0b refusal, carrying the identity block that produced it.
+ *
+ * It exists so the CLI can emit a MACHINE-READABLE record of the refusal without parsing its own
+ * prose. The state name used to survive only as the first token of `message`, which meant a
+ * consumer wanting to distinguish `EXECUTED_TREE_IS_NOT_THE_RELEASE` from a broken policy had to
+ * read English — and across a workflow boundary, English is not a contract.
+ *
+ * It changes nothing about the refusal: still a ValidationError, still exit 2, still no compliance
+ * envelope. Subclassing rather than adding a field keeps every existing `instanceof ValidationError`
+ * catch correct, including the CLI's.
+ */
+export class VersionIdentityError extends ValidationError {
+  constructor(message, identity) {
+    super(message);
+    this.identity = identity;
+  }
+}
+
+/**
  * The authoritative path: Gate 0, Gate 1, Gate 2, in that order.
  *
  * Every early return here is an exit-2 condition raised as ValidationError. None of them produces a
@@ -1262,12 +1281,13 @@ export async function runValidate(
   // downstream can read the result as having been produced by the release it names.
   const waived = allowUnreleasedFramework && identity.identity === "EXECUTED_TREE_IS_NOT_THE_RELEASE";
   if (identity.blocking && !waived) {
-    throw new ValidationError(
+    throw new VersionIdentityError(
       `${identity.identity}\n  ${identity.reason}\n\n` +
         `  Resolving a historical rule set is not implemented, so this run cannot evaluate ` +
         `${identity.declaredVersion}.\n  Either execute the framework at ${identity.declaredVersion} — ` +
         `check out the immutable tag, not a branch — or update\n  project-policy.yml deliberately and review ` +
         `what the different rule set reports. Changing the governing\n  version is an engineering event, not a default.`,
+      identity,
     );
   }
 
@@ -1701,6 +1721,40 @@ export async function runCli(
           `Exiting 2: no verdict was reached. A defect in an evidence producer is not a finding ` +
           `about this project, and it is not a pass.\n`,
       );
+      return EXIT_INVOCATION;
+    }
+    // Ordered BEFORE the ValidationError branch, which it extends.
+    //
+    // The record carries `error` and `versionIdentity` and NOTHING ELSE: no status, no
+    // uiCompliance, no frameworkCompliance. That is the classifier's non-execution argument
+    // transposed — there must be nothing here a consumer could read as a verdict, because the
+    // verdict is precisely the claim being refused. `versionIdentity` is the same block the
+    // compliance envelope carries on a run that reached one, so a governance layer parses one shape
+    // either way rather than two.
+    //
+    // Emitting it also ends a second ambiguity. `envelope.json` was written as a ZERO-BYTE file on
+    // refusal, and an empty file is indistinguishable from a step that never ran — the same
+    // confusion the classifier's error envelope exists to prevent, on the other side of the gate.
+    if (error instanceof VersionIdentityError) {
+      if (options.json) {
+        write(
+          JSON.stringify(
+            {
+              schemaVersion: "1.0",
+              // The EXECUTING framework's own version, which the guard has already read, rather
+              // than a second read of package.json. Under a refusal, which version is running is
+              // the disputed fact; reporting it from the block that established it keeps one source.
+              tool: { name: "uiux-standards", version: error.identity.executedVersion ?? "unknown" },
+              target: options.target,
+              error: { code: error.identity.identity, message: error.message },
+              versionIdentity: error.identity,
+            },
+            null,
+            2,
+          ) + "\n",
+        );
+      }
+      fail(`uiux-standards validate: ${error.message}\nExiting 2: no verdict was reached.\n`);
       return EXIT_INVOCATION;
     }
     if (error instanceof ValidationError || error instanceof CatalogError) {

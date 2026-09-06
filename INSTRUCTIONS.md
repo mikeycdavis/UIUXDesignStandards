@@ -311,8 +311,26 @@ of what happened:
 }
 ```
 
-**When identity refuses, there is no envelope at all** — its `status` would be exactly the claim
-being refused. The refusal names the state on stderr and the run exits 2.
+**When identity refuses, there is no compliance envelope** — its `status` would be exactly the claim
+being refused. There is still machine-readable output: under `--json` the refusal is written to stdout
+as an error record carrying `error.code` and the same `versionIdentity` block, and nothing a consumer
+could read as a verdict. No `status`, no `uiCompliance`, no `frameworkCompliance` — not even set to
+`null`, because an envelope answering `null` is still an envelope answering.
+
+```json
+{
+  "schemaVersion": "1.0",
+  "tool": { "name": "uiux-standards", "version": "1.0.0" },
+  "target": ".",
+  "error": { "code": "EXECUTED_TREE_IS_NOT_THE_RELEASE", "message": "..." },
+  "versionIdentity": { "identity": "EXECUTED_TREE_IS_NOT_THE_RELEASE", "blocking": true, "...": "..." }
+}
+```
+
+Read `error.code` rather than the message: the code is the identity state itself, so an adapter never
+parses English. **Tell the two shapes apart by `status`, not by the file name** — the workflow writes
+both to `envelope.json`, and a compliance envelope has `status` while a refusal record has `error`.
+Without `--json` stdout stays empty and the refusal is named on stderr. Either way the run exits 2.
 
 ### Pinning a development sha, and what it produces
 
@@ -332,7 +350,7 @@ With a policy declaring `1.0.0`, that pin produces:
 ```text
 uiux-standards validate: EXECUTED_TREE_IS_NOT_THE_RELEASE
   ... the executing framework's VERSION agrees, but its tree is not the v1.0.0 release ...
-exit 2 — and no envelope
+exit 2 — and no verdict; envelope.json carries the refusal record, not a compliance envelope
 ```
 
 That is the guard working, not a defect to route around. It is also the only outcome this pack can
