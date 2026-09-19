@@ -1,84 +1,27 @@
-# Backlog
+# This backlog now lives in GitHub Issues
 
-<!-- GENERATED FILE - do not edit by hand. Re-run the backlog script after changing anything in items/. -->
+The item files that were here were migrated into GitHub Issues and removed. Issues are the only
+home for this repository's work items; nothing here is maintained.
 
-Work on this project classified with the Extended Agile Hierarchy. Every item is a file in
-[`items/`](./items/); its YAML frontmatter is the source of truth and this page is derived from it.
+- **The work:** https://github.com/mikeycdavis/UIUXDesignStandards/issues
+- **The mapping:** [`github-mapping.json`](./github-mapping.json) records every item id against the
+  issue number and id it became, so existing references still resolve. It also records which store
+  is authoritative, and how to recover the files if that is ever needed.
 
-**14 of 18 leaf items complete — 78%**
+## Reading it
 
-```
-███████████████████████████████░░░░░░░░░  78%
-```
+| The old way | Now |
+| --- | --- |
+| `status:` frontmatter | The issue's open/closed state, plus a `status:` label |
+| `parent:` frontmatter | A GitHub sub-issue link |
+| `type:` frontmatter | A `level:` label |
+| `evidence:` frontmatter | An **Evidence** heading in the issue body, and `Closes #N` from a pull request |
+| The generated tracker | GitHub's own issue views |
 
-## Status
+**An open issue does not mean actionable.** `BLOCKED`, `DEFERRED` and `IN_REVIEW` are all open, so
+the `status:` label is what separates open work from executable work.
 
-| Status | Items |
-| --- | ---: |
-| ○ Not started | 3 |
-| ◔ Ready | 2 |
-| ◑ In progress | 4 |
-| ◒ Blocked | 1 |
-| ● Complete | 17 |
-| **Total** | **27** |
+This repository's default branch is `main`, so a pull request saying `Closes #N` closes its issue
+when it merges. A pull request aimed anywhere else creates no link at all.
 
-## The hierarchy
-
-| Level | Prefix | Count | Answers |
-| --- | --- | ---: | --- |
-| Theme | `TH-` | 1 | Which enduring area of value is this? |
-| Initiative | `IN-` | 2 | What outcome are we pursuing there? |
-| Epic | `EP-` | 5 | What large body of work delivers it? |
-| Feature | `FE-` | 17 | What shippable slice of that epic? |
-| Story | `ST-` | 2 | What user-visible change, roughly one PR? |
-| Task | `TA-` | 0 | What technical step inside a story? |
-
-## Progress by theme
-
-| Theme | Progress | Done | Remaining |
-| --- | --- | ---: | ---: |
-| [TH-01 Enforceable UI/UX design standards](./items/TH-01.md) | `███████████░░░` 78% | 14 | 4 |
-
-## In flight
-
-- ◑ [EP-04](./items/EP-04.md) — Assurance, documentation, and release
-- ◑ [FE-14](./items/FE-14.md) — Version identity and reusable workflow (13A transport)
-- ◑ [IN-01](./items/IN-01.md) — A releasable v1.0.0 framework
-- ◒ [ST-01](./items/ST-01.md) — First successful external consumption of a released pack
-- ◑ [TH-01](./items/TH-01.md) — Enforceable UI/UX design standards
-
-## Ready to pick up
-
-- ◔ [EP-05](./items/EP-05.md) — Deferred adoption work
-- ◔ [IN-02](./items/IN-02.md) — Adoption beyond v1.0.0
-
-## Everything
-
-- ◑ **[TH-01](./items/TH-01.md)** Enforceable UI/UX design standards _(14/18)_
-  - ◑ **[IN-01](./items/IN-01.md)** A releasable v1.0.0 framework _(13/13)_
-    - ● **[EP-01](./items/EP-01.md)** Normative corpus and frozen rule identity _(4/4)_
-      - ● **[FE-01](./items/FE-01.md)** Process bootstrap
-      - ● **[FE-02](./items/FE-02.md)** Repository skeleton and vendored core
-      - ● **[FE-03](./items/FE-03.md)** Standards corpus and external provenance
-      - ● **[FE-04](./items/FE-04.md)** Rule catalog and identity freeze
-    - ● **[EP-02](./items/EP-02.md)** Policy, applicability, and rule evaluation _(3/3)_
-      - ● **[FE-05](./items/FE-05.md)** Policy schema, semantics, and templates
-      - ● **[FE-06](./items/FE-06.md)** Gate 1 applicability classifier
-      - ● **[FE-07](./items/FE-07.md)** Evaluator and static detectors
-    - ● **[EP-03](./items/EP-03.md)** Evidence surfaces beyond static analysis _(3/3)_
-      - ● **[FE-08](./items/FE-08.md)** Browser-evidence ingestion contract
-      - ● **[FE-09](./items/FE-09.md)** Manual review and attestations
-      - ● **[FE-10](./items/FE-10.md)** Init bootstrap
-    - ◑ **[EP-04](./items/EP-04.md)** Assurance, documentation, and release _(3/3)_
-      - ● **[FE-11](./items/FE-11.md)** Invariant registry and falsifier harness
-      - ● **[FE-12](./items/FE-12.md)** CI and documentation
-      - ● **[FE-13](./items/FE-13.md)** Release readiness and v1.0.0
-  - ◔ **[IN-02](./items/IN-02.md)** Adoption beyond v1.0.0 _(1/5)_
-    - ◔ **[EP-05](./items/EP-05.md)** Deferred adoption work _(1/5)_
-      - ◑ **[FE-14](./items/FE-14.md)** Version identity and reusable workflow (13A transport) _(1/2)_
-        - ◒ **[ST-01](./items/ST-01.md)** First successful external consumption of a released pack
-        - ● **[ST-02](./items/ST-02.md)** A machine-readable record for an identity refusal
-      - ○ **[FE-15](./items/FE-15.md)** Real-project dogfood
-      - ○ **[FE-16](./items/FE-16.md)** Browser-evidence producer
-      - ○ **[FE-17](./items/FE-17.md)** Portfolio integration
-
+The full contract is in the ClaudeSkills repository, as `GITHUB-SCHEMA.md`.

@@ -1,0 +1,200 @@
+{
+  "schemaVersion": "1.0.0",
+  "source": "mikeycdavis/UIUXDesignStandards",
+  "target": "mikeycdavis/UIUXDesignStandards",
+  "migratedAt": "2026-09-19",
+  "items": {
+    "EP-01": {
+      "number": 7,
+      "id": 5507880312,
+      "state": "closed",
+      "parent": "IN-01",
+      "linked": true
+    },
+    "EP-02": {
+      "number": 8,
+      "id": 5507880564,
+      "state": "closed",
+      "parent": "IN-01",
+      "linked": true
+    },
+    "EP-03": {
+      "number": 9,
+      "id": 5507880820,
+      "state": "closed",
+      "parent": "IN-01",
+      "linked": true
+    },
+    "EP-04": {
+      "number": 10,
+      "id": 5507880987,
+      "state": "open",
+      "parent": "IN-01",
+      "linked": true
+    },
+    "EP-05": {
+      "number": 11,
+      "id": 5507881058,
+      "state": "open",
+      "parent": "IN-02",
+      "linked": true
+    },
+    "FE-01": {
+      "number": 12,
+      "id": 5507881134,
+      "state": "closed",
+      "parent": "EP-01",
+      "linked": true
+    },
+    "FE-02": {
+      "number": 13,
+      "id": 5507881409,
+      "state": "closed",
+      "parent": "EP-01",
+      "linked": true
+    },
+    "FE-03": {
+      "number": 14,
+      "id": 5507881550,
+      "state": "closed",
+      "parent": "EP-01",
+      "linked": true
+    },
+    "FE-04": {
+      "number": 15,
+      "id": 5507881679,
+      "state": "closed",
+      "parent": "EP-01",
+      "linked": true
+    },
+    "FE-05": {
+      "number": 16,
+      "id": 5507882126,
+      "state": "closed",
+      "parent": "EP-02",
+      "linked": true
+    },
+    "FE-06": {
+      "number": 17,
+      "id": 5507882252,
+      "state": "closed",
+      "parent": "EP-02",
+      "linked": true
+    },
+    "FE-07": {
+      "number": 18,
+      "id": 5507882372,
+      "state": "closed",
+      "parent": "EP-02",
+      "linked": true
+    },
+    "FE-08": {
+      "number": 19,
+      "id": 5507882670,
+      "state": "closed",
+      "parent": "EP-03",
+      "linked": true
+    },
+    "FE-09": {
+      "number": 20,
+      "id": 5507882798,
+      "state": "closed",
+      "parent": "EP-03",
+      "linked": true
+    },
+    "FE-10": {
+      "number": 21,
+      "id": 5507883076,
+      "state": "closed",
+      "parent": "EP-03",
+      "linked": true
+    },
+    "FE-11": {
+      "number": 22,
+      "id": 5507883241,
+      "state": "closed",
+      "parent": "EP-04",
+      "linked": true
+    },
+    "FE-12": {
+      "number": 23,
+      "id": 5507883504,
+      "state": "closed",
+      "parent": "EP-04",
+      "linked": true
+    },
+    "FE-13": {
+      "number": 24,
+      "id": 5507883625,
+      "state": "closed",
+      "parent": "EP-04",
+      "linked": true
+    },
+    "FE-14": {
+      "number": 25,
+      "id": 5507883874,
+      "state": "open",
+      "parent": "EP-05",
+      "linked": true
+    },
+    "FE-15": {
+      "number": 26,
+      "id": 5507883983,
+      "state": "open",
+      "parent": "EP-05",
+      "linked": true
+    },
+    "FE-16": {
+      "number": 27,
+      "id": 5507884039,
+      "state": "open",
+      "parent": "EP-05",
+      "linked": true
+    },
+    "FE-17": {
+      "number": 28,
+      "id": 5507884180,
+      "state": "open",
+      "parent": "EP-05",
+      "linked": true
+    },
+    "IN-01": {
+      "number": 29,
+      "id": 5507884314,
+      "state": "open",
+      "parent": "TH-01",
+      "linked": true
+    },
+    "IN-02": {
+      "number": 30,
+      "id": 5507884371,
+      "state": "open",
+      "parent": "TH-01",
+      "linked": true
+    },
+    "ST-01": {
+      "number": 31,
+      "id": 5507884604,
+      "state": "open",
+      "parent": "FE-14",
+      "linked": true
+    },
+    "ST-02": {
+      "number": 32,
+      "id": 5507884694,
+      "state": "closed",
+      "parent": "FE-14",
+      "linked": true
+    },
+    "TH-01": {
+      "number": 33,
+      "id": 5507884838,
+      "state": "open",
+      "parent": null
+    }
+  },
+  "authority": "github",
+  "switchedAt": "2026-09-19",
+  "verifiedBy": "fidelity check: 27/27 items agree on id, type, title, status and parent; 0 conflicts",
+  "recovery": "The issues are the record. This file maps every legacy id to its issue number and id. To recover the file backlog, restore the item files from this repository's git history at the commit that removed them, then set authority back to \"files\"."
+}
