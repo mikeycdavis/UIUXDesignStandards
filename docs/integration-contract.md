@@ -106,6 +106,13 @@ establishes only that *the signals this classifier supports* were not present, w
 claim than "there is no interface here". The declaration carries the rest, which is why it is
 required.
 
+**The vendored pack is not part of the search surface.** The reusable workflow checks the pack out to
+`<consumer>/.uiux-standards`, and that directory is excluded by name at any depth. The pack's own
+`test/fixtures` contain deliberate UI markup; scanned from the consumer's root they would make a
+genuinely no-UI consumer `INDETERMINATE` forever. The exclusion is recorded in `scan.excluded` and named in
+`reasons` like every other one, and it is by directory name only, so a consumer's own
+`src/fixtures` is still searched.
+
 ### 2.4 `agreement` is a separate axis from `classification`
 
 `classification` is what the evidence supports. `agreement` is how the project's declaration relates
