@@ -276,5 +276,13 @@ export const FALSIFIERS = [
     replace: null,
     suite: "test/evidence.test.mjs",
   },
+  {
+    // Stop excluding the vendored pack: its own deliberate UI fixtures then classify a no-UI consumer.
+    invariant: "gate1.the-vendored-pack-is-not-the-consumers-ui",
+    file: "scripts/applicability.mjs",
+    find: `  ".uiux-standards",\n`,
+    replace: "",
+    suite: "test/applicability.test.mjs",
+  },
 ];
 

@@ -331,3 +331,49 @@ test("an unknown command exits 2 and never 0", () => {
   assert.match(result.stderr, /unknown command/);
   assert.equal(result.stdout, "");
 });
+
+// --- The vendored pack is not the consumer's UI -------------------------------------------------------
+
+/**
+ * The reusable workflow checks the pack out to `<consumer>/.uiux-standards`. The pack's own
+ * `test/fixtures` hold deliberate UI markup, and from the consumer's root that path is
+ * `.uiux-standards/test/fixtures`, which the root-anchored fixtures exclusion never matched.
+ */
+async function vendorPack(target) {
+  await mkdir(path.join(target, ".uiux-standards", "test"), { recursive: true });
+  await cp(FIXTURES, path.join(target, ".uiux-standards", "test", "fixtures"), { recursive: true });
+}
+
+test("a vendored copy of the pack is not scanned as the consumer's UI", async () => {
+  await withCopy(NO_UI, async (target) => {
+    await vendorPack(target);
+    const result = await classify(target);
+    assert.equal(result.classification, "NOT_APPLICABLE", "a no-UI consumer stays exempt with the pack vendored beside it");
+    assert.equal(result.agreement, "match");
+    const cited = result.signals.flatMap((s) => s.evidence).filter((e) => e.includes(".uiux-standards"));
+    assert.deepEqual(cited, [], "no signal may cite a path inside the vendored pack");
+  });
+});
+
+test("the vendored-pack exclusion is recorded, never silent", async () => {
+  await withCopy(NO_UI, async (target) => {
+    await vendorPack(target);
+    const result = await classify(target);
+    assert.ok(result.scan.excluded.includes(".uiux-standards"));
+    assert.match(result.reasons.join(" "), /excluded from the search:.*\.uiux-standards/);
+  });
+});
+
+test("the vendored-pack exclusion is narrow: the consumer's own UI and src/fixtures are still found", async () => {
+  await withCopy(NO_UI, async (target) => {
+    await vendorPack(target);
+    await mkdir(path.join(target, "src", "fixtures"), { recursive: true });
+    await writeFile(path.join(target, "src", "fixtures", "page.html"), "<!doctype html><html><body><main>hi</main></body></html>\n");
+    const result = await classify(target);
+    assert.equal(result.classification, "INDETERMINATE", "a real src/fixtures UI contradicts the no-ui declaration");
+    assert.equal(result.agreement, "conflict");
+    const cited = result.signals.flatMap((s) => s.evidence);
+    assert.ok(cited.some((e) => e.includes("src/fixtures/page.html")));
+    assert.ok(!cited.some((e) => e.includes(".uiux-standards")));
+  });
+});

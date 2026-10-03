@@ -464,4 +464,15 @@ export const INVARIANTS = [
     ],
     falsifier: "governance.the-policy-moving-is-not-the-host-moving",
   },
+  {
+    id: "gate1.the-vendored-pack-is-not-the-consumers-ui",
+    statement: "The standards pack vendored into a consumer is never scanned as that consumer's UI.",
+    record: { file: "docs/integration-contract.md", quote: "The vendored pack is not part of the search surface." },
+    tests: [
+      "a vendored copy of the pack is not scanned as the consumer's UI",
+      "the vendored-pack exclusion is recorded, never silent",
+      "the vendored-pack exclusion is narrow: the consumer's own UI and src/fixtures are still found",
+    ],
+    falsifier: "gate1.the-vendored-pack-is-not-the-consumers-ui",
+  },
 ];

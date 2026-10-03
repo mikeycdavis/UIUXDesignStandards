@@ -86,6 +86,11 @@ const SKIP_NAMES = new Set([
   ".output",
   ".cache",
   "vendor",
+  // The standards pack as the reusable workflow vendors it (`<consumer>/.uiux-standards`). Its own
+  // `test/fixtures` hold deliberate UI markup that describes nothing about the consumer, and from the
+  // consumer's root that path is nested, so the root-anchored SKIP_PATHS below never matches it.
+  // Excluded by name and recorded in `scan.excluded` like every other exclusion.
+  ".uiux-standards",
 ]);
 const SKIP_PATHS = /^(test|tests|spec|__tests__)\/fixtures$/;
 
