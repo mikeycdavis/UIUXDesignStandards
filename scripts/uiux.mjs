@@ -360,6 +360,14 @@ const KEY_HANDLER = /(\bon:?key(down|up|press)\b|\bv-on:key|@key(down|up|press)\
 const MARKUP_EXTENSIONS = new Set([".html", ".htm", ".vue", ".svelte", ".jsx", ".tsx"]);
 const STYLE_EXTENSIONS = new Set([".css", ".scss", ".less"]);
 
+/** True when a declaration block `@apply`s a Tailwind ring-width utility (`ring`, `ring-1|2|4|8`). */
+function appliesRingWidth(body) {
+  for (const applied of body.matchAll(/@apply\s+([^;]*)/gi)) {
+    if (applied[1].split(/\s+/).some((token) => /^ring(-(1|2|4|8))?$/.test(token))) return true;
+  }
+  return false;
+}
+
 export const DETECTORS = [
   {
     /**
@@ -706,6 +714,9 @@ export const DETECTORS = [
      *
      *   `:focus:not(:focus-visible)` — the idiom for hiding the ring from mouse users only.
      *   a compensating declaration in the same block — a box-shadow ring is a focus indicator.
+     *   an `@apply` of a ring-width utility (`ring`, `ring-1|2|4|8`) in the same block — Tailwind
+     *   compiles it to a box-shadow ring. Only the exact, unprefixed ring-width tokens count; ring
+     *   colour/offset/inset/`ring-0` supply no indicator, and no other utility is interpreted.
      */
     id: "focus-visible-removal",
     rule: "accessibility.no-removed-focus-indicators",
@@ -726,6 +737,7 @@ export const DETECTORS = [
         if (/:focus\s*:not\(\s*:focus-visible\s*\)/.test(selector)) continue;
         if (!/\boutline\s*:\s*(none|0)\b/i.test(body)) continue;
         if (compensating.test(body)) continue;
+        if (appliesRingWidth(body)) continue;
         findings.push(
           FINDING(
             this.rule,

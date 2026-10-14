@@ -261,6 +261,72 @@ test("a compensating focus style keeps the detector silent — the whitelist is 
   assert.deepEqual(mutated, []);
 });
 
+// --- ST-04: an @apply ring is the replacement focus indicator ---------------------------------------
+
+async function focusRulesFor(css) {
+  const dir = await mkdtemp(path.join(tmpdir(), "uiux-st04-"));
+  try {
+    await writeFile(path.join(dir, "index.css"), css);
+    return rulesOf((await runAudit(dir)).findings);
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+}
+
+const FOCUS_RULE = "accessibility.no-removed-focus-indicators";
+
+test("ST-04 criterion 1: an @apply ring-width utility in the block is a replacement indicator", async () => {
+  for (const selector of [":focus-visible", ":focus", "button:focus-visible"]) {
+    for (const ring of ["ring", "ring-1", "ring-2", "ring-4", "ring-8"]) {
+      for (const outline of ["none", "0"]) {
+        const css = `${selector} {
+  outline: ${outline};
+  @apply ${ring};
+}
+`;
+        assert.deepEqual(await focusRulesFor(css), [], css);
+      }
+    }
+  }
+});
+
+test("ST-04 criterion 2: the demonstrated block produces no finding", async () => {
+  const css = `:focus-visible {
+  outline: none;
+  @apply ring-2 ring-indigo-500 ring-offset-2 ring-offset-white dark:ring-offset-slate-950;
+}
+`;
+  assert.deepEqual(await focusRulesFor(css), []);
+});
+
+test("ST-04 criterion 3: @apply of utilities that supply no indicator still fires", async () => {
+  for (const applied of [
+    "ring-0",
+    "ring-offset-2",
+    "ring-indigo-500",
+    "ring-offset-2 ring-indigo-500",
+    "p-2 text-sm",
+    "ring-inset",
+    "dark:ring-2",
+  ]) {
+    const css = `:focus-visible {
+  outline: none;
+  @apply ${applied};
+}
+`;
+    assert.deepEqual(await focusRulesFor(css), [FOCUS_RULE], css);
+  }
+});
+
+test("ST-04 criterion 4: existing focus behaviour is unchanged", async () => {
+  assert.deepEqual(await focusRulesFor(":focus-visible { outline: none; }\n"), [FOCUS_RULE]);
+  assert.deepEqual(
+    await focusRulesFor(":focus-visible { outline: none; box-shadow: 0 0 0 3px blue; }\n"),
+    [],
+  );
+  assert.deepEqual(await focusRulesFor(":focus:not(:focus-visible) { outline: none; }\n"), []);
+});
+
 // --- The audit command ------------------------------------------------------------------------------
 
 test("audit reaches no verdict: no status, no score, and no policy is consulted", async () => {
