@@ -360,12 +360,27 @@ const KEY_HANDLER = /(\bon:?key(down|up|press)\b|\bv-on:key|@key(down|up|press)\
 const MARKUP_EXTENSIONS = new Set([".html", ".htm", ".vue", ".svelte", ".jsx", ".tsx"]);
 const STYLE_EXTENSIONS = new Set([".css", ".scss", ".less"]);
 
-/** True when a declaration block `@apply`s a Tailwind ring-width utility (`ring`, `ring-1|2|4|8`). */
+/**
+ * True when the ring width a declaration block `@apply`s ends up non-zero.
+ *
+ * Tailwind applies utilities in source order, so the LAST ring-width token wins: `ring-2` then
+ * `ring-0` removes the ring, `ring-0` then `ring-2` keeps it. Tokens are read across every `@apply`
+ * directive in the block, in order. Only exact unprefixed width tokens (`ring`, `ring-0|1|2|4|8`)
+ * count. A variant-prefixed token is ignored. Failing toward reporting: an important modifier
+ * (`!ring-0`, `ring-0!`) is sticky and forces "no ring", and an important non-zero ring (`!ring-2`)
+ * is not counted as an indicator.
+ */
 function appliesRingWidth(body) {
+  let ring = false;
+  let importantZero = false;
   for (const applied of body.matchAll(/@apply\s+([^;]*)/gi)) {
-    if (applied[1].split(/\s+/).some((token) => /^ring(-(1|2|4|8))?$/.test(token))) return true;
+    for (const token of applied[1].split(/\s+/)) {
+      if (/^(!ring-0|ring-0!)$/.test(token)) importantZero = true;
+      else if (token === "ring-0") ring = false;
+      else if (/^ring(-(1|2|4|8))?$/.test(token)) ring = true;
+    }
   }
-  return false;
+  return ring && !importantZero;
 }
 
 export const DETECTORS = [

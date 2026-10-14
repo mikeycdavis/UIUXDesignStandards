@@ -318,6 +318,25 @@ test("ST-04 criterion 3: @apply of utilities that supply no indicator still fire
   }
 });
 
+test("ST-04: the last ring-width utility wins, as Tailwind applies them in source order", async () => {
+  const cases = [
+    ["@apply ring-2 ring-0;", [FOCUS_RULE]],
+    ["@apply ring-0 ring-2;", []],
+    ["@apply ring-2;\n  @apply ring-0;", [FOCUS_RULE]],
+    ["@apply ring-0;\n  @apply ring-2;", []],
+    ["@apply ring-2 ring-offset-2 ring-0 ring-indigo-500;", [FOCUS_RULE]],
+    ["@apply ring-2 !ring-0;", [FOCUS_RULE]],
+    ["@apply ring-2 ring-0!;", [FOCUS_RULE]],
+    ["@apply !ring-0 ring-2;", [FOCUS_RULE]],
+    ["@apply !ring-2;", [FOCUS_RULE]],
+    ["@apply ring-2 dark:ring-0;", []],
+  ];
+  for (const [applies, expected] of cases) {
+    const css = `:focus-visible {\n  outline: none;\n  ${applies}\n}\n`;
+    assert.deepEqual(await focusRulesFor(css), expected, css);
+  }
+});
+
 test("ST-04 criterion 4: existing focus behaviour is unchanged", async () => {
   assert.deepEqual(await focusRulesFor(":focus-visible { outline: none; }\n"), [FOCUS_RULE]);
   assert.deepEqual(
