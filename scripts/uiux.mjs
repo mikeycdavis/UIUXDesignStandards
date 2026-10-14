@@ -360,6 +360,39 @@ const KEY_HANDLER = /(\bon:?key(down|up|press)\b|\bv-on:key|@key(down|up|press)\
 const MARKUP_EXTENSIONS = new Set([".html", ".htm", ".vue", ".svelte", ".jsx", ".tsx"]);
 const STYLE_EXTENSIONS = new Set([".css", ".scss", ".less"]);
 
+/**
+ * True when the ring width a declaration block `@apply`s ends up non-zero.
+ *
+ * Model, from the Tailwind v3 documentation (https://v3.tailwindcss.com/docs/functions-and-directives):
+ * "If you'd like to @apply an existing class and make it !important, simply add !important to the
+ * end of the declaration" — so a trailing standalone `!important` makes every utility in that one
+ * @apply declaration important, and a per-token `!ring-N` / `ring-N!` makes that token important.
+ * An important declaration beats a non-important one regardless of order; among declarations of the
+ * same importance the later one wins, as utilities are applied in source order. Tokens are read
+ * across every @apply in the block. Only exact width tokens (`ring`, `ring-0|1|2|4|8`) count; a
+ * variant-prefixed token (`dark:ring-2`) is ignored, which fails toward reporting.
+ */
+function appliesRingWidth(body) {
+  let important = false;
+  let ring = false;
+  for (const applied of body.matchAll(/@apply\s+([^;]*)/gi)) {
+    const tokens = applied[1].trim().split(/\s+/);
+    const declarationImportant = tokens.length > 0 && /^!important$/i.test(tokens[tokens.length - 1]);
+    for (const raw of tokens) {
+      const tokenImportant = declarationImportant || raw.startsWith("!") || raw.endsWith("!");
+      const token = raw.replace(/^!|!$/g, "");
+      let nonZero;
+      if (token === "ring-0") nonZero = false;
+      else if (/^ring(-(1|2|4|8))?$/.test(token)) nonZero = true;
+      else continue;
+      if (important && !tokenImportant) continue;
+      important = tokenImportant;
+      ring = nonZero;
+    }
+  }
+  return ring;
+}
+
 export const DETECTORS = [
   {
     /**
@@ -706,6 +739,9 @@ export const DETECTORS = [
      *
      *   `:focus:not(:focus-visible)` — the idiom for hiding the ring from mouse users only.
      *   a compensating declaration in the same block — a box-shadow ring is a focus indicator.
+     *   an `@apply` of a ring-width utility (`ring`, `ring-1|2|4|8`) in the same block — Tailwind
+     *   compiles it to a box-shadow ring. Only the exact, unprefixed ring-width tokens count; ring
+     *   colour/offset/inset/`ring-0` supply no indicator, and no other utility is interpreted.
      */
     id: "focus-visible-removal",
     rule: "accessibility.no-removed-focus-indicators",
@@ -726,6 +762,7 @@ export const DETECTORS = [
         if (/:focus\s*:not\(\s*:focus-visible\s*\)/.test(selector)) continue;
         if (!/\boutline\s*:\s*(none|0)\b/i.test(body)) continue;
         if (compensating.test(body)) continue;
+        if (appliesRingWidth(body)) continue;
         findings.push(
           FINDING(
             this.rule,
