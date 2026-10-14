@@ -280,8 +280,7 @@ test("ST-04 criterion 1: an @apply ring-width utility in the block is a replacem
     for (const ring of ["ring", "ring-1", "ring-2", "ring-4", "ring-8"]) {
       for (const outline of ["none", "0"]) {
         const css = `${selector} {
-  outline: ${outline};
-  @apply ${ring};
+  outline: ${outline};\n  @apply ${ring};
 }
 `;
         assert.deepEqual(await focusRulesFor(css), [], css);
@@ -292,8 +291,7 @@ test("ST-04 criterion 1: an @apply ring-width utility in the block is a replacem
 
 test("ST-04 criterion 2: the demonstrated block produces no finding", async () => {
   const css = `:focus-visible {
-  outline: none;
-  @apply ring-2 ring-indigo-500 ring-offset-2 ring-offset-white dark:ring-offset-slate-950;
+  outline: none;\n  @apply ring-2 ring-indigo-500 ring-offset-2 ring-offset-white dark:ring-offset-slate-950;
 }
 `;
   assert.deepEqual(await focusRulesFor(css), []);
@@ -310,8 +308,7 @@ test("ST-04 criterion 3: @apply of utilities that supply no indicator still fire
     "dark:ring-2",
   ]) {
     const css = `:focus-visible {
-  outline: none;
-  @apply ${applied};
+  outline: none;\n  @apply ${applied};
 }
 `;
     assert.deepEqual(await focusRulesFor(css), [FOCUS_RULE], css);
@@ -328,11 +325,40 @@ test("ST-04: the last ring-width utility wins, as Tailwind applies them in sourc
     ["@apply ring-2 !ring-0;", [FOCUS_RULE]],
     ["@apply ring-2 ring-0!;", [FOCUS_RULE]],
     ["@apply !ring-0 ring-2;", [FOCUS_RULE]],
-    ["@apply !ring-2;", [FOCUS_RULE]],
+    ["@apply !ring-2;", []],
+    ["@apply !ring-2 ring-0;", []],
+    ["@apply !ring-0 !ring-2;", []],
+    ["@apply !ring-2 !ring-0;", [FOCUS_RULE]],
     ["@apply ring-2 dark:ring-0;", []],
   ];
   for (const [applies, expected] of cases) {
     const css = `:focus-visible {\n  outline: none;\n  ${applies}\n}\n`;
+    assert.deepEqual(await focusRulesFor(css), expected, css);
+  }
+});
+
+test("ST-04: a trailing !important makes the whole @apply declaration important and important wins", async () => {
+  const cases = [
+    ["@apply ring-0 !important;\n  @apply ring-2;", [FOCUS_RULE]],
+    ["@apply ring-2 !important;\n  @apply ring-0;", []],
+    ["@apply ring-2;\n  @apply ring-0 !important;", [FOCUS_RULE]],
+    ["@apply ring-0;\n  @apply ring-2 !important;", []],
+    ["@apply ring-2 ring-0 !important;", [FOCUS_RULE]],
+    ["@apply ring-0 ring-2 !important;", []],
+    ["@apply ring-0 !important;\n  @apply ring-2 !important;", []],
+    ["@apply ring-2 !important;\n  @apply ring-0 !important;", [FOCUS_RULE]],
+    ["@apply ring-0 !important;\n  @apply !ring-2;", []],
+    ["@apply ring-2 !important;\n  @apply !ring-0;", [FOCUS_RULE]],
+    ["@apply ring-offset-2 !important;", [FOCUS_RULE]],
+    ["@apply ring-2 ring-offset-2 !important;", []],
+    ["@apply ring-0! ring-2;", [FOCUS_RULE]],
+  ];
+  for (const [applies, expected] of cases) {
+    const css = `:focus-visible {
+  outline: none;
+  ${applies}
+}
+`;
     assert.deepEqual(await focusRulesFor(css), expected, css);
   }
 });

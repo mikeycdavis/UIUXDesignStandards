@@ -363,24 +363,34 @@ const STYLE_EXTENSIONS = new Set([".css", ".scss", ".less"]);
 /**
  * True when the ring width a declaration block `@apply`s ends up non-zero.
  *
- * Tailwind applies utilities in source order, so the LAST ring-width token wins: `ring-2` then
- * `ring-0` removes the ring, `ring-0` then `ring-2` keeps it. Tokens are read across every `@apply`
- * directive in the block, in order. Only exact unprefixed width tokens (`ring`, `ring-0|1|2|4|8`)
- * count. A variant-prefixed token is ignored. Failing toward reporting: an important modifier
- * (`!ring-0`, `ring-0!`) is sticky and forces "no ring", and an important non-zero ring (`!ring-2`)
- * is not counted as an indicator.
+ * Model, from the Tailwind v3 documentation (https://v3.tailwindcss.com/docs/functions-and-directives):
+ * "If you'd like to @apply an existing class and make it !important, simply add !important to the
+ * end of the declaration" — so a trailing standalone `!important` makes every utility in that one
+ * @apply declaration important, and a per-token `!ring-N` / `ring-N!` makes that token important.
+ * An important declaration beats a non-important one regardless of order; among declarations of the
+ * same importance the later one wins, as utilities are applied in source order. Tokens are read
+ * across every @apply in the block. Only exact width tokens (`ring`, `ring-0|1|2|4|8`) count; a
+ * variant-prefixed token (`dark:ring-2`) is ignored, which fails toward reporting.
  */
 function appliesRingWidth(body) {
+  let important = false;
   let ring = false;
-  let importantZero = false;
   for (const applied of body.matchAll(/@apply\s+([^;]*)/gi)) {
-    for (const token of applied[1].split(/\s+/)) {
-      if (/^(!ring-0|ring-0!)$/.test(token)) importantZero = true;
-      else if (token === "ring-0") ring = false;
-      else if (/^ring(-(1|2|4|8))?$/.test(token)) ring = true;
+    const tokens = applied[1].trim().split(/\s+/);
+    const declarationImportant = tokens.length > 0 && /^!important$/i.test(tokens[tokens.length - 1]);
+    for (const raw of tokens) {
+      const tokenImportant = declarationImportant || raw.startsWith("!") || raw.endsWith("!");
+      const token = raw.replace(/^!|!$/g, "");
+      let nonZero;
+      if (token === "ring-0") nonZero = false;
+      else if (/^ring(-(1|2|4|8))?$/.test(token)) nonZero = true;
+      else continue;
+      if (important && !tokenImportant) continue;
+      important = tokenImportant;
+      ring = nonZero;
     }
   }
-  return ring && !importantZero;
+  return ring;
 }
 
 export const DETECTORS = [
