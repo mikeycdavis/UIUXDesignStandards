@@ -393,6 +393,41 @@ function appliesRingWidth(body) {
   return ring;
 }
 
+/**
+ * Mask SCSS interpolation spans (`#{ ... }`) without changing the text's length or line structure.
+ *
+ * The block matcher splits on `{` and `}`, so an interpolation cuts a rule into fragments and the
+ * real selector/body pair is never matched. Masking keeps every offset valid. `#{!important}` is
+ * Sass's way of writing a declaration-level `!important`, so it is rewritten to `!important`, padded
+ * with spaces; every other span becomes `_`, which no ring-width token can match, so an unknown
+ * interpolated utility fails toward reporting, as a variant-prefixed token does.
+ */
+function maskInterpolation(text) {
+  let out = "";
+  let i = 0;
+  while (i < text.length) {
+    if (text[i] !== "#" || text[i + 1] !== "{") {
+      out += text[i++];
+      continue;
+    }
+    let depth = 0;
+    let j = i + 1;
+    for (; j < text.length; j++) {
+      if (text[j] === "{") depth++;
+      else if (text[j] === "}" && --depth === 0) break;
+    }
+    const end = Math.min(j + 1, text.length); // an unterminated span is masked to the end
+    const span = text.slice(i, end);
+    if (/^#\{\s*!important\s*\}$/i.test(span)) {
+      out += "!important".padEnd(span.length, " ");
+    } else {
+      out += span.replace(/[^\n]/g, "_");
+    }
+    i = end;
+  }
+  return out;
+}
+
 export const DETECTORS = [
   {
     /**
@@ -754,9 +789,13 @@ export const DETECTORS = [
       let examined = false;
       const compensating = /\b(box-shadow|border|border-bottom|border-color|background|background-color|text-decoration|outline-offset|outline-color)\s*:/i;
 
-      for (const block of text.matchAll(/([^{}]+)\{([^{}]*)\}/g)) {
+      // SCSS interpolation contains braces, which would split a block; match on a masked copy of the
+      // same length and read the selector for the message from the unmasked text.
+      const masked = maskInterpolation(text);
+      for (const block of masked.matchAll(/([^{}]+)\{([^{}]*)\}/g)) {
         const selector = block[1];
         const body = block[2];
+        const spelled = text.slice(block.index, block.index + selector.length);
         if (!/:focus\b|:focus-visible\b/.test(selector)) continue;
         examined = true;
         if (/:focus\s*:not\(\s*:focus-visible\s*\)/.test(selector)) continue;
@@ -768,7 +807,7 @@ export const DETECTORS = [
             this.rule,
             file,
             block.index,
-            `'${selector.trim()}' removes the focus outline and declares no replacement indicator`,
+            `'${spelled.trim()}' removes the focus outline and declares no replacement indicator`,
             { detector: this.id },
           ),
         );

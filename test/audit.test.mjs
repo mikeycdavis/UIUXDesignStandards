@@ -263,10 +263,10 @@ test("a compensating focus style keeps the detector silent — the whitelist is 
 
 // --- ST-04: an @apply ring is the replacement focus indicator ---------------------------------------
 
-async function focusRulesFor(css) {
+async function focusRulesFor(css, file = "index.css") {
   const dir = await mkdtemp(path.join(tmpdir(), "uiux-st04-"));
   try {
-    await writeFile(path.join(dir, "index.css"), css);
+    await writeFile(path.join(dir, file), css);
     return rulesOf((await runAudit(dir)).findings);
   } finally {
     await rm(dir, { recursive: true, force: true });
@@ -370,6 +370,64 @@ test("ST-04 criterion 4: existing focus behaviour is unchanged", async () => {
     [],
   );
   assert.deepEqual(await focusRulesFor(":focus:not(:focus-visible) { outline: none; }\n"), []);
+});
+
+// --- ST-07: a block containing SCSS interpolation is examined, not skipped --------------------------
+
+test("ST-07 criteria 1 and 2: a focus block containing #{...} is examined with the interpolation masked", async () => {
+  const cases = [
+    // the reproduced block: an important zero-width ring wins over the later ring-2
+    [":focus {\n  outline: none;\n  @apply ring-0 #{!important};\n  @apply ring-2;\n}\n", [FOCUS_RULE]],
+    // an interpolation elsewhere in the block, no replacement indicator
+    [":focus-visible {\n  outline: none;\n  margin: #{$gap};\n}\n", [FOCUS_RULE]],
+    // an interpolated selector is still a focus selector
+    [".#{$prefix}-button:focus-visible {\n  outline: none;\n}\n", [FOCUS_RULE]],
+    // an effective ring plus an interpolation elsewhere is a replacement indicator
+    [":focus {\n  outline: none;\n  @apply ring-2;\n  margin: #{$gap};\n}\n", []],
+    [":focus {\n  outline: none;\n  box-shadow: 0 0 0 #{$w} blue;\n}\n", []],
+    // an important ring written through interpolation is not displaced by a later ring-0
+    [":focus {\n  outline: none;\n  @apply ring-2 #{!important};\n  @apply ring-0;\n}\n", []],
+    // nested braces inside an interpolation do not end the span early
+    [":focus {\n  outline: none;\n  width: #{map-get((a: 1), a)};\n}\n", [FOCUS_RULE]],
+  ];
+  for (const [css, expected] of cases) {
+    assert.deepEqual(await focusRulesFor(css, "focus.scss"), expected, css);
+  }
+});
+
+test("ST-07: the finding names the real selector, not the masked text", async () => {
+  const dir = await mkdtemp(path.join(tmpdir(), "uiux-st07-"));
+  try {
+    await writeFile(path.join(dir, "f.scss"), "/* h */\n\n.a { color: red; }\n\n.#{$p}-x:focus {\n  outline: none;\n}\n");
+    const found = (await runAudit(dir)).findings.filter((f) => f.rule === FOCUS_RULE);
+    assert.equal(found.length, 1);
+    assert.match(found[0].message, /^'\.#\{\$p\}-x:focus' removes the focus outline/);
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test("ST-07: masking an interpolation does not move the reported line", async () => {
+  const lineOf = async (head) => {
+    const dir = await mkdtemp(path.join(tmpdir(), "uiux-st07-"));
+    try {
+      await writeFile(path.join(dir, "f.scss"), `${head}\n.b {\n  outline: none;\n}\n:focus {\n  outline: none;\n}\n`);
+      return (await runAudit(dir)).findings.filter((f) => f.rule === FOCUS_RULE).map((f) => f.evidence[0]);
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  };
+  const plain = await lineOf(".a { margin: 1px\n  + 2px; }");
+  const interpolated = await lineOf(".a { margin: #{1px\n  + 2px}; }");
+  assert.equal(plain.length, 1);
+  assert.deepEqual(interpolated, plain);
+});
+
+test("ST-07 criterion 3: blocks without #{ are unchanged", async () => {
+  assert.deepEqual(await focusRulesFor(":focus { outline: none; @apply ring-0 !important; @apply ring-2; }\n", "a.scss"), [FOCUS_RULE]);
+  assert.deepEqual(await focusRulesFor(":focus { outline: none; @apply ring-2; }\n", "a.scss"), []);
+  assert.deepEqual(await focusRulesFor(":focus-visible { outline: none; }\n"), [FOCUS_RULE]);
+  assert.deepEqual(await focusRulesFor(":focus:not(:focus-visible) { outline: none; }\n", "a.scss"), []);
 });
 
 // --- The audit command ------------------------------------------------------------------------------
