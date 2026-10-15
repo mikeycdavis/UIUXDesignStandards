@@ -516,11 +516,68 @@ test("ST-07: interpolations that cannot change the answer stay examined", async 
   }
 });
 
-test("ST-07: nested blocks - a parent's own declarations are read, a child's are its own", async () => {
-  assert.deepEqual((await focusAuditFor(".a { &:focus { outline: none; } }\n")).rules, [FOCUS_RULE]);
-  assert.deepEqual((await focusAuditFor(":focus { outline: none; &:hover { color: red; } }\n")).rules, [FOCUS_RULE]);
-  assert.deepEqual((await focusAuditFor(":focus { outline: none; &:hover { box-shadow: 0 0 0 2px blue; } }\n")).rules, [FOCUS_RULE]);
-  assert.deepEqual((await focusAuditFor(":focus { &:hover { outline: none; } }\n")).rules, []);
+test("ST-07: a nested rule is examined under its COMPOSED selector", async () => {
+  const cases = [
+    // [css, expected rules, expected examined]
+    [".a { &:focus { outline: none; } }\n", [FOCUS_RULE]],
+    [":focus { &.danger { outline: none; } }\n", [FOCUS_RULE]],
+    [":focus { .danger { outline: none; } }\n", [FOCUS_RULE]],
+    [":focus { & > .x { outline: none; } }\n", [FOCUS_RULE]],
+    [":focus { .a &, .b { outline: none; } }\n", [FOCUS_RULE]],
+    [".a, :focus { outline: none; }\n", [FOCUS_RULE]],
+    [".a, .b:focus { .c { outline: none; } }\n", [FOCUS_RULE]],
+    [".a, .b { &:focus-visible { outline: none; } }\n", [FOCUS_RULE]],
+    [".a { .b { &:focus { outline: none; } } }\n", [FOCUS_RULE]],
+    [":focus-within { &.x { outline: none; } }\n", [FOCUS_RULE]],
+    [":focus { &:hover { outline: none; } }\n", [FOCUS_RULE]],
+    [".a { .b { outline: none; } }\n", []],
+    [":focus { outline: none; &:hover { color: red; } }\n", [FOCUS_RULE]],
+    [":focus { outline: none; &:hover { box-shadow: 0 0 0 2px blue; } }\n", [FOCUS_RULE]],
+    [":focus { box-shadow: 0 0 0 2px blue; &.x { outline: none; box-shadow: 0 0 0 2px red; } }\n", []],
+    [":focus:not(:focus-visible) { &.x { outline: none; } }\n", []],
+    [":focus:not(:focus-visible), .a:focus { outline: none; }\n", [FOCUS_RULE]],
+  ];
+  for (const [css, rules] of cases) {
+    const r = await focusAuditFor(css);
+    assert.deepEqual(r.rules, rules, css);
+    assert.deepEqual(r.unexaminable, [], css);
+  }
+});
+
+test("ST-07: an at-rule prelude is not a selector", async () => {
+  // A prelude naming :focus-visible must not make the rule examined: no focus rule was inspected.
+  for (const css of [
+    "@supports selector(:focus-visible) { .button { color: red; } }\n",
+    "@media (prefers-reduced-motion: reduce) { .a { color: red; } }\n",
+    "@layer base { .a { outline: none; } }\n",
+    "@container card (min-width: 1px) { .a { color: red; } }\n",
+  ]) {
+    const r = await focusAuditFor(css);
+    assert.equal(r.examined, false, css);
+    assert.deepEqual(r.rules, [], css);
+  }
+  // Children of an at-rule are examined under the ancestor selector, the at-rule excluded.
+  assert.deepEqual((await focusAuditFor("@supports selector(:focus-visible) { :focus { outline: none; } }\n")).rules, [FOCUS_RULE]);
+  assert.deepEqual((await focusAuditFor(":focus { @media (min-width: 1px) { outline: none; } }\n")).rules, [FOCUS_RULE]);
+  assert.deepEqual((await focusAuditFor(":focus { @media (min-width: 1px) { &.x { outline: none; } } }\n")).rules, [FOCUS_RULE]);
+  assert.deepEqual((await focusAuditFor("@media (min-width: 1px) { .a { &:focus { outline: none; } } }\n")).rules, [FOCUS_RULE]);
+});
+
+test("ST-07: an unknown span belongs to the block that owns it", async () => {
+  // The child's unknown does not make the parent unexaminable; the parent's own declarations are known.
+  const parent = await focusAuditFor(":focus { outline: none; &:hover { margin: #{$m}; } }\n");
+  assert.deepEqual(parent.rules, [FOCUS_RULE]);
+  assert.equal(parent.examined, true);
+  assert.deepEqual(parent.unexaminable, []);
+  // The child's unknown in a deciding position is the child's alone, and it still disqualifies the rule.
+  const child = await focusAuditFor(":focus { outline: none; &:hover { outline: #{$o}; } }\n");
+  assert.equal(child.examined, false);
+  assert.equal(child.unexaminable.length, 1);
+  assert.deepEqual(child.rules, [FOCUS_RULE]);
+  // A parent's unknown is not attributed to a clean child.
+  const own = await focusAuditFor(":focus { margin: #{$m}; &:hover { color: red; } }\n");
+  assert.equal(own.examined, true);
+  assert.deepEqual(own.unexaminable, []);
 });
 
 // --- The audit command ------------------------------------------------------------------------------

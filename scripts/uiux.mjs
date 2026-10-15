@@ -408,11 +408,14 @@ function appliesRingWidth(body) {
  *            Its value is unknowable here, so it is masked with `_` and its range returned; the
  *            detector decides whether not knowing it makes a block unexaminable.
  *
- * Returns { text, dynamic: [{ start, end }] }.
+ * Returns the resolved text; a dynamic span's characters are UNKNOWN, so whichever block owns that
+ * text owns the unknown, with no separate range bookkeeping.
  */
+/** Stands in for every character of an interpolation whose value is not statically knowable. */
+const UNKNOWN = "\uE000";
+
 function resolveInterpolation(text, sourceText = text) {
   let out = "";
-  const dynamic = [];
   let i = 0;
   const isIdent = (ch) => ch !== undefined && /[A-Za-z0-9_-]/.test(ch);
   while (i < text.length) {
@@ -440,18 +443,23 @@ function resolveInterpolation(text, sourceText = text) {
     if (literal !== null && literal.length <= width && !(isIdent(before) && isIdent(after))) {
       out += isIdent(after) ? literal.padStart(width, " ") : literal.padEnd(width, " ");
     } else {
-      out += text.slice(i, end).replace(/[^\n]/g, "_");
-      dynamic.push({ start: i, end });
+      out += text.slice(i, end).replace(/[^\n]/g, UNKNOWN);
     }
     i = end;
   }
-  return { text: out, dynamic };
+  return out;
 }
 
 /**
- * Parse nested rule blocks from resolved text. Each block carries its selector and the declarations
- * it owns: child blocks are blanked out of the body, so a parent's own declarations are read and a
- * child's are not. Offsets are into the same-length resolved text.
+ * ONE small block tree for the static style detectors. Each node carries:
+ *
+ *   selector    its own selector text (an at-rule's prelude for an at-rule)
+ *   atRule      the at-rule name, or null for a style rule. A prelude is not a selector.
+ *   composed    the FULL selectors of a style rule, from its ancestors: `&` resolved, a descendant
+ *               combinator otherwise, comma lists as a cross product. An at-rule contributes nothing;
+ *               its children compose against the nearest style-rule ancestor.
+ *   body        the text the block OWNS - child blocks blanked - so a declaration, and an unknown
+ *               span within it, belongs to exactly one block.
  */
 function parseBlocks(text) {
   const frames = [];
@@ -460,75 +468,109 @@ function parseBlocks(text) {
   for (let i = 0; i < text.length; i++) {
     const ch = text[i];
     if (ch === "{") {
-      stack.push({ selStart: boundary + 1, open: i, children: [] });
+      const frame = { selStart: boundary + 1, open: i, close: text.length, children: [], parent: stack[stack.length - 1] ?? null };
+      stack.push(frame);
+      frames.push(frame);
       boundary = i;
     } else if (ch === "}") {
       const frame = stack.pop();
       if (frame) {
         frame.close = i;
-        frames.push(frame);
-        if (stack.length > 0) stack[stack.length - 1].children.push([frame.selStart, i + 1]);
+        if (frame.parent) frame.parent.children.push([frame.selStart, i + 1]);
       }
       boundary = i;
     } else if (ch === ";") {
       boundary = i;
     }
   }
-  // A block still open at end of input (an unterminated interpolation swallowed its brace) is a block.
-  while (stack.length > 0) {
-    const frame = stack.pop();
-    frame.close = text.length;
-    frames.push(frame);
-  }
-  return frames.map((frame) => {
+  // A block still open at end of input (an unterminated interpolation swallowed its brace) keeps
+  // close = end of input, and is still a block.
+
+  const nodes = new Map();
+  const out = [];
+  for (const frame of frames) {
+    // frames are in source order, so a parent is always built before its children
+    const selector = text.slice(frame.selStart, frame.open);
+    const trimmed = selector.trim();
+    const atRule = trimmed.startsWith("@") ? /^@([A-Za-z-]+)/.exec(trimmed)?.[1] ?? "" : null;
     const body = text.slice(frame.open + 1, frame.close).split("");
     for (const [from, to] of frame.children) {
       for (let k = Math.max(from, frame.open + 1); k < Math.min(to, frame.close); k++) {
         if (body[k - frame.open - 1] !== "\n") body[k - frame.open - 1] = " ";
       }
     }
-    return {
-      selector: text.slice(frame.selStart, frame.open),
+    const parent = frame.parent ? nodes.get(frame.parent) : null;
+    const inherited = parent ? parent.composed : [""];
+    const node = {
+      selector,
       selectorStart: frame.selStart,
-      bodyStart: frame.open + 1,
+      atRule,
+      parent,
       body: body.join(""),
+      composed: atRule !== null ? inherited : composeSelectors(selector, inherited),
     };
-  });
+    nodes.set(frame, node);
+    out.push(node);
+  }
+  return out;
 }
+
+const GROUP_AT_RULES = new Set(["media", "supports", "layer", "container", "scope", "document", "starting-style"]);
+
+/** Split on commas outside parentheses and brackets. */
+function splitSelectorList(selector) {
+  const parts = [];
+  let depth = 0;
+  let current = "";
+  for (const ch of selector) {
+    if (ch === "(" || ch === "[") depth++;
+    else if (ch === ")" || ch === "]") depth = Math.max(0, depth - 1);
+    if (ch === "," && depth === 0) {
+      parts.push(current);
+      current = "";
+    } else current += ch;
+  }
+  parts.push(current);
+  return parts.map((part) => part.trim()).filter((part) => part.length > 0);
+}
+
+function composeSelectors(selector, parents) {
+  const composed = [];
+  for (const part of splitSelectorList(selector)) {
+    for (const parent of parents) {
+      if (part.includes("&")) composed.push(part.replaceAll("&", parent));
+      else composed.push(parent === "" ? part : `${parent} ${part}`);
+    }
+  }
+  return composed;
+}
+
+/** A focus pseudo-class a selector names. `:focus-within` is one: it is matched by the `:focus` prefix. */
+const FOCUS_SELECTOR = /:focus(-visible|-within)?(?![A-Za-z0-9_-])/;
 
 /** Declaration properties whose value decides whether a focus indicator exists. */
 const FOCUS_RELEVANT_PROPERTY = /^(outline(-[a-z]+)?|box-shadow|border(-[a-z]+)*|background(-[a-z]+)?|text-decoration(-[a-z]+)?|--tw-ring[a-z-]*|ring[a-z-]*|filter|all)$/i;
 
 /**
- * Why a block cannot be examined because of an interpolation whose value is unknowable, or null when
- * it can. A dynamic span is harmless in a declaration that cannot change the answer
+ * Why a style rule cannot be examined because of an interpolation whose value is unknowable, or null
+ * when it can. An unknown span is harmless in a declaration that cannot change the answer
  * (`margin: #{$gap}`) and disqualifying where it can: in a property name, in the value of an
- * outline / ring / shadow-like property, in an `@apply` list, or in a selector that has no literal
- * focus pseudo-class or sits inside `:not(...)`.
+ * outline / ring / shadow-like property, in an `@apply` list, or inside a focus selector's
+ * `:not(...)`. Only text the block owns is read, so a child's unknown is the child's.
  */
-function unexaminableReason(block, dynamic) {
-  const within = (start, end) => dynamic.some((d) => d.start < end && d.end > start);
-  const selEnd = block.selectorStart + block.selector.length;
-  if (within(block.selectorStart, selEnd)) {
-    if (!/:focus\b|:focus-visible\b/.test(block.selector)) {
-      return "an interpolation in the selector may make it a focus rule";
-    }
-    for (const m of block.selector.matchAll(/:not\(([^()]*)\)/g)) {
-      const from = block.selectorStart + m.index;
-      if (within(from, from + m[0].length)) {
-        return "an interpolation inside :not(...) changes which elements the rule excludes";
-      }
+function unexaminableReason(node) {
+  for (const selector of node.composed) {
+    if (!FOCUS_SELECTOR.test(selector)) continue;
+    for (const m of selector.matchAll(/:not\(([^()]*)\)/g)) {
+      if (m[1].includes(UNKNOWN)) return "an interpolation inside :not(...) changes which elements the rule excludes";
     }
   }
-  let offset = 0;
-  for (const raw of block.body.split(";")) {
-    const start = block.bodyStart + offset;
-    offset += raw.length + 1;
-    if (!within(start, start + raw.length)) continue;
+  for (const raw of node.body.split(";")) {
+    if (!raw.includes(UNKNOWN)) continue;
     if (/^\s*@apply\b/i.test(raw)) return "an interpolation in an @apply list may name a ring utility";
     const colon = raw.indexOf(":");
     if (colon === -1) return "an interpolation outside a property: value declaration";
-    if (within(start, start + colon)) return "an interpolation in a property name may be outline or a ring property";
+    if (raw.slice(0, colon).includes(UNKNOWN)) return "an interpolation in a property name may be outline or a ring property";
     const property = raw.slice(0, colon).trim();
     if (FOCUS_RELEVANT_PROPERTY.test(property)) {
       return `an interpolation in the value of '${property}' cannot be read statically`;
@@ -898,43 +940,45 @@ export const DETECTORS = [
       let examined = false;
       const compensating = /\b(box-shadow|border|border-bottom|border-color|background|background-color|text-decoration|outline-offset|outline-color)\s*:/i;
       const unexaminable = [];
-      const firstChar = (block) => block.selectorStart + Math.max(0, block.selector.search(/\S/));
 
       // SCSS interpolation contains braces, which would split a block. Resolve it on a copy of the
-      // same length: statically readable spans are substituted (#{none} reads as none); unknowable
-      // ones are masked and, where they sit in a position that decides the answer, the block is
-      // recorded as unexaminable instead of examined. The selector for the message is read from the
-      // unresolved text.
-      const { text: resolved, dynamic } = resolveInterpolation(text, file.views.sourceOf);
-      for (const block of parseBlocks(resolved)) {
-        const selector = block.selector;
-        const body = block.body;
-        const spelled = text.slice(block.selectorStart, block.selectorStart + selector.length);
-        const reason = unexaminableReason(block, dynamic);
-        const focusLike = /:focus\b|:focus-visible\b/.test(selector);
-        if (!focusLike) {
-          // An interpolated selector with no literal focus pseudo-class could still be a focus rule;
-          // it matters only when it also removes the outline.
-          if (reason !== null && /\boutline\s*:\s*(none|0)\b/i.test(body)) {
-            unexaminable.push({ index: firstChar(block), reason });
+      // same length: statically readable spans are substituted (#{none} reads as none) and unknowable
+      // ones become UNKNOWN. Every style rule is then examined under its COMPOSED selector, so a rule
+      // nested under :focus is a focus rule, and an at-rule prelude is never mistaken for a selector.
+      const resolved = resolveInterpolation(text, file.views.sourceOf);
+      for (const node of parseBlocks(resolved)) {
+        // A conditional group at-rule nested in a rule bubbles its declarations to that rule, so it is
+        // examined under the inherited selector; any other at-rule owns no style declarations.
+        if (node.atRule !== null && !GROUP_AT_RULES.has(node.atRule)) continue;
+        const where = node.selectorStart + Math.max(0, node.selector.search(/\S/));
+        const focusSelectors = node.composed.filter((selector) => FOCUS_SELECTOR.test(selector));
+        const removesOutline = /\boutline\s*:\s*(none|0)\b/i.test(node.body);
+        if (focusSelectors.length === 0) {
+          // A selector with an unknown span and no literal focus pseudo-class could still be a focus
+          // rule; it matters only when it also removes the outline.
+          if (removesOutline && node.composed.some((selector) => selector.includes(UNKNOWN))) {
+            unexaminable.push({ index: where, reason: "an interpolation in the selector may make it a focus rule" });
           }
           continue;
         }
+        const reason = unexaminableReason(node);
         if (reason !== null) {
-          unexaminable.push({ index: firstChar(block), reason });
+          unexaminable.push({ index: where, reason });
           continue;
         }
         examined = true;
-        if (/:focus\s*:not\(\s*:focus-visible\s*\)/.test(selector)) continue;
-        if (!/\boutline\s*:\s*(none|0)\b/i.test(body)) continue;
-        if (compensating.test(body)) continue;
-        if (appliesRingWidth(body)) continue;
+        if (focusSelectors.every((selector) => /:focus\s*:not\(\s*:focus-visible\s*\)/.test(selector))) continue;
+        if (!removesOutline) continue;
+        if (compensating.test(node.body)) continue;
+        if (appliesRingWidth(node.body)) continue;
+        const own = text.slice(node.selectorStart, node.selectorStart + node.selector.length).trim();
+        const spelled = node.parent ? "(nested) " + own : own;
         findings.push(
           FINDING(
             this.rule,
             file,
-            firstChar(block),
-            `'${spelled.trim()}' removes the focus outline and declares no replacement indicator`,
+            where,
+            `'${spelled}' removes the focus outline and declares no replacement indicator`,
             { detector: this.id },
           ),
         );
