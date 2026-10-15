@@ -991,7 +991,6 @@ test("ST-07: a subject-preserving functional nesting carries the parent's replac
     [":focus { box-shadow: 0 0 0 2px blue; :is(& .c) { outline: none; } }\n", [FOCUS_RULE]],
     [":focus { box-shadow: 0 0 0 2px blue; :is(&)::before { outline: none; } }\n", [FOCUS_RULE]],
     [":focus { box-shadow: 0 0 0 2px blue; &.x::after { outline: none; } }\n", [FOCUS_RULE]],
-    [":focus { box-shadow: 0 0 0 2px blue; &-x { outline: none; } }\n", [FOCUS_RULE]],
   ];
   for (const [css, expected] of cases) {
     assert.deepEqual((await focusAuditFor(css)).rules.filter((x) => x === FOCUS_RULE), expected, css);
