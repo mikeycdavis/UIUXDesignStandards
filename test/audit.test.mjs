@@ -1103,6 +1103,38 @@ test("ST-07: a cascade the detector cannot decide is unexaminable, never a guess
   }
 });
 
+test("ST-07: a Sass placeholder emits nothing unless it is extended", async () => {
+  // not extended: the rule does not exist in the output
+  for (const css of [
+    ":focus { %silent { outline: none; } }\n",
+    "%silent:focus { outline: none; }\n",
+    ".a { %x { :focus { outline: none; } } }\n",
+  ]) {
+    const r = await focusAuditFor(css);
+    assert.deepEqual(r.rules.filter((x) => x === FOCUS_RULE), [], css);
+    assert.deepEqual(r.unexaminable, [], css);
+  }
+  // extended: what it becomes is not modelled, so it is unexaminable, never a guess
+  const extended = await focusAuditFor("%ring:focus { outline: none; }\n.btn { @extend %ring; }\n");
+  assert.deepEqual(extended.rules.filter((x) => x === FOCUS_RULE), []);
+  assert.equal(extended.unexaminable.length >= 1, true);
+  // a percentage is not a placeholder
+  assert.deepEqual((await focusAuditFor("@keyframes k { 50% { outline: none; } }\n:focus { outline: none; }\n")).rules.filter((x) => x === FOCUS_RULE), [FOCUS_RULE]);
+});
+
+test("ST-07: a doubly negated reference to the parent keeps the subject", async () => {
+  const cases = [
+    [":focus { box-shadow: 0 0 0 2px blue; :not(:not(&)) { outline: none; } }\n", []],
+    [":focus { box-shadow: 0 0 0 2px blue; :not(:not(&.x)) { outline: none; } }\n", []],
+    [":focus { box-shadow: 0 0 0 2px blue; :not(&) { outline: none; } }\n", []],
+    [":focus { box-shadow: 0 0 0 2px blue; :not(:not(& .x)) { outline: none; } }\n", [FOCUS_RULE]],
+    [":focus { box-shadow: 0 0 0 2px blue; :not(:not(:not(&))) { outline: none; } }\n", []],
+  ];
+  for (const [css, expected] of cases) {
+    assert.deepEqual((await focusAuditFor(css)).rules.filter((x) => x === FOCUS_RULE), expected, css);
+  }
+});
+
 // --- ST-05 / #39 (owner decision, option A): the reported line is the line of the selector's first
 // non-whitespace character, the rule head. A declaration line is not required.
 

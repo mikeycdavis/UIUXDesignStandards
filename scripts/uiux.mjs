@@ -879,7 +879,7 @@ function namesSameSubject(part) {
   if (selectorCompounds(part).length !== 1) return false;
   let rest = part;
   let anchored = false;
-  const wrapper = /:(?:is|where|matches|-webkit-any|-moz-any)\(/i;
+  const wrapper = /:(?:is|where|matches|-webkit-any|-moz-any|not)\(/i;
   for (let m = wrapper.exec(rest); m !== null; m = wrapper.exec(rest)) {
     let depth = 1;
     let end = m.index + m[0].length;
@@ -889,7 +889,15 @@ function namesSameSubject(part) {
     }
     if (depth !== 0) return false;
     const args = splitSelectorList(rest.slice(m.index + m[0].length, end - 1));
-    if (args.length === 0 || !args.every((arg) => namesSameSubject(arg))) return false;
+    if (args.length === 0) return false;
+    if (/^:not\(/i.test(m[0])) {
+      // a negation preserves the subject only when it is itself negated: :not(:not(&)) is &
+      const doubled = args.every((arg) => {
+        const inner = /^:not\(([\s\S]*)\)$/i.exec(arg);
+        return inner !== null && splitSelectorList(inner[1]).every((part) => namesSameSubject(part));
+      });
+      if (!doubled) return false;
+    } else if (!args.every((arg) => namesSameSubject(arg))) return false;
     anchored = true;
     rest = rest.slice(0, m.index) + rest.slice(end);
   }
@@ -899,6 +907,9 @@ function namesSameSubject(part) {
   }
   return anchored;
 }
+
+/** A Sass placeholder selector: %name at the start of a compound (50% is a keyframe selector). */
+const PLACEHOLDER = /(^|[\s>+~,(&.#:])%[A-Za-z_-]/;
 
 /** A focus pseudo-class a selector names. `:focus-within` is one: it is matched by the `:focus` prefix. */
 const FOCUS_SELECTOR = /:focus(-visible|-within)?(?![A-Za-z0-9_-])/i;
@@ -1359,6 +1370,18 @@ export const DETECTORS = [
         // A conditional group at-rule nested in a rule bubbles its declarations to that rule, so it is
         // examined under the inherited selector; any other at-rule owns no style declarations.
         if (node.rootEmitted || node.inside || node.dataBlock) continue;
+        // A Sass placeholder (%name) emits nothing unless it is @extend-ed, and what an extension
+        // would emit is not modelled: with no @extend in the file the rule does not exist in the
+        // output; with one, a placeholder that removes the outline is unexaminable.
+        if (node.composed.some((composed) => PLACEHOLDER.test(composed))) {
+          if (/@extend\b/i.test(text) && /\boutline\s*:\s*(none|0)\b/i.test(node.body)) {
+            unexaminable.push({
+              index: node.selectorStart + Math.max(0, node.selector.search(/\S/)),
+              reason: "a Sass placeholder selector may be extended into a focus rule",
+            });
+          }
+          continue;
+        }
         const where = node.selectorStart + Math.max(0, node.selector.search(/\S/));
         if (node.propNest !== null) {
           // `outline: { style: none }` spells outline-style: none; the declarations are not flat, so
