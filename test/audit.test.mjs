@@ -1037,6 +1037,14 @@ test("ST-07: a same-element child that disables an inherited replacement removes
     // a sibling's override does not reach, and a re-enabling inner declaration restores it
     [":focus { box-shadow: 0 0 0 2px blue; &.a { box-shadow: none; } &.b { outline: none; } }\n", []],
     [":focus { border: 2px solid blue; &.x { border-style: none; &.y { outline: none; border-color: red; } } }\n", []],
+    [":focus { border: 2px solid blue; border-style: none; &.danger { outline: none; } }\n", [FOCUS_RULE]],
+    [":focus { box-shadow: none; box-shadow: 0 0 0 2px blue; &.danger { outline: none; } }\n", []],
+    [":focus { border: 2px solid blue; &.danger { outline: none; all: initial; } }\n", [FOCUS_RULE]],
+    [":focus { box-shadow: 0 0 0 2px blue; &.danger { outline: none; all: unset; } }\n", [FOCUS_RULE]],
+    [":focus { border: 2px solid blue; &.danger { outline: none; all: inherit; } }\n", []],
+    [":focus { border: 2px solid blue !important; &.danger { outline: none; border-style: none; } }\n", []],
+    [":focus { border: 2px solid blue !important; &.danger { outline: none; border-style: none !important; } }\n", [FOCUS_RULE]],
+    [":focus { border: 2px solid blue; &.danger { outline: none; border-style: none !important; } }\n", [FOCUS_RULE]],
     // an inherited indicator of another family is untouched
     [":focus { border: 2px solid blue; box-shadow: 0 0 0 2px blue; &.x { outline: none; border-style: none; } }\n", []],
   ];

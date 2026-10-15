@@ -698,6 +698,7 @@ function replacementFamily(property) {
   if (p.startsWith("text-decoration")) return "text-decoration";
   return p;
 }
+const IMPORTANT = /!\s*important\s*$/i;
 const DISABLED_VALUE = /^(none|hidden|0|0(px|em|rem)|initial|unset|revert|transparent)(\s*!important)?$/i;
 
 /**
@@ -719,8 +720,16 @@ function inheritedReplacementSurvives(ancestors, own, compensating) {
   return declarations.some((candidate, index) => {
     if (candidate.depth === ancestors.length || !compensating.test(candidate.property + ":") || DISABLED_VALUE.test(candidate.value)) return false;
     const family = replacementFamily(candidate.property);
+    const important = IMPORTANT.test(candidate.value);
     return !declarations.slice(index + 1).some(
-      (later) => later.depth > candidate.depth && replacementFamily(later.property) === family && DISABLED_VALUE.test(later.value),
+      (later) =>
+        // later in source order (a nested body, or the same body: `border: 2px solid; border-style: none`)
+        later.depth >= candidate.depth &&
+        // `all` resets every family; otherwise the same family
+        (later.property.toLowerCase() === "all" || replacementFamily(later.property) === family) &&
+        DISABLED_VALUE.test(later.value) &&
+        // an important indicator is not displaced by a declaration that is not
+        (!important || IMPORTANT.test(later.value)),
     );
   });
 }
