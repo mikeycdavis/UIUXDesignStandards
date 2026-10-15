@@ -532,6 +532,9 @@ function parseBlocks(text) {
     //                        here, so everything inside is opaque and never examined as a finding.
     //   anything else (@keyframes, @font-face, ...) has no selector semantics: the context passes
     //                        through and none of it is focus-relevant.
+    // A colon followed by whitespace (or the end) after a property name makes a prelude a declaration;
+    // `a:hover` and `:focus` are selectors.
+    const declaration = atRule === null ? /^(--[\w-]*|[\w\u{E000}-]+)\s*:(\s|$)/u.exec(trimmed) : null;
     let opaque = (parent?.opaque ?? false) || (atRule !== null && OPAQUE_AT_RULES.has(atRule));
     let composed;
     let childCtx;
@@ -560,6 +563,11 @@ function parseBlocks(text) {
       if (atRule === "") opaque = true;
       composed = ctx.reset ? [""] : ctx.parents;
       childCtx = ctx;
+    } else if (declaration) {
+      // `name: {` or `name: value {`: a block that belongs to a DECLARATION, not a rule. `--x: { }`
+      // is a custom property's value (data); `outline: { style: none }` is Sass property nesting.
+      composed = ctx.reset ? [""] : ctx.parents;
+      childCtx = ctx;
     } else {
       composed = composeSelectors(selector, ctx.parents, ctx.reset);
       childCtx = { parents: composed, reset: false };
@@ -569,6 +577,11 @@ function parseBlocks(text) {
       selectorStart: frame.selStart,
       atRule,
       rootEmitted,
+      // dataBlock: a custom property's value; propNest: the property name of a Sass nested property
+      // block. Neither is a rule, and nothing inside either is read as one.
+      dataBlock: declaration !== null && declaration[1].startsWith("--"),
+      propNest: declaration !== null && !declaration[1].startsWith("--") ? declaration[1] : null,
+      inside: parent !== null && (parent.inside || parent.dataBlock || parent.propNest !== null),
       opaque,
       ctx: childCtx,
       parent,
@@ -1085,8 +1098,20 @@ export const DETECTORS = [
       for (const node of parseBlocks(resolved)) {
         // A conditional group at-rule nested in a rule bubbles its declarations to that rule, so it is
         // examined under the inherited selector; any other at-rule owns no style declarations.
-        if (node.rootEmitted) continue;
+        if (node.rootEmitted || node.inside || node.dataBlock) continue;
         const where = node.selectorStart + Math.max(0, node.selector.search(/\S/));
+        if (node.propNest !== null) {
+          // `outline: { style: none }` spells outline-style: none; the declarations are not flat, so
+          // under a focus rule a nested block of a focus-relevant (or unknown) property is not read.
+          const relevant = FOCUS_RELEVANT_PROPERTY.test(node.propNest) || node.propNest.includes(UNKNOWN);
+          if (relevant && node.composed.some((selector) => isFocusSelector(selector))) {
+            unexaminable.push({
+              index: where,
+              reason: `a nested property block of '${node.propNest}' spells its declarations indirectly`,
+            });
+          }
+          continue;
+        }
         const focusSelectors = node.composed.filter((selector) => isFocusSelector(selector));
         const removesOutline = /\boutline\s*:\s*(none|0)\b/i.test(node.body);
         if (node.opaque && (node.atRule !== null ? removesOutline : focusSelectors.length > 0 || removesOutline)) {

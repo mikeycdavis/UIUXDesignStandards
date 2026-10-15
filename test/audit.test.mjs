@@ -749,6 +749,38 @@ test("ST-07: generic CSS at-rules keep the enclosing rule around their declarati
   assert.deepEqual((await focusAuditFor(":focus { @keyframes k { @custom s { from { outline: none; } } } }\n")).rules.filter((x) => x === FOCUS_RULE), []);
 });
 
+test("ST-07: a block that belongs to a declaration is not a rule", async () => {
+  // a custom property's value is data, however much it looks like a rule
+  for (const css of [
+    ":focus { --theme: { outline: none; }; }\n",
+    ":focus { --theme: { .a { outline: none; } }; }\n",
+    ":focus { --a: x { outline: none; }; }\n",
+    ".a { --theme: { :focus { outline: none; } }; }\n",
+  ]) {
+    const r = await focusAuditFor(css);
+    assert.deepEqual(r.rules.filter((x) => x === FOCUS_RULE), [], css);
+    assert.deepEqual(r.unexaminable, [], css);
+  }
+  // the data block does not hide the enclosing rule's own declarations
+  assert.deepEqual((await focusAuditFor(":focus { outline: none; --theme: { color: red; }; }\n")).rules, [FOCUS_RULE]);
+  // Sass property nesting: outline: { style: none } is outline-style: none - not read, not passed
+  for (const css of [
+    ":focus { outline: { style: none; } }\n",
+    ":focus { outline: none { width: 0; } }\n",
+    ":focus { #{$prop}: { style: none; } }\n",
+    ":focus { box-shadow: { x: 0; } }\n",
+  ]) {
+    const r = await focusAuditFor(css);
+    assert.equal(r.unexaminable.length >= 1, true, css);
+    assert.deepEqual(r.rules.filter((x) => x === FOCUS_RULE), [], css);
+  }
+  // an unrelated nested property is harmless, and a selector with a pseudo is still a rule
+  const margin = await focusAuditFor(":focus { margin: { top: 1px; } outline: none; }\n");
+  assert.deepEqual(margin.rules, [FOCUS_RULE]);
+  assert.deepEqual(margin.unexaminable, []);
+  assert.deepEqual((await focusAuditFor(".a { &:hover { outline: none; } :focus { outline: none; } }\n")).rules, [FOCUS_RULE]);
+});
+
 test("ST-07: a directive whose selector semantics are not modelled makes its contents unexaminable", async () => {
   const cases = [
     "@include breakpoint(md) { :focus { outline: none; } }\n",
