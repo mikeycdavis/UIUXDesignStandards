@@ -535,7 +535,7 @@ function parseBlocks(text) {
     let opaque = (parent?.opaque ?? false) || (atRule !== null && OPAQUE_AT_RULES.has(atRule));
     let composed;
     let childCtx;
-    let ownRule = atRule === null;
+    let rootEmitted = false;
     if (atRule === "at-root") {
       const prelude = trimmed.replace(/^@at-root/i, "").trim();
       if (prelude === "" || prelude.startsWith("(")) {
@@ -544,22 +544,22 @@ function parseBlocks(text) {
         const drops = resets !== false;
         childCtx = { parents: ctx.parents, reset: ctx.reset || drops };
         composed = drops ? [""] : ctx.reset ? [""] : ctx.parents;
-        ownRule = true;
       } else {
         composed = composeSelectors(prelude, ctx.parents, true);
         childCtx = { parents: composed, reset: false };
-        ownRule = true;
       }
-    } else if (GROUP_AT_RULES.has(atRule)) {
-      composed = ctx.reset ? [""] : ctx.parents;
-      childCtx = ctx;
-    } else if (atRule !== null) {
-      // Any other at-rule (@keyframes, @font-face, @page, ...) is emitted at the stylesheet root by
-      // Sass and is not a descendant of the enclosing rule: nothing inside inherits its selector. A
-      // name that is itself interpolated is not knowable.
-      if (atRule === "") opaque = true;
+    } else if (atRule !== null && ROOT_EMITTED_AT_RULES.has(atRule.replace(/^-[a-z]+-/, ""))) {
+      // dart-sass: inside a style rule an at-rule is bubbled to the root and its contents are
+      // wrapped in the enclosing rule - except in @keyframes and @font-face, whose contents are not.
+      rootEmitted = true;
       composed = [""];
       childCtx = { parents: [""], reset: true };
+    } else if (atRule !== null) {
+      // Every other at-rule - the conditional group rules and generic CSS at-rules alike - keeps the
+      // enclosing rule around its declarations. A name that is itself interpolated is not knowable.
+      if (atRule === "") opaque = true;
+      composed = ctx.reset ? [""] : ctx.parents;
+      childCtx = ctx;
     } else {
       composed = composeSelectors(selector, ctx.parents, ctx.reset);
       childCtx = { parents: composed, reset: false };
@@ -568,7 +568,7 @@ function parseBlocks(text) {
       selector,
       selectorStart: frame.selStart,
       atRule,
-      ownRule,
+      rootEmitted,
       opaque,
       ctx: childCtx,
       parent,
@@ -601,7 +601,8 @@ function atRootResets(prelude) {
   return m[1].toLowerCase() === "without" ? listsRule : !listsRule;
 }
 
-const GROUP_AT_RULES = new Set(["media", "supports", "layer", "container", "scope", "document", "starting-style"]);
+/** At-rules whose contents Sass does NOT wrap in the enclosing style rule (vendor prefix ignored). */
+const ROOT_EMITTED_AT_RULES = new Set(["keyframes", "font-face"]);
 const OPAQUE_AT_RULES = new Set(["include", "each", "if", "else", "for", "while", "function", "mixin", "content", "return"]);
 
 /** Split on commas outside parentheses and brackets. */
@@ -1084,7 +1085,7 @@ export const DETECTORS = [
       for (const node of parseBlocks(resolved)) {
         // A conditional group at-rule nested in a rule bubbles its declarations to that rule, so it is
         // examined under the inherited selector; any other at-rule owns no style declarations.
-        if (!node.ownRule && !GROUP_AT_RULES.has(node.atRule) && !node.opaque) continue;
+        if (node.rootEmitted) continue;
         const where = node.selectorStart + Math.max(0, node.selector.search(/\S/));
         const focusSelectors = node.composed.filter((selector) => isFocusSelector(selector));
         const removesOutline = /\boutline\s*:\s*(none|0)\b/i.test(node.body);

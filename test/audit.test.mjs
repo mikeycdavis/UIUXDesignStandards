@@ -715,10 +715,8 @@ test("ST-07: at-rules emitted at the stylesheet root do not inherit the enclosin
     ":focus { @keyframes pulse { from { outline: none; } to { outline: none; } } }\n",
     ":focus { @-webkit-keyframes pulse { 50% { outline: none; } } }\n",
     ":focus { @font-face { outline: none; } }\n",
-    ":focus { @page { outline: none; } }\n",
     ":focus { @KEYFRAMES pulse { from { outline: none; } } }\n",
     ":focus { @media print { @keyframes k { from { outline: none; } } } }\n",
-    ":focus { @property --x { outline: none; } }\n",
   ]) {
     const r = await focusAuditFor(css);
     assert.deepEqual(r.rules.filter((x) => x === FOCUS_RULE), [], css);
@@ -729,6 +727,26 @@ test("ST-07: at-rules emitted at the stylesheet root do not inherit the enclosin
   const r = await focusAuditFor(":focus { @#{$name} { .a { outline: none; } } }\n");
   assert.equal(r.examined, false);
   assert.equal(r.unexaminable.length >= 1, true);
+});
+
+test("ST-07: generic CSS at-rules keep the enclosing rule around their declarations", async () => {
+  // dart-sass wraps the contents of every at-rule except @keyframes and @font-face in the style rule
+  for (const css of [
+    ":focus { @custom state { outline: none; } }\n",
+    ":focus { @page { outline: none; } }\n",
+    ":focus { @property --x { outline: none; } }\n",
+    ":focus { @-moz-document url-prefix() { outline: none; } }\n",
+    ":focus { @CUSTOM state { outline: none; } }\n",
+    ":focus { @custom a { @custom b { outline: none; } } }\n",
+    ":focus { @custom state { &.x { outline: none; } } }\n",
+    ":focus { @custom state { .x { outline: none; } } }\n",
+  ]) {
+    assert.deepEqual((await focusAuditFor(css)).rules.filter((x) => x === FOCUS_RULE), [FOCUS_RULE], css);
+  }
+  // not under a focus rule: nothing to report
+  assert.deepEqual((await focusAuditFor(".a { @custom state { outline: none; } }\n")).rules.filter((x) => x === FOCUS_RULE), []);
+  // a keyframes/font-face between the rule and the generic at-rule still breaks the context
+  assert.deepEqual((await focusAuditFor(":focus { @keyframes k { @custom s { from { outline: none; } } } }\n")).rules.filter((x) => x === FOCUS_RULE), []);
 });
 
 test("ST-07: a directive whose selector semantics are not modelled makes its contents unexaminable", async () => {
