@@ -659,14 +659,6 @@ function composeSelectors(selector, parents, reset = false) {
   return composed;
 }
 
-/** Which declarations override which: a longhand or shorthand of the same family disables it. */
-function replacementFamily(property) {
-  const p = property.toLowerCase();
-  if (p.startsWith("border")) return "border";
-  if (p.startsWith("background")) return "background";
-  if (p.startsWith("text-decoration")) return "text-decoration";
-  return p;
-}
 const IMPORTANT = /!\s*important\s*$/i;
 const DISABLED_VALUE = /^(none|hidden|0|0(px|em|rem)|initial|unset|revert|transparent)(\s*!important)?$/i;
 
@@ -741,14 +733,42 @@ function specificityRange(node) {
   return [specs[0], specs[specs.length - 1]];
 }
 
+const BORDER_SIDES = ["top", "right", "bottom", "left"];
+const LOGICAL_SIDES = { "block-start": ["top"], "block-end": ["bottom"], "inline-start": ["left"], "inline-end": ["right"], block: ["top", "bottom"], inline: ["left", "right"] };
+const BORDER_FACETS = ["style", "width", "color"];
+
 /**
- * Do the declarations that style the focused element leave a replacement indicator? Every
- * declaration of the rule and of the enclosing same-element rules is put in one cascade: an indicator
- * (a non-disabled box-shadow/border/background/... or a ring-width @apply) is removed by a
- * declaration of its family (or \`all\`) with a disabled value that WINS - important beats not,
- * then higher specificity, then later source position (the offsets are absolute, so a parent's
- * declaration written after a nested rule is later than it). Returns "present", "absent" or, when a
- * disabling declaration's specificity or selector list cannot decide the cascade, "unknown".
+ * The (component, facet) pairs a declaration sets, or null when it is neither an indicator nor
+ * something that can disable one. Each border side is its own component with a style, a width and a
+ * colour facet: `border-top-style: none` leaves the bottom border alone, `border-style: none` clears
+ * the style of every side, and a shorthand sets every facet of the sides it names.
+ */
+function declarationCovers(property) {
+  const p = property.toLowerCase();
+  if (p === "all") return "all";
+  if (p === "box-shadow") return [["box-shadow", "*"]];
+  if (p === "outline-offset" || p === "outline-color") return [[p, "*"]];
+  if (p === "background" || p === "background-color" || p === "background-image") return [["background", "*"]];
+  if (/^text-decoration(-(line|color|style|thickness))?$/.test(p)) return [["text-decoration", "*"]];
+  const border = /^border(?:-(top|right|bottom|left|block-start|block-end|inline-start|inline-end|block|inline))?(?:-(style|width|color))?$/.exec(p);
+  if (border) {
+    const where = border[1];
+    const sides = where === undefined ? BORDER_SIDES : (LOGICAL_SIDES[where] ?? [where]);
+    const facets = border[2] === undefined ? BORDER_FACETS : [border[2]];
+    return sides.flatMap((side) => facets.map((facet) => ["border-" + side, facet]));
+  }
+  return null;
+}
+
+/**
+ * Do the declarations that style the focused element leave a replacement indicator? The rule's own
+ * declarations and those of the enclosing same-element rules are put in one cascade. For every
+ * component (box-shadow, each border side, background, ...) and facet the WINNING declaration decides
+ * whether it is on or off - important beats not, then higher computed specificity, then later
+ * absolute source position (a parent's declaration written after a nested rule is later than it) -
+ * so a disabling declaration can be re-enabled by a later one, and a longhand disables only what it
+ * names. Returns "present", "absent" or, when a selector list gives declarations a range of
+ * specificities that cannot decide the cascade, "unknown".
  */
 function replacementVerdict(node, compensating) {
   const chain = [...node.elementNodes, node];
@@ -790,36 +810,59 @@ function replacementVerdict(node, compensating) {
   decls.sort((x, y) => x.at - y.at);
   decls.forEach((d, order) => {
     d.order = order;
+    d.enabled = !DISABLED_VALUE.test(d.value);
+    d.covers = declarationCovers(d.property);
   });
-  const sameSpecificity = (d) => compareSpecificity(d.lo, d.hi) === 0;
-  const outcome = (disabler, indicator) => {
-    if (disabler.important !== indicator.important) return disabler.important ? "wins" : "loses";
-    if (compareSpecificity(disabler.lo, indicator.hi) > 0) return "wins";
-    if (compareSpecificity(disabler.hi, indicator.lo) < 0) return "loses";
-    if (sameSpecificity(disabler) && sameSpecificity(indicator) && compareSpecificity(disabler.lo, indicator.lo) === 0) {
-      return disabler.order > indicator.order ? "wins" : "loses";
-    }
+  const isSingle = (d) => compareSpecificity(d.lo, d.hi) === 0;
+  // does `a` beat `b` in the cascade? "wins" | "loses" | "unknown"
+  const beats = (a, b) => {
+    if (a.important !== b.important) return a.important ? "wins" : "loses";
+    if (compareSpecificity(a.lo, b.hi) > 0) return "wins";
+    if (compareSpecificity(a.hi, b.lo) < 0) return "loses";
+    if (isSingle(a) && isSingle(b) && compareSpecificity(a.lo, b.lo) === 0) return a.order > b.order ? "wins" : "loses";
     return "unknown";
   };
-  let unknown = false;
-  for (const indicator of decls) {
-    if (!compensating.test(indicator.property + ":") || DISABLED_VALUE.test(indicator.value)) continue;
-    const family = replacementFamily(indicator.property);
-    let survives = true;
-    let undecided = false;
-    for (const disabler of decls) {
-      if (disabler === indicator || !DISABLED_VALUE.test(disabler.value)) continue;
-      if (disabler.property !== "all" && replacementFamily(disabler.property) !== family) continue;
-      const result = outcome(disabler, indicator);
-      if (result === "wins") {
-        survives = false;
-        undecided = false;
-        break;
-      }
-      if (result === "unknown") undecided = true;
+  // The state of one facet: the winner's, "unknown" when survivors disagree, null when undeclared.
+  const facetState = (facetDecls) => {
+    if (facetDecls.length === 0) return null;
+    const survivors = facetDecls.filter((d) => !facetDecls.some((other) => other !== d && beats(other, d) === "wins"));
+    const states = new Set(survivors.map((d) => d.enabled));
+    return states.size === 1 ? [...states][0] : "unknown";
+  };
+  const components = new Map(); // "component|facet" -> declarations covering it
+  for (const d of decls) {
+    const pairs = d.covers === "all" ? [] : d.covers;
+    if (pairs === null) continue;
+    for (const [component, facet] of pairs) {
+      const key = component + "|" + facet;
+      if (!components.has(key)) components.set(key, []);
+      components.get(key).push(d);
     }
-    if (survives && !undecided) return "present";
-    if (survives && undecided) unknown = true;
+  }
+  // `all` resets every component and facet it competes with
+  const resets = decls.filter((d) => d.covers === "all" && !d.enabled);
+  const componentNames = new Set([...components.keys()].map((key) => key.split("|")[0]));
+  let unknown = false;
+  for (const component of componentNames) {
+    // an indicator needs an introducer: an enabled declaration of an indicator property
+    const introduced = decls.some(
+      (d) =>
+        d.enabled &&
+        Array.isArray(d.covers) &&
+        d.covers.some(([c]) => c === component) &&
+        compensating.test(d.property + ":"),
+    );
+    if (!introduced) continue;
+    let on = true;
+    let undecided = false;
+    for (const [key, facetDecls] of components) {
+      if (key.split("|")[0] !== component) continue;
+      const state = facetState([...facetDecls, ...resets]);
+      if (state === "unknown") undecided = true;
+      else if (state === false) on = false;
+    }
+    if (on && !undecided) return "present";
+    if (on && undecided) unknown = true;
   }
   return unknown ? "unknown" : "absent";
 }
