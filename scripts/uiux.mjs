@@ -619,6 +619,29 @@ function composeSelectors(selector, parents, reset = false) {
 /** A focus pseudo-class a selector names. `:focus-within` is one: it is matched by the `:focus` prefix. */
 const FOCUS_SELECTOR = /:focus(-visible|-within)?(?![A-Za-z0-9_-])/;
 
+/**
+ * True when a selector selects FOCUSED elements: it names a focus pseudo-class outside any negation,
+ * or inside an even number of nested `:not(...)`. `:not(:focus)` selects the opposite and
+ * `:focus { :not(&) {...} }` composes to exactly that.
+ */
+function isFocusSelector(selector, negated = false) {
+  let outside = "";
+  const inner = [];
+  for (let i = 0; i < selector.length; ) {
+    if (selector.startsWith(":not(", i)) {
+      let depth = 1;
+      let j = i + 5;
+      for (; j < selector.length && depth > 0; j++) {
+        if (selector[j] === "(") depth++;
+        else if (selector[j] === ")") depth--;
+      }
+      inner.push(selector.slice(i + 5, depth === 0 ? j - 1 : j));
+      i = j;
+    } else outside += selector[i++];
+  }
+  return (!negated && FOCUS_SELECTOR.test(outside)) || inner.some((part) => isFocusSelector(part, !negated));
+}
+
 /** Declaration properties whose value decides whether a focus indicator exists. */
 const FOCUS_RELEVANT_PROPERTY = /^(outline(-[a-z]+)?|box-shadow|border(-[a-z]+)*|background(-[a-z]+)?|text-decoration(-[a-z]+)?|--tw-ring[a-z-]*|ring[a-z-]*|filter|all)$/i;
 
@@ -631,7 +654,7 @@ const FOCUS_RELEVANT_PROPERTY = /^(outline(-[a-z]+)?|box-shadow|border(-[a-z]+)*
  */
 function unexaminableReason(node) {
   for (const selector of node.composed) {
-    if (!FOCUS_SELECTOR.test(selector)) continue;
+    if (!isFocusSelector(selector)) continue;
     // Only text after the pseudo-class can append the exempting `:not(:focus-visible)`, so an
     // unknown span in the same compound AFTER it decides what the selector means; one before it
     // (a class-name prefix) cannot.
@@ -1029,7 +1052,7 @@ export const DETECTORS = [
         // examined under the inherited selector; any other at-rule owns no style declarations.
         if (!node.ownRule && !GROUP_AT_RULES.has(node.atRule) && !node.opaque) continue;
         const where = node.selectorStart + Math.max(0, node.selector.search(/\S/));
-        const focusSelectors = node.composed.filter((selector) => FOCUS_SELECTOR.test(selector));
+        const focusSelectors = node.composed.filter((selector) => isFocusSelector(selector));
         const removesOutline = /\boutline\s*:\s*(none|0)\b/i.test(node.body);
         if (node.opaque && (node.atRule !== null ? removesOutline : focusSelectors.length > 0 || removesOutline)) {
           unexaminable.push({

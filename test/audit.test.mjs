@@ -545,6 +545,30 @@ test("ST-07: a nested rule is examined under its COMPOSED selector", async () =>
   }
 });
 
+test("ST-07: a focus pseudo inside a negation does not select focused elements", async () => {
+  const none = [
+    ":focus { :not(&) { outline: none; } }\n",
+    ":not(:focus) { outline: none; }\n",
+    ".a:not(:focus-visible) { outline: none; }\n",
+    ":not(:focus-within) { outline: none; }\n",
+    ".a { &:not(:focus) { outline: none; } }\n",
+    ":not(:not(:not(:focus))) { outline: none; }\n",
+  ];
+  for (const css of none) {
+    const r = await focusAuditFor(css);
+    assert.deepEqual(r.rules, [], css);
+    assert.equal(r.examined, false, css);
+  }
+  // a double negation selects focused elements again; a negation beside a focus pseudo does not hide it
+  for (const css of [
+    ":not(:not(:focus)) { outline: none; }\n",
+    ":focus:not(.disabled) { outline: none; }\n",
+    ".a:not(.b):focus { outline: none; }\n",
+  ]) {
+    assert.deepEqual((await focusAuditFor(css)).rules, [FOCUS_RULE], css);
+  }
+});
+
 test("ST-07: an at-rule prelude is not a selector", async () => {
   // A prelude naming :focus-visible must not make the rule examined: no focus rule was inspected.
   for (const css of [

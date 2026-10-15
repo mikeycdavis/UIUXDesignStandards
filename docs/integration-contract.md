@@ -348,7 +348,7 @@ It exits 0 even with findings. `--strict` exits 1 instead, for a consumer that w
 break a build — the default does not, because a discovery command that fails is a command people stop
 running.
 
-`detectorsUnexaminable` lists spans a detector met but could not read statically (for example a SCSS interpolation whose value is a variable in an outline or ring declaration). A rule with any such span is not in `detectorsExamined` and appears in `detectorsWithoutSubject`; the span is never counted as examined-clean.
+`detectorsUnexaminable` lists spans a detector met but could not read statically (for example a SCSS interpolation whose value is a variable in an outline or ring declaration). A span is never counted as examined-clean: a rule with any such span and no established finding is not in `detectorsExamined` and appears in `detectorsWithoutSubject`. The one exception is a rule for which the detector also established a definite violation: it stays in `detectorsExamined` (so validation reports the failure) and is omitted from `detectorsWithoutSubject`, while the unreadable span is still listed in `detectorsUnexaminable`.
 
 `evidenceSurface` is present on both commands, always, with not-attempted defaults:
 
