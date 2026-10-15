@@ -563,6 +563,63 @@ test("ST-07: an at-rule prelude is not a selector", async () => {
   assert.deepEqual((await focusAuditFor("@media (min-width: 1px) { .a { &:focus { outline: none; } } }\n")).rules, [FOCUS_RULE]);
 });
 
+test("ST-07: @at-root replaces the ancestor selector, and at-rule names are case-insensitive", async () => {
+  // @at-root children are not descendants of the enclosing rule
+  assert.deepEqual((await focusAuditFor(":focus { @at-root { .not-focus { outline: none; } } }\n")).rules, []);
+  assert.deepEqual((await focusAuditFor(":focus { @at-root (without: media) { .not-focus { outline: none; } } }\n")).rules, []);
+  assert.deepEqual((await focusAuditFor(":focus { @at-root .not-focus { outline: none; } }\n")).rules, []);
+  // ...but a literal & still names the enclosing rule, and @at-root .x:focus is a focus rule itself
+  assert.deepEqual((await focusAuditFor(".a { @at-root { &:focus { outline: none; } } }\n")).rules, [FOCUS_RULE]);
+  assert.deepEqual((await focusAuditFor(".a { @at-root .b:focus { outline: none; } }\n")).rules, [FOCUS_RULE]);
+  // names are lower-cased before every at-rule comparison
+  assert.deepEqual((await focusAuditFor(":focus { @MEDIA (min-width: 1px) { outline: none; } }\n")).rules, [FOCUS_RULE]);
+  assert.deepEqual((await focusAuditFor(":focus { @Supports (display: grid) { &.x { outline: none; } } }\n")).rules, [FOCUS_RULE]);
+  assert.deepEqual((await focusAuditFor(":focus { @AT-ROOT { .not-focus { outline: none; } } }\n")).rules, []);
+  assert.equal((await focusAuditFor("@SUPPORTS selector(:focus-visible) { .b { color: red; } }\n")).examined, false);
+});
+
+test("ST-07: a directive whose selector semantics are not modelled makes its contents unexaminable", async () => {
+  const cases = [
+    "@include breakpoint(md) { :focus { outline: none; } }\n",
+    ".a { @include on-focus { outline: none; } }\n",
+    ".a { @each $c in red, blue { &:focus { outline: none; } } }\n",
+    ".a:focus { @if $x { outline: none; } }\n",
+    ".a:focus { @if $x { outline: 1px solid; } @else { outline: none; } }\n",
+    "@for $i from 1 through 3 { .a:focus { outline: none; } }\n",
+    "@while $i > 0 { .a:focus { outline: none; } }\n",
+    "@mixin focus-reset { &:focus { outline: none; } }\n",
+    "@function f() { @return 1; }\n.a { @include m { &:focus { outline: none; } } }\n",
+    "@INCLUDE bp { :focus { outline: none; } }\n",
+  ];
+  for (const css of cases) {
+    const r = await focusAuditFor(css);
+    assert.equal(r.examined, false, css);
+    assert.equal(r.unexaminable.length >= 1, true, css);
+    assert.deepEqual(r.rules, [], css);
+  }
+  // an opaque region with nothing focus-relevant in it is not noise
+  assert.deepEqual((await focusAuditFor(".a { @include m { color: red; } }\n")).unexaminable, []);
+});
+
+test("ST-07: an unknown span after the focus pseudo-class can supply the exemption", async () => {
+  for (const css of [
+    ":focus#{$exclusion} { outline: none; }\n",
+    ":focus.#{$c} { outline: none; }\n",
+    ".a:focus-visible#{$x}.b { outline: none; }\n",
+    ".a { &:focus#{$x} { outline: none; } }\n",
+    ":focus:not(#{$x}) { outline: none; }\n",
+    ".a:not(#{$x}):focus { outline: none; }\n",
+  ]) {
+    const r = await focusAuditFor(css);
+    assert.equal(r.examined, false, css);
+    assert.equal(r.unexaminable.length, 1, css);
+    assert.deepEqual(r.rules, [], css);
+  }
+  // before the pseudo-class, or in a later compound, it cannot supply the exemption
+  assert.deepEqual((await focusAuditFor(".#{$p}:focus { outline: none; }\n")).rules, [FOCUS_RULE]);
+  assert.deepEqual((await focusAuditFor(":focus .#{$p} { outline: none; }\n")).rules, [FOCUS_RULE]);
+});
+
 test("ST-07: an unknown span belongs to the block that owns it", async () => {
   // The child's unknown does not make the parent unexaminable; the parent's own declarations are known.
   const parent = await focusAuditFor(":focus { outline: none; &:hover { margin: #{$m}; } }\n");

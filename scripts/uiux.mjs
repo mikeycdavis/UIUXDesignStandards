@@ -492,7 +492,8 @@ function parseBlocks(text) {
     // frames are in source order, so a parent is always built before its children
     const selector = text.slice(frame.selStart, frame.open);
     const trimmed = selector.trim();
-    const atRule = trimmed.startsWith("@") ? /^@([A-Za-z-]+)/.exec(trimmed)?.[1] ?? "" : null;
+    // At-rule names are ASCII case-insensitive: @MEDIA is @media.
+    const atRule = trimmed.startsWith("@") ? (/^@([A-Za-z-]+)/.exec(trimmed)?.[1] ?? "").toLowerCase() : null;
     const body = text.slice(frame.open + 1, frame.close).split("");
     for (const [from, to] of frame.children) {
       for (let k = Math.max(from, frame.open + 1); k < Math.min(to, frame.close); k++) {
@@ -501,13 +502,43 @@ function parseBlocks(text) {
     }
     const parent = frame.parent ? nodes.get(frame.parent) : null;
     const inherited = parent ? parent.composed : [""];
+    // Selector semantics of an at-rule:
+    //   group at-rules       inherit the enclosing selector, and own declarations bubble to it
+    //   @at-root             the children are NOT descendants of the enclosing selector: `reset`
+    //                        drops the descendant prefix (a literal & still names the enclosing rule).
+    //                        `@at-root .sel { }` is itself a style rule with that selector.
+    //   control / mixin / include-with-content: the selectors inside depend on code not modelled
+    //                        here, so everything inside is opaque and never examined as a finding.
+    //   anything else (@keyframes, @font-face, ...) has no selector semantics: children inherit and
+    //                        none of it is focus-relevant.
+    const opaque = (parent?.opaque ?? false) || (atRule !== null && OPAQUE_AT_RULES.has(atRule));
+    let composed;
+    let reset = false;
+    let ownRule = atRule === null;
+    if (atRule === "at-root") {
+      const prelude = trimmed.replace(/^@at-root/i, "").trim();
+      if (prelude === "" || prelude.startsWith("(")) {
+        composed = inherited;
+        reset = true;
+      } else {
+        composed = composeSelectors(prelude, inherited, true);
+        ownRule = true;
+      }
+    } else if (atRule !== null) {
+      composed = inherited;
+    } else {
+      composed = composeSelectors(selector, inherited, parent?.reset ?? false);
+    }
     const node = {
       selector,
       selectorStart: frame.selStart,
       atRule,
+      ownRule,
+      opaque,
+      reset,
       parent,
       body: body.join(""),
-      composed: atRule !== null ? inherited : composeSelectors(selector, inherited),
+      composed,
     };
     nodes.set(frame, node);
     out.push(node);
@@ -516,6 +547,7 @@ function parseBlocks(text) {
 }
 
 const GROUP_AT_RULES = new Set(["media", "supports", "layer", "container", "scope", "document", "starting-style"]);
+const OPAQUE_AT_RULES = new Set(["include", "each", "if", "else", "for", "while", "function", "mixin", "content", "return"]);
 
 /** Split on commas outside parentheses and brackets. */
 function splitSelectorList(selector) {
@@ -534,12 +566,12 @@ function splitSelectorList(selector) {
   return parts.map((part) => part.trim()).filter((part) => part.length > 0);
 }
 
-function composeSelectors(selector, parents) {
+function composeSelectors(selector, parents, reset = false) {
   const composed = [];
   for (const part of splitSelectorList(selector)) {
     for (const parent of parents) {
       if (part.includes("&")) composed.push(part.replaceAll("&", parent));
-      else composed.push(parent === "" ? part : `${parent} ${part}`);
+      else composed.push(parent === "" || reset ? part : `${parent} ${part}`);
     }
   }
   return composed;
@@ -561,6 +593,13 @@ const FOCUS_RELEVANT_PROPERTY = /^(outline(-[a-z]+)?|box-shadow|border(-[a-z]+)*
 function unexaminableReason(node) {
   for (const selector of node.composed) {
     if (!FOCUS_SELECTOR.test(selector)) continue;
+    // Only text after the pseudo-class can append the exempting `:not(:focus-visible)`, so an
+    // unknown span in the same compound AFTER it decides what the selector means; one before it
+    // (a class-name prefix) cannot.
+    for (const f of selector.matchAll(/:focus(-visible|-within)?(?![A-Za-z0-9_-])/g)) {
+      const tail = selector.slice(f.index + f[0].length).split(/[\s>+~,]/)[0];
+      if (tail.includes(UNKNOWN)) return "an interpolation after the focus pseudo-class may supply the :not(:focus-visible) exemption";
+    }
     for (const m of selector.matchAll(/:not\(([^()]*)\)/g)) {
       if (m[1].includes(UNKNOWN)) return "an interpolation inside :not(...) changes which elements the rule excludes";
     }
@@ -949,10 +988,17 @@ export const DETECTORS = [
       for (const node of parseBlocks(resolved)) {
         // A conditional group at-rule nested in a rule bubbles its declarations to that rule, so it is
         // examined under the inherited selector; any other at-rule owns no style declarations.
-        if (node.atRule !== null && !GROUP_AT_RULES.has(node.atRule)) continue;
+        if (!node.ownRule && !GROUP_AT_RULES.has(node.atRule) && !node.opaque) continue;
         const where = node.selectorStart + Math.max(0, node.selector.search(/\S/));
         const focusSelectors = node.composed.filter((selector) => FOCUS_SELECTOR.test(selector));
         const removesOutline = /\boutline\s*:\s*(none|0)\b/i.test(node.body);
+        if (node.opaque && (node.atRule !== null ? removesOutline : focusSelectors.length > 0 || removesOutline)) {
+          unexaminable.push({
+            index: where,
+            reason: "it sits inside an @include / control directive / mixin whose selector semantics are not modelled",
+          });
+          continue;
+        }
         if (focusSelectors.length === 0) {
           // A selector with an unknown span and no literal focus pseudo-class could still be a focus
           // rule; it matters only when it also removes the outline.
