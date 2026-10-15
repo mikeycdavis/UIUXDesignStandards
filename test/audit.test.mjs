@@ -1041,6 +1041,7 @@ test("ST-07: a same-element child that disables an inherited replacement removes
     [":focus { outline: none; border: 0; border-style: solid; border-color: red; }\n", [FOCUS_RULE]],
     [":focus { outline: none; border-radius: 0; border: 2px solid blue; }\n", []],
     [":focus { outline: none; box-shadow: 0 0 0 2px blue; border-radius: 0; }\n", []],
+    [":focus { outline: none; border: 2px solid blue; border-radius: 0; }\n", []],
     [":focus { outline: none; box-shadow: none; box-shadow: 0 0 0 2px blue; }\n", []],
     [":focus { outline: none; box-shadow: 0 0 0 2px blue; box-shadow: none; }\n", [FOCUS_RULE]],
     [":focus { box-shadow: 0 0 0 2px blue; &.a { box-shadow: none; &.b { outline: none; } } }\n", [FOCUS_RULE]],
