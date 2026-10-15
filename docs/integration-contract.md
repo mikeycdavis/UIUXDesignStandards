@@ -339,6 +339,7 @@ mistake for one.
   "evidenceSurface": { "…": "see below" },
   "detectorsExamined": ["accessibility.img-alt-text"],
   "detectorsWithoutSubject": [{ "rule": "…", "detector": "…", "reason": "…" }],
+  "detectorsUnexaminable": [{ "rule": "…", "detector": "…", "evidence": ["styles.scss:12"], "reason": "…" }],
   "findings": [{ "id": "img-alt", "rule": "accessibility.img-alt-text", "category": "accessibility", "severity": "error", "label": "OBSERVED", "evidence": ["index.html:17"], "message": "…", "standardRef": null }]
 }
 ```
@@ -346,6 +347,8 @@ mistake for one.
 It exits 0 even with findings. `--strict` exits 1 instead, for a consumer that wants discovery to
 break a build — the default does not, because a discovery command that fails is a command people stop
 running.
+
+`detectorsUnexaminable` lists spans a detector met but could not read statically (for example a SCSS interpolation whose value is a variable in an outline or ring declaration). A rule with any such span is not in `detectorsExamined` and appears in `detectorsWithoutSubject`; the span is never counted as examined-clean.
 
 `evidenceSurface` is present on both commands, always, with not-attempted defaults:
 

@@ -394,17 +394,27 @@ function appliesRingWidth(body) {
 }
 
 /**
- * Mask SCSS interpolation spans (`#{ ... }`) without changing the text's length or line structure.
+ * Resolve SCSS interpolation spans (`#{ ... }`) without changing the text's length or line structure.
  *
- * The block matcher splits on `{` and `}`, so an interpolation cuts a rule into fragments and the
- * real selector/body pair is never matched. Masking keeps every offset valid. `#{!important}` is
- * Sass's way of writing a declaration-level `!important`, so it is rewritten to `!important`, padded
- * with spaces; every other span becomes `_`, which no ring-width token can match, so an unknown
- * interpolated utility fails toward reporting, as a variant-prefixed token does.
+ * The block matcher splits on braces, so an interpolation cuts a rule into fragments. Resolving keeps
+ * every offset valid. Each span is one of two things:
+ *
+ *   STATIC   its content is a bare keyword, number or `!important`, or a quoted literal - Sass
+ *            interpolates those verbatim - so the content is substituted (`#{none}` reads as `none`,
+ *            `#{!important}` as `!important`). The content is read from `sourceText`, because the
+ *            structure view blanks a quoted literal. It is padded with spaces to the span's length, on
+ *            the side that keeps it from fusing with an adjacent identifier character.
+ *   DYNAMIC  anything else (a variable, a function call, a map, arithmetic, an unterminated span).
+ *            Its value is unknowable here, so it is masked with `_` and its range returned; the
+ *            detector decides whether not knowing it makes a block unexaminable.
+ *
+ * Returns { text, dynamic: [{ start, end }] }.
  */
-function maskInterpolation(text) {
+function resolveInterpolation(text, sourceText = text) {
   let out = "";
+  const dynamic = [];
   let i = 0;
+  const isIdent = (ch) => ch !== undefined && /[A-Za-z0-9_-]/.test(ch);
   while (i < text.length) {
     if (text[i] !== "#" || text[i + 1] !== "{") {
       out += text[i++];
@@ -416,16 +426,115 @@ function maskInterpolation(text) {
       if (text[j] === "{") depth++;
       else if (text[j] === "}" && --depth === 0) break;
     }
+    const terminated = j < text.length;
     const end = Math.min(j + 1, text.length); // an unterminated span is masked to the end
-    const span = text.slice(i, end);
-    if (/^#\{\s*!important\s*\}$/i.test(span)) {
-      out += "!important".padEnd(span.length, " ");
+    const inner = terminated ? sourceText.slice(i + 2, j).trim() : null;
+    let literal = null;
+    if (inner !== null) {
+      // A quoted literal is already bare here: the source view blanks the quote characters.
+      if (/^!?[A-Za-z0-9_.%-]+$/.test(inner)) literal = inner;
+    }
+    const width = end - i;
+    const before = text[i - 1];
+    const after = text[end];
+    if (literal !== null && literal.length <= width && !(isIdent(before) && isIdent(after))) {
+      out += isIdent(after) ? literal.padStart(width, " ") : literal.padEnd(width, " ");
     } else {
-      out += span.replace(/[^\n]/g, "_");
+      out += text.slice(i, end).replace(/[^\n]/g, "_");
+      dynamic.push({ start: i, end });
     }
     i = end;
   }
-  return out;
+  return { text: out, dynamic };
+}
+
+/**
+ * Parse nested rule blocks from resolved text. Each block carries its selector and the declarations
+ * it owns: child blocks are blanked out of the body, so a parent's own declarations are read and a
+ * child's are not. Offsets are into the same-length resolved text.
+ */
+function parseBlocks(text) {
+  const frames = [];
+  const stack = [];
+  let boundary = -1;
+  for (let i = 0; i < text.length; i++) {
+    const ch = text[i];
+    if (ch === "{") {
+      stack.push({ selStart: boundary + 1, open: i, children: [] });
+      boundary = i;
+    } else if (ch === "}") {
+      const frame = stack.pop();
+      if (frame) {
+        frame.close = i;
+        frames.push(frame);
+        if (stack.length > 0) stack[stack.length - 1].children.push([frame.selStart, i + 1]);
+      }
+      boundary = i;
+    } else if (ch === ";") {
+      boundary = i;
+    }
+  }
+  // A block still open at end of input (an unterminated interpolation swallowed its brace) is a block.
+  while (stack.length > 0) {
+    const frame = stack.pop();
+    frame.close = text.length;
+    frames.push(frame);
+  }
+  return frames.map((frame) => {
+    const body = text.slice(frame.open + 1, frame.close).split("");
+    for (const [from, to] of frame.children) {
+      for (let k = Math.max(from, frame.open + 1); k < Math.min(to, frame.close); k++) {
+        if (body[k - frame.open - 1] !== "\n") body[k - frame.open - 1] = " ";
+      }
+    }
+    return {
+      selector: text.slice(frame.selStart, frame.open),
+      selectorStart: frame.selStart,
+      bodyStart: frame.open + 1,
+      body: body.join(""),
+    };
+  });
+}
+
+/** Declaration properties whose value decides whether a focus indicator exists. */
+const FOCUS_RELEVANT_PROPERTY = /^(outline(-[a-z]+)?|box-shadow|border(-[a-z]+)*|background(-[a-z]+)?|text-decoration(-[a-z]+)?|--tw-ring[a-z-]*|ring[a-z-]*|filter|all)$/i;
+
+/**
+ * Why a block cannot be examined because of an interpolation whose value is unknowable, or null when
+ * it can. A dynamic span is harmless in a declaration that cannot change the answer
+ * (`margin: #{$gap}`) and disqualifying where it can: in a property name, in the value of an
+ * outline / ring / shadow-like property, in an `@apply` list, or in a selector that has no literal
+ * focus pseudo-class or sits inside `:not(...)`.
+ */
+function unexaminableReason(block, dynamic) {
+  const within = (start, end) => dynamic.some((d) => d.start < end && d.end > start);
+  const selEnd = block.selectorStart + block.selector.length;
+  if (within(block.selectorStart, selEnd)) {
+    if (!/:focus\b|:focus-visible\b/.test(block.selector)) {
+      return "an interpolation in the selector may make it a focus rule";
+    }
+    for (const m of block.selector.matchAll(/:not\(([^()]*)\)/g)) {
+      const from = block.selectorStart + m.index;
+      if (within(from, from + m[0].length)) {
+        return "an interpolation inside :not(...) changes which elements the rule excludes";
+      }
+    }
+  }
+  let offset = 0;
+  for (const raw of block.body.split(";")) {
+    const start = block.bodyStart + offset;
+    offset += raw.length + 1;
+    if (!within(start, start + raw.length)) continue;
+    if (/^\s*@apply\b/i.test(raw)) return "an interpolation in an @apply list may name a ring utility";
+    const colon = raw.indexOf(":");
+    if (colon === -1) return "an interpolation outside a property: value declaration";
+    if (within(start, start + colon)) return "an interpolation in a property name may be outline or a ring property";
+    const property = raw.slice(0, colon).trim();
+    if (FOCUS_RELEVANT_PROPERTY.test(property)) {
+      return `an interpolation in the value of '${property}' cannot be read statically`;
+    }
+  }
+  return null;
 }
 
 export const DETECTORS = [
@@ -788,15 +897,33 @@ export const DETECTORS = [
       const findings = [];
       let examined = false;
       const compensating = /\b(box-shadow|border|border-bottom|border-color|background|background-color|text-decoration|outline-offset|outline-color)\s*:/i;
+      const unexaminable = [];
+      const firstChar = (block) => block.selectorStart + Math.max(0, block.selector.search(/\S/));
 
-      // SCSS interpolation contains braces, which would split a block; match on a masked copy of the
-      // same length and read the selector for the message from the unmasked text.
-      const masked = maskInterpolation(text);
-      for (const block of masked.matchAll(/([^{}]+)\{([^{}]*)\}/g)) {
-        const selector = block[1];
-        const body = block[2];
-        const spelled = text.slice(block.index, block.index + selector.length);
-        if (!/:focus\b|:focus-visible\b/.test(selector)) continue;
+      // SCSS interpolation contains braces, which would split a block. Resolve it on a copy of the
+      // same length: statically readable spans are substituted (#{none} reads as none); unknowable
+      // ones are masked and, where they sit in a position that decides the answer, the block is
+      // recorded as unexaminable instead of examined. The selector for the message is read from the
+      // unresolved text.
+      const { text: resolved, dynamic } = resolveInterpolation(text, file.views.sourceOf);
+      for (const block of parseBlocks(resolved)) {
+        const selector = block.selector;
+        const body = block.body;
+        const spelled = text.slice(block.selectorStart, block.selectorStart + selector.length);
+        const reason = unexaminableReason(block, dynamic);
+        const focusLike = /:focus\b|:focus-visible\b/.test(selector);
+        if (!focusLike) {
+          // An interpolated selector with no literal focus pseudo-class could still be a focus rule;
+          // it matters only when it also removes the outline.
+          if (reason !== null && /\boutline\s*:\s*(none|0)\b/i.test(body)) {
+            unexaminable.push({ index: firstChar(block), reason });
+          }
+          continue;
+        }
+        if (reason !== null) {
+          unexaminable.push({ index: firstChar(block), reason });
+          continue;
+        }
         examined = true;
         if (/:focus\s*:not\(\s*:focus-visible\s*\)/.test(selector)) continue;
         if (!/\boutline\s*:\s*(none|0)\b/i.test(body)) continue;
@@ -806,13 +933,20 @@ export const DETECTORS = [
           FINDING(
             this.rule,
             file,
-            block.index,
+            firstChar(block),
             `'${spelled.trim()}' removes the focus outline and declares no replacement indicator`,
             { detector: this.id },
           ),
         );
       }
-      return { examined, findings };
+      return {
+        examined,
+        findings,
+        unexaminable: unexaminable.map((u) => ({
+          evidence: `${file.path}:${lineOf(file.text, u.index)}`,
+          reason: u.reason,
+        })),
+      };
     },
   },
 
@@ -1015,26 +1149,42 @@ export function runDetectors(files, context, { auditOnly = false } = {}) {
   const findings = [];
   const examined = new Set();
   const unexamined = [];
+  const unexaminable = [];
 
   for (const detector of DETECTORS) {
     if (detector.auditOnly && !auditOnly) continue;
 
     let sawSubject = false;
+    const cannotRead = [];
     if (detector.project) {
       const result = detector.examineProject(files, context);
       if (result.examined) sawSubject = true;
       findings.push(...result.findings);
+      cannotRead.push(...(result.unexaminable ?? []));
     } else {
       for (const file of files) {
         if (detector.applies && !detector.applies(file, context)) continue;
         const result = detector.examine(file, context);
         if (result.examined) sawSubject = true;
         findings.push(...result.findings);
+        cannotRead.push(...(result.unexaminable ?? []));
       }
     }
 
-    if (sawSubject) examined.add(detector.rule);
-    else {
+    for (const item of cannotRead) {
+      unexaminable.push({ rule: detector.rule, detector: detector.id, evidence: [item.evidence], reason: item.reason });
+    }
+
+    // A rule with a span the detector could not read is not evaluated, even where it examined other
+    // instances: a clean result over the readable ones would otherwise stand in for the whole.
+    if (sawSubject && cannotRead.length === 0) examined.add(detector.rule);
+    else if (cannotRead.length > 0) {
+      unexamined.push({
+        rule: detector.rule,
+        detector: detector.id,
+        reason: `${cannotRead.length} span(s) could not be examined statically (see detectorsUnexaminable), so ${detector.id} did not establish this rule`,
+      });
+    } else {
       unexamined.push({
         rule: detector.rule,
         detector: detector.id,
@@ -1045,7 +1195,7 @@ export function runDetectors(files, context, { auditOnly = false } = {}) {
     }
   }
 
-  return { findings, examined: [...examined], unexamined };
+  return { findings, examined: [...examined], unexamined, unexaminable };
 }
 
 // -------------------------------------------------------------------------------------------------
@@ -1241,7 +1391,7 @@ export function scopeOfRule(rule, gate) {
 export async function runAudit(target, { maxFiles = MAX_FILES } = {}) {
   const corpus = await readCorpus(target, { maxFiles });
   const context = { tokenSystem: detectTokenSystem(corpus.files, corpus.scan, null), policy: null };
-  const { findings, examined, unexamined } = runDetectors(corpus.files, context, { auditOnly: true });
+  const { findings, examined, unexamined, unexaminable } = runDetectors(corpus.files, context, { auditOnly: true });
 
   return {
     schemaVersion: "1.0",
@@ -1250,6 +1400,7 @@ export async function runAudit(target, { maxFiles = MAX_FILES } = {}) {
     evidenceSurface: census(target, corpus, context),
     detectorsExamined: examined,
     detectorsWithoutSubject: unexamined,
+    detectorsUnexaminable: unexaminable,
     findings,
   };
 }

@@ -430,6 +430,99 @@ test("ST-07 criterion 3: blocks without #{ are unchanged", async () => {
   assert.deepEqual(await focusRulesFor(":focus:not(:focus-visible) { outline: none; }\n", "a.scss"), []);
 });
 
+// --- ST-07: an interpolation that cannot be read statically makes the block unexaminable -----------
+
+async function focusAuditFor(css, file = "f.scss") {
+  const dir = await mkdtemp(path.join(tmpdir(), "uiux-st07u-"));
+  try {
+    await writeFile(path.join(dir, file), css);
+    const audit = await runAudit(dir);
+    return {
+      rules: rulesOf(audit.findings),
+      examined: audit.detectorsExamined.includes(FOCUS_RULE),
+      unexaminable: audit.detectorsUnexaminable.filter((u) => u.rule === FOCUS_RULE),
+      withoutSubject: audit.detectorsWithoutSubject.filter((u) => u.rule === FOCUS_RULE),
+    };
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+}
+
+test("ST-07: a statically readable interpolation is read, not masked", async () => {
+  for (const css of [
+    ":focus { outline: #{none}; }\n",
+    ":focus { outline: #{0}; }\n",
+    ':focus { outline: #{"none"}; }\n',
+    ":focus { outline: #{ none }; }\n",
+    ":focus { outline: no#{ne}; }\n",
+    ":focus { outline: #{no}ne; }\n",
+  ]) {
+    const r = await focusAuditFor(css);
+    assert.deepEqual(r.rules, [FOCUS_RULE], css);
+    assert.equal(r.examined, true, css);
+    assert.deepEqual(r.unexaminable, [], css);
+  }
+});
+
+test("ST-07: every position an unknowable interpolation can take is unexaminable, never examined-clean", async () => {
+  const positions = {
+    "outline value": ":focus { outline: #{$none}; }\n",
+    "outline shorthand width": ":focus { outline: #{$w} solid; }\n",
+    "function call value": ":focus { outline: #{if($x, none, auto)}; }\n",
+    "map value": ":focus { outline: #{map-get((a: none), a)}; }\n",
+    "property name": ":focus { #{$prop}: none; }\n",
+    "partial property name": ":focus { out#{$part}: none; }\n",
+    "box-shadow value": ":focus { outline: none; box-shadow: #{$s}; }\n",
+    "compensating property value": ":focus { outline: none; outline-color: #{$c}; }\n",
+    "@apply list": ":focus { outline: none; @apply #{$ring}; }\n",
+    "@apply variant token with colon": ":focus { outline: none; @apply focus:#{$r} sm:ring-0; }\n",
+    "@apply mixed with static": ":focus { outline: none; @apply ring-0 #{$x}; }\n",
+    "nested focus block": ".a { &:focus { outline: #{$o}; } }\n",
+    "selector :not": ":focus:not(#{$fv}) { outline: none; }\n",
+    "whole-selector interpolation": "#{$sel} { outline: none; }\n",
+    "selector pseudo fragment": ".a:#{$state} { outline: none; }\n",
+    "inside @media": "@media (min-width: 1px) { :focus { outline: #{$o}; } }\n",
+    "unterminated span": ":focus { outline: #{$o;\n}\n",
+  };
+  for (const [name, css] of Object.entries(positions)) {
+    const r = await focusAuditFor(css);
+    assert.equal(r.examined, false, `${name}: the rule must not be evaluated`);
+    assert.equal(r.unexaminable.length >= 1, true, `${name}: an unexaminable record is emitted`);
+    assert.equal(r.withoutSubject.length, 1, `${name}: the rule is listed as not established`);
+  }
+});
+
+test("ST-07: an unexaminable block makes the rule unevaluated even when another block is readable", async () => {
+  const r = await focusAuditFor(":focus-visible { outline: 2px solid blue; }\n:focus { outline: #{$o}; }\n");
+  assert.equal(r.examined, false);
+  assert.equal(r.unexaminable.length, 1);
+  assert.match(r.unexaminable[0].evidence[0], /^f\.scss:2$/);
+});
+
+test("ST-07: interpolations that cannot change the answer stay examined", async () => {
+  const cases = [
+    [":focus { outline: none; margin: #{$gap}; }\n", [FOCUS_RULE]],
+    [".#{$p}-btn:focus { outline: none; }\n", [FOCUS_RULE]],
+    [":focus { outline: 2px solid; width: calc(#{$a} + 1px); }\n", []],
+    [':focus { content: "#{$x}"; outline: none; }\n', [FOCUS_RULE]],
+    ["// :focus { outline: #{$o}; }\n:focus { outline: none; }\n", [FOCUS_RULE]],
+    ["/* :focus { outline: #{$o}; } */\n:focus { outline: none; }\n", [FOCUS_RULE]],
+  ];
+  for (const [css, rules] of cases) {
+    const r = await focusAuditFor(css);
+    assert.deepEqual(r.rules, rules, css);
+    assert.equal(r.examined, true, css);
+    assert.deepEqual(r.unexaminable, [], css);
+  }
+});
+
+test("ST-07: nested blocks - a parent's own declarations are read, a child's are its own", async () => {
+  assert.deepEqual((await focusAuditFor(".a { &:focus { outline: none; } }\n")).rules, [FOCUS_RULE]);
+  assert.deepEqual((await focusAuditFor(":focus { outline: none; &:hover { color: red; } }\n")).rules, [FOCUS_RULE]);
+  assert.deepEqual((await focusAuditFor(":focus { outline: none; &:hover { box-shadow: 0 0 0 2px blue; } }\n")).rules, [FOCUS_RULE]);
+  assert.deepEqual((await focusAuditFor(":focus { &:hover { outline: none; } }\n")).rules, []);
+});
+
 // --- The audit command ------------------------------------------------------------------------------
 
 test("audit reaches no verdict: no status, no score, and no policy is consulted", async () => {
