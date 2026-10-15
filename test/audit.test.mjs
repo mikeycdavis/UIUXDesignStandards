@@ -749,6 +749,41 @@ test("ST-07: generic CSS at-rules keep the enclosing rule around their declarati
   assert.deepEqual((await focusAuditFor(":focus { @keyframes k { @custom s { from { outline: none; } } } }\n")).rules.filter((x) => x === FOCUS_RULE), []);
 });
 
+test("ST-07: Sass null interpolates to nothing; the string \"null\" does not", async () => {
+  for (const css of [
+    ":focus#{null} { outline: none; }\n",
+    ":focus#{ null } { outline: none; }\n",
+    ":focus { outline: none#{null}; }\n",
+    ":focus#{null}#{null} { outline: none; }\n",
+  ]) {
+    const r = await focusAuditFor(css);
+    assert.deepEqual(r.rules.filter((x) => x === FOCUS_RULE), [FOCUS_RULE], css);
+  }
+  // a readable safe sibling does not mask it
+  assert.deepEqual(
+    (await focusAuditFor(":focus-visible { outline: 2px solid; }\n:focus#{null} { outline: none; }\n")).rules.filter((x) => x === FOCUS_RULE),
+    [FOCUS_RULE],
+  );
+  // the quoted string "null" is the text null: :focusnull is not a focus selector
+  assert.deepEqual((await focusAuditFor(':focus#{"null"} { outline: none; }\n')).rules.filter((x) => x === FOCUS_RULE), []);
+});
+
+test("ST-07: pseudo-class names are ASCII case-insensitive", async () => {
+  for (const css of [
+    ":focus { :NOT(&) { outline: none; } }\n",
+    ":focus { .parent:HAS(&) { outline: none; } }\n",
+    ":focus { .parent:Has(&) { outline: none; } }\n",
+    ":NOT(:FOCUS) { outline: none; }\n",
+    ":FOCUS:NOT(:FOCUS-VISIBLE) { outline: none; }\n",
+    ":Focus:Not(:Focus-Visible) { outline: none; }\n",
+  ]) {
+    assert.deepEqual((await focusAuditFor(css)).rules.filter((x) => x === FOCUS_RULE), [], css);
+  }
+  for (const css of [":FOCUS { outline: none; }\n", ":Focus-Visible { outline: none; }\n", ":NOT(:NOT(:FOCUS)) { outline: none; }\n"]) {
+    assert.deepEqual((await focusAuditFor(css)).rules.filter((x) => x === FOCUS_RULE), [FOCUS_RULE], css);
+  }
+});
+
 test("ST-07: a block that belongs to a declaration is not a rule", async () => {
   // a custom property's value is data, however much it looks like a rule
   for (const css of [

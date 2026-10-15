@@ -414,7 +414,7 @@ function appliesRingWidth(body) {
 /** Stands in for every character of an interpolation whose value is not statically knowable. */
 const UNKNOWN = "\uE000";
 
-function resolveInterpolation(text, sourceText = text) {
+function resolveInterpolation(text, sourceText = text, rawText = sourceText) {
   const isIdent = (ch) => ch !== undefined && /[A-Za-z0-9_-]/.test(ch);
   // Pass 1: find every span, and read its content when it is statically readable.
   const spans = [];
@@ -432,8 +432,11 @@ function resolveInterpolation(text, sourceText = text) {
     const terminated = j < text.length;
     const end = Math.min(j + 1, text.length); // an unterminated span is masked to the end
     const inner = terminated ? sourceText.slice(i + 2, j).trim() : null;
-    // A quoted literal is already bare here: the source view blanks the quote characters.
-    const literal = inner !== null && /^!?[A-Za-z0-9_.%-]+$/.test(inner) ? inner : null;
+    // The views blank quote characters, so quoting is read from the raw file text: the BARE value
+    // `null` interpolates to nothing, while the string "null" interpolates to the text null.
+    const raw = terminated ? rawText.slice(i + 2, j).trim() : null;
+    let literal = inner !== null && /^!?[A-Za-z0-9_.%-]+$/.test(inner) ? inner : null;
+    if (literal === "null" && raw === "null") literal = "";
     spans.push({ start: i, end, literal });
     i = end;
   }
@@ -647,7 +650,7 @@ function composeSelectors(selector, parents, reset = false) {
 }
 
 /** A focus pseudo-class a selector names. `:focus-within` is one: it is matched by the `:focus` prefix. */
-const FOCUS_SELECTOR = /:focus(-visible|-within)?(?![A-Za-z0-9_-])/;
+const FOCUS_SELECTOR = /:focus(-visible|-within)?(?![A-Za-z0-9_-])/i;
 
 /**
  * True when a selector selects FOCUSED elements: it names a focus pseudo-class outside any negation,
@@ -659,8 +662,10 @@ function isFocusSelector(selector, negated = false) {
   let outside = "";
   const inner = [];
   for (let i = 0; i < selector.length; ) {
-    const relational = selector.startsWith(":has(", i);
-    if (relational || selector.startsWith(":not(", i)) {
+    // pseudo-class names are ASCII case-insensitive: :NOT( and :Has( are :not( and :has(
+    const head = selector.slice(i, i + 5).toLowerCase();
+    const relational = head === ":has(";
+    if (relational || head === ":not(") {
       const open = relational ? 5 : 5;
       let depth = 1;
       let j = i + open;
@@ -1094,7 +1099,7 @@ export const DETECTORS = [
       // same length: statically readable spans are substituted (#{none} reads as none) and unknowable
       // ones become UNKNOWN. Every style rule is then examined under its COMPOSED selector, so a rule
       // nested under :focus is a focus rule, and an at-rule prelude is never mistaken for a selector.
-      const resolved = resolveInterpolation(text, file.views.sourceOf);
+      const resolved = resolveInterpolation(text, file.views.sourceOf, file.text);
       for (const node of parseBlocks(resolved)) {
         // A conditional group at-rule nested in a rule bubbles its declarations to that rule, so it is
         // examined under the inherited selector; any other at-rule owns no style declarations.
@@ -1135,7 +1140,7 @@ export const DETECTORS = [
           continue;
         }
         examined = true;
-        if (focusSelectors.every((selector) => /:focus\s*:not\(\s*:focus-visible\s*\)/.test(selector))) continue;
+        if (focusSelectors.every((selector) => /:focus\s*:not\(\s*:focus-visible\s*\)/i.test(selector))) continue;
         if (!removesOutline) continue;
         if (compensating.test(node.body)) continue;
         if (appliesRingWidth(node.body)) continue;
