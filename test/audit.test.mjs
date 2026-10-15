@@ -557,7 +557,8 @@ test("ST-07: a focus pseudo inside a negation does not select focused elements",
   for (const css of none) {
     const r = await focusAuditFor(css);
     assert.deepEqual(r.rules, [], css);
-    assert.equal(r.examined, false, css);
+    // the :focus parent of the first form is itself an examined focus rule
+    if (!css.startsWith(":focus {")) assert.equal(r.examined, false, css);
   }
   // a double negation selects focused elements again; a negation beside a focus pseudo does not hide it
   for (const css of [
