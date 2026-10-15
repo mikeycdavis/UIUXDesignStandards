@@ -501,33 +501,45 @@ function parseBlocks(text) {
       }
     }
     const parent = frame.parent ? nodes.get(frame.parent) : null;
-    const inherited = parent ? parent.composed : [""];
+    // The inherited CONTEXT is what a child composes against: `parents` are the selectors a
+    // `&` names, and `reset` says whether a plain child is still a descendant of them. It is
+    // carried through every non-rule block, so a reset set by @at-root reaches the first style rule
+    // however many group at-rules sit between.
+    const ctx = parent ? parent.ctx : { parents: [""], reset: false };
     // Selector semantics of an at-rule:
-    //   group at-rules       inherit the enclosing selector, and own declarations bubble to it
-    //   @at-root             the children are NOT descendants of the enclosing selector: `reset`
-    //                        drops the descendant prefix (a literal & still names the enclosing rule).
+    //   group at-rules       inherit the context, and own declarations bubble to the enclosing rule
+    //   @at-root             follows Sass's query semantics (see atRootResets): a query that drops
+    //                        rules sets reset for what is inside; one that keeps rules leaves the
+    //                        context untouched and its own declarations belong to the enclosing rule.
     //                        `@at-root .sel { }` is itself a style rule with that selector.
     //   control / mixin / include-with-content: the selectors inside depend on code not modelled
     //                        here, so everything inside is opaque and never examined as a finding.
-    //   anything else (@keyframes, @font-face, ...) has no selector semantics: children inherit and
-    //                        none of it is focus-relevant.
-    const opaque = (parent?.opaque ?? false) || (atRule !== null && OPAQUE_AT_RULES.has(atRule));
+    //   anything else (@keyframes, @font-face, ...) has no selector semantics: the context passes
+    //                        through and none of it is focus-relevant.
+    let opaque = (parent?.opaque ?? false) || (atRule !== null && OPAQUE_AT_RULES.has(atRule));
     let composed;
-    let reset = false;
+    let childCtx;
     let ownRule = atRule === null;
     if (atRule === "at-root") {
       const prelude = trimmed.replace(/^@at-root/i, "").trim();
       if (prelude === "" || prelude.startsWith("(")) {
-        composed = inherited;
-        reset = true;
+        const resets = prelude === "" ? true : atRootResets(prelude);
+        if (resets === null) opaque = true; // a query that cannot be read is not guessed at
+        const drops = resets !== false;
+        childCtx = { parents: ctx.parents, reset: ctx.reset || drops };
+        composed = drops ? [""] : ctx.reset ? [""] : ctx.parents;
+        ownRule = true;
       } else {
-        composed = composeSelectors(prelude, inherited, true);
+        composed = composeSelectors(prelude, ctx.parents, true);
+        childCtx = { parents: composed, reset: false };
         ownRule = true;
       }
     } else if (atRule !== null) {
-      composed = inherited;
+      composed = ctx.reset ? [""] : ctx.parents;
+      childCtx = ctx;
     } else {
-      composed = composeSelectors(selector, inherited, parent?.reset ?? false);
+      composed = composeSelectors(selector, ctx.parents, ctx.reset);
+      childCtx = { parents: composed, reset: false };
     }
     const node = {
       selector,
@@ -535,7 +547,7 @@ function parseBlocks(text) {
       atRule,
       ownRule,
       opaque,
-      reset,
+      ctx: childCtx,
       parent,
       body: body.join(""),
       composed,
@@ -544,6 +556,26 @@ function parseBlocks(text) {
     out.push(node);
   }
   return out;
+}
+
+/**
+ * Sass `@at-root` query semantics. Returns true when the query excludes style rules (so what is
+ * inside is no longer a descendant of the enclosing rule), false when it keeps them, and null when
+ * the query cannot be read.
+ *
+ *   (without: <names>)  excludes what it lists: resets iff the list contains `rule` or `all`
+ *   (with: <names>)     excludes everything it does not list: resets iff the list contains neither
+ *                       `rule` nor `all`
+ *   no query            defaults to (without: rule): resets
+ * Names such as `media` and `supports` concern at-rules only and never decide it.
+ */
+function atRootResets(prelude) {
+  const m = /^\(\s*(with|without)\s*:\s*([^()]*)\)$/i.exec(prelude);
+  if (!m || m[2].includes(UNKNOWN)) return null;
+  const names = m[2].toLowerCase().split(/[\s,]+/).filter(Boolean);
+  if (names.length === 0) return null;
+  const listsRule = names.includes("rule") || names.includes("all");
+  return m[1].toLowerCase() === "without" ? listsRule : !listsRule;
 }
 
 const GROUP_AT_RULES = new Set(["media", "supports", "layer", "container", "scope", "document", "starting-style"]);

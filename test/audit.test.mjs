@@ -566,7 +566,7 @@ test("ST-07: an at-rule prelude is not a selector", async () => {
 test("ST-07: @at-root replaces the ancestor selector, and at-rule names are case-insensitive", async () => {
   // @at-root children are not descendants of the enclosing rule
   assert.deepEqual((await focusAuditFor(":focus { @at-root { .not-focus { outline: none; } } }\n")).rules, []);
-  assert.deepEqual((await focusAuditFor(":focus { @at-root (without: media) { .not-focus { outline: none; } } }\n")).rules, []);
+  assert.deepEqual((await focusAuditFor(":focus { @at-root (without: media) { .not-focus { outline: none; } } }\n")).rules, [FOCUS_RULE]); // without: media keeps the rule
   assert.deepEqual((await focusAuditFor(":focus { @at-root .not-focus { outline: none; } }\n")).rules, []);
   // ...but a literal & still names the enclosing rule, and @at-root .x:focus is a focus rule itself
   assert.deepEqual((await focusAuditFor(".a { @at-root { &:focus { outline: none; } } }\n")).rules, [FOCUS_RULE]);
@@ -576,6 +576,56 @@ test("ST-07: @at-root replaces the ancestor selector, and at-rule names are case
   assert.deepEqual((await focusAuditFor(":focus { @Supports (display: grid) { &.x { outline: none; } } }\n")).rules, [FOCUS_RULE]);
   assert.deepEqual((await focusAuditFor(":focus { @AT-ROOT { .not-focus { outline: none; } } }\n")).rules, []);
   assert.equal((await focusAuditFor("@SUPPORTS selector(:focus-visible) { .b { color: red; } }\n")).examined, false);
+});
+
+test("ST-07: @at-root queries x nesting depth (Sass query semantics, reset carried through group at-rules)", async () => {
+  // [query, resets] - resets iff the query excludes style rules
+  const queries = [
+    ["", true],
+    ["(without: rule)", true],
+    ["(without: all)", true],
+    ["(without: media rule)", true],
+    ["(without: media)", false],
+    ["(without: supports)", false],
+    ["(with: rule)", false],
+    ["(with: all)", false],
+    ["(with: rule media)", false],
+    ["(with: media)", true],
+    ["(with: supports layer)", true],
+    ["(WITHOUT: RULE)", true],
+  ];
+  // wrappers between the @at-root and the style rule
+  const wrappers = [
+    ["", ""],
+    ["@media (width > 1px) {", "}"],
+    ["@supports (display: grid) { @layer base {", "} }"],
+    ["@MEDIA print { @container c (min-width: 1px) {", "} }"],
+  ];
+  for (const [query, resets] of queries) {
+    for (const [open, close] of wrappers) {
+      // a rule inside: under :focus when the rule is preserved, a plain .not-focus when it is reset
+      const rule = `:focus { @at-root ${query} { ${open} .not-focus { outline: none; } ${close} } }\n`;
+      const r = await focusAuditFor(rule);
+      assert.deepEqual(r.rules, resets ? [] : [FOCUS_RULE], rule);
+      assert.deepEqual(r.unexaminable, [], rule);
+      // a declaration directly inside belongs to the enclosing rule when it is preserved
+      const direct = `:focus { @at-root ${query} { ${open} outline: none; ${close} } }\n`;
+      const d = await focusAuditFor(direct);
+      assert.deepEqual(d.rules, resets ? [] : [FOCUS_RULE], direct);
+      // a literal & always names the enclosing rule
+      const amp = `.a { @at-root ${query} { ${open} &:focus { outline: none; } ${close} } }\n`;
+      assert.deepEqual((await focusAuditFor(amp)).rules, [FOCUS_RULE], amp);
+    }
+  }
+  // a reset is not undone by a nested preserving query
+  assert.deepEqual((await focusAuditFor(":focus { @at-root { @at-root (without: media) { .a { outline: none; } } } }\n")).rules, []);
+  assert.deepEqual((await focusAuditFor(":focus { @at-root { @media print { @at-root (with: all) { .a { outline: none; } } } } }\n")).rules, []);
+  // an unreadable query is not guessed at
+  for (const q of ["(without: #{$x})", "(foo: rule)", "(without:)"]) {
+    const r = await focusAuditFor(`:focus { @at-root ${q} { .a { outline: none; } } }\n`);
+    assert.equal(r.examined, false, q);
+    assert.equal(r.unexaminable.length >= 1, true, q);
+  }
 });
 
 test("ST-07: a directive whose selector semantics are not modelled makes its contents unexaminable", async () => {
