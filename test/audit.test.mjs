@@ -915,6 +915,10 @@ test("ST-07: a same-element nested rule inherits the replacement indicators of t
     [":focus { box-shadow: 0 0 0 2px blue; & > .child { outline: none; } }\n", [FOCUS_RULE]],
     [":focus { box-shadow: 0 0 0 2px blue; &::before { outline: none; } }\n", [FOCUS_RULE]],
     [":focus { box-shadow: 0 0 0 2px blue; &.a, .b { outline: none; } }\n", [FOCUS_RULE]],
+    // a parent shadow that is present unfocused is not a focus indicator
+    [".btn { box-shadow: 0 0 0 2px blue; &:focus { outline: none; } } ", [FOCUS_RULE]],
+    [".btn { box-shadow: 0 0 0 2px blue; &:focus { &.x { outline: none; } } } ", [FOCUS_RULE]],
+    [":focus, .b { box-shadow: 0 0 0 2px blue; &.x { outline: none; } } ", [FOCUS_RULE]],
     // a parent without a replacement gives the child nothing
     [":focus { color: red; &.danger { outline: none; } }\n", [FOCUS_RULE]],
     // @at-root with a query that drops rules detaches the subject

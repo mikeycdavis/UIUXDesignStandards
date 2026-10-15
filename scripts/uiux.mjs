@@ -589,7 +589,13 @@ function parseBlocks(text) {
     // enclosing rule through, but its own (conditional) body is not counted as unconditional.
     let elementBodies = [];
     if (parent) {
-      const carried = parent.atRule === null && parent.propNest === null && !parent.dataBlock ? [parent.body] : [];
+      // Only a parent that is itself a focus rule: `.btn { box-shadow: ...; &:focus { outline: none } }`
+      // carries a shadow that is present unfocused, which is no focus indicator.
+      const carried =
+        parent.atRule === null && parent.propNest === null && !parent.dataBlock && parent.composed.length > 0 &&
+        parent.composed.every((selector) => isFocusSelector(selector))
+          ? [parent.body]
+          : [];
       if (atRule !== null) {
         if (keepsSubject) elementBodies = [...parent.elementBodies, ...carried];
       } else if (declaration === null && !ctx.reset) {
