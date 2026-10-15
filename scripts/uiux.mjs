@@ -415,12 +415,12 @@ function appliesRingWidth(body) {
 const UNKNOWN = "\uE000";
 
 function resolveInterpolation(text, sourceText = text) {
-  let out = "";
-  let i = 0;
   const isIdent = (ch) => ch !== undefined && /[A-Za-z0-9_-]/.test(ch);
-  while (i < text.length) {
+  // Pass 1: find every span, and read its content when it is statically readable.
+  const spans = [];
+  for (let i = 0; i < text.length; ) {
     if (text[i] !== "#" || text[i + 1] !== "{") {
-      out += text[i++];
+      i++;
       continue;
     }
     let depth = 0;
@@ -432,22 +432,38 @@ function resolveInterpolation(text, sourceText = text) {
     const terminated = j < text.length;
     const end = Math.min(j + 1, text.length); // an unterminated span is masked to the end
     const inner = terminated ? sourceText.slice(i + 2, j).trim() : null;
-    let literal = null;
-    if (inner !== null) {
-      // A quoted literal is already bare here: the source view blanks the quote characters.
-      if (/^!?[A-Za-z0-9_.%-]+$/.test(inner)) literal = inner;
-    }
-    const width = end - i;
-    const before = text[i - 1];
-    const after = text[end];
+    // A quoted literal is already bare here: the source view blanks the quote characters.
+    const literal = inner !== null && /^!?[A-Za-z0-9_.%-]+$/.test(inner) ? inner : null;
+    spans.push({ start: i, end, literal });
+    i = end;
+  }
+  // Adjacent spans are ONE value: Sass concatenates them (#{n}#{one} is none). A run is readable only
+  // if every member is, and then its text is the concatenation, laid out contiguously.
+  const runs = [];
+  for (const span of spans) {
+    const last = runs[runs.length - 1];
+    if (last && last.end === span.start) {
+      last.end = span.end;
+      last.parts.push(span.literal);
+    } else runs.push({ start: span.start, end: span.end, parts: [span.literal] });
+  }
+  // Pass 2: write the text.
+  let out = "";
+  let at = 0;
+  for (const run of runs) {
+    out += text.slice(at, run.start);
+    const width = run.end - run.start;
+    const literal = run.parts.every((part) => part !== null) ? run.parts.join("") : null;
+    const before = text[run.start - 1];
+    const after = text[run.end];
     if (literal !== null && literal.length <= width && !(isIdent(before) && isIdent(after))) {
       out += isIdent(after) ? literal.padStart(width, " ") : literal.padEnd(width, " ");
     } else {
-      out += text.slice(i, end).replace(/[^\n]/g, UNKNOWN);
+      out += text.slice(run.start, run.end).replace(/[^\n]/g, UNKNOWN);
     }
-    i = end;
+    at = run.end;
   }
-  return out;
+  return out + text.slice(at);
 }
 
 /**
@@ -622,24 +638,45 @@ const FOCUS_SELECTOR = /:focus(-visible|-within)?(?![A-Za-z0-9_-])/;
 /**
  * True when a selector selects FOCUSED elements: it names a focus pseudo-class outside any negation,
  * or inside an even number of nested `:not(...)`. `:not(:focus)` selects the opposite and
- * `:focus { :not(&) {...} }` composes to exactly that.
+ * `:focus { :not(&) {...} }` composes to exactly that. A focus pseudo inside `:has(...)` describes
+ * a related element, not the subject (`.parent:has(:focus)`).
  */
 function isFocusSelector(selector, negated = false) {
   let outside = "";
   const inner = [];
   for (let i = 0; i < selector.length; ) {
-    if (selector.startsWith(":not(", i)) {
+    const relational = selector.startsWith(":has(", i);
+    if (relational || selector.startsWith(":not(", i)) {
+      const open = relational ? 5 : 5;
       let depth = 1;
-      let j = i + 5;
+      let j = i + open;
       for (; j < selector.length && depth > 0; j++) {
         if (selector[j] === "(") depth++;
         else if (selector[j] === ")") depth--;
       }
-      inner.push(selector.slice(i + 5, depth === 0 ? j - 1 : j));
+      // :has(...) describes a DESCENDANT or sibling of the subject, never the subject itself.
+      if (!relational) inner.push(selector.slice(i + open, depth === 0 ? j - 1 : j));
       i = j;
     } else outside += selector[i++];
   }
   return (!negated && FOCUS_SELECTOR.test(outside)) || inner.some((part) => isFocusSelector(part, !negated));
+}
+
+/** Compound selectors of a selector: split on combinators and commas outside parentheses. */
+function selectorCompounds(selector) {
+  const out = [];
+  let depth = 0;
+  let current = "";
+  for (const ch of selector) {
+    if (ch === "(" || ch === "[") depth++;
+    else if (ch === ")" || ch === "]") depth = Math.max(0, depth - 1);
+    if (depth === 0 && /[\s>+~,]/.test(ch)) {
+      if (current) out.push(current);
+      current = "";
+    } else current += ch;
+  }
+  if (current) out.push(current);
+  return out;
 }
 
 /** Declaration properties whose value decides whether a focus indicator exists. */
@@ -649,21 +686,18 @@ const FOCUS_RELEVANT_PROPERTY = /^(outline(-[a-z]+)?|box-shadow|border(-[a-z]+)*
  * Why a style rule cannot be examined because of an interpolation whose value is unknowable, or null
  * when it can. An unknown span is harmless in a declaration that cannot change the answer
  * (`margin: #{$gap}`) and disqualifying where it can: in a property name, in the value of an
- * outline / ring / shadow-like property, in an `@apply` list, or inside a focus selector's
- * `:not(...)`. Only text the block owns is read, so a child's unknown is the child's.
+ * outline / ring / shadow-like property, in an `@apply` list, or in the same compound as a focus
+ * pseudo-class. Only text the block owns is read, so a child's unknown is the child's.
  */
 function unexaminableReason(node) {
   for (const selector of node.composed) {
     if (!isFocusSelector(selector)) continue;
-    // Only text after the pseudo-class can append the exempting `:not(:focus-visible)`, so an
-    // unknown span in the same compound AFTER it decides what the selector means; one before it
-    // (a class-name prefix) cannot.
-    for (const f of selector.matchAll(/:focus(-visible|-within)?(?![A-Za-z0-9_-])/g)) {
-      const tail = selector.slice(f.index + f[0].length).split(/[\s>+~,]/)[0];
-      if (tail.includes(UNKNOWN)) return "an interpolation after the focus pseudo-class may supply the :not(:focus-visible) exemption";
-    }
-    for (const m of selector.matchAll(/:not\(([^()]*)\)/g)) {
-      if (m[1].includes(UNKNOWN)) return "an interpolation inside :not(...) changes which elements the rule excludes";
+    // An unknown span in the same compound as a focus pseudo-class, before it or after it, can
+    // supply the exempting `:not(:focus-visible)` (`#{$x}:focus`, `:focus#{$x}`, `.#{$x}:focus`).
+    for (const compound of selectorCompounds(selector)) {
+      if (FOCUS_SELECTOR.test(compound) && compound.includes(UNKNOWN)) {
+        return "an interpolation in the same compound as the focus pseudo-class may supply the :not(:focus-visible) exemption";
+      }
     }
   }
   for (const raw of node.body.split(";")) {

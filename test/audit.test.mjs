@@ -382,7 +382,7 @@ test("ST-07 criteria 1 and 2: a focus block containing #{...} is examined with t
     // an interpolation elsewhere in the block, no replacement indicator
     [":focus-visible {\n  outline: none;\n  margin: #{$gap};\n}\n", [FOCUS_RULE]],
     // an interpolated selector is still a focus selector
-    [".#{$prefix}-button:focus-visible {\n  outline: none;\n}\n", [FOCUS_RULE]],
+    [".#{prefix}-button:focus-visible {\n  outline: none;\n}\n", [FOCUS_RULE]],
     // an effective ring plus an interpolation elsewhere is a replacement indicator
     [":focus {\n  outline: none;\n  @apply ring-2;\n  margin: #{$gap};\n}\n", []],
     [":focus {\n  outline: none;\n  box-shadow: 0 0 0 #{$w} blue;\n}\n", []],
@@ -399,10 +399,10 @@ test("ST-07 criteria 1 and 2: a focus block containing #{...} is examined with t
 test("ST-07: the finding names the real selector, not the masked text", async () => {
   const dir = await mkdtemp(path.join(tmpdir(), "uiux-st07-"));
   try {
-    await writeFile(path.join(dir, "f.scss"), "/* h */\n\n.a { color: red; }\n\n.#{$p}-x:focus {\n  outline: none;\n}\n");
+    await writeFile(path.join(dir, "f.scss"), "/* h */\n\n.a { color: red; }\n\n.#{p}-x:focus {\n  outline: none;\n}\n");
     const found = (await runAudit(dir)).findings.filter((f) => f.rule === FOCUS_RULE);
     assert.equal(found.length, 1);
-    assert.match(found[0].message, /^'\.#\{\$p\}-x:focus' removes the focus outline/);
+    assert.match(found[0].message, /^'\.#\{p\}-x:focus' removes the focus outline/);
   } finally {
     await rm(dir, { recursive: true, force: true });
   }
@@ -503,7 +503,7 @@ test("ST-07: an unexaminable block makes the rule unevaluated even when another 
 test("ST-07: interpolations that cannot change the answer stay examined", async () => {
   const cases = [
     [":focus { outline: none; margin: #{$gap}; }\n", [FOCUS_RULE]],
-    [".#{$p}-btn:focus { outline: none; }\n", [FOCUS_RULE]],
+    [".#{p}-btn:focus { outline: none; }\n", [FOCUS_RULE]],
     [":focus { outline: 2px solid; width: calc(#{$a} + 1px); }\n", []],
     [':focus { content: "#{$x}"; outline: none; }\n', [FOCUS_RULE]],
     ["// :focus { outline: #{$o}; }\n:focus { outline: none; }\n", [FOCUS_RULE]],
@@ -568,6 +568,40 @@ test("ST-07: a focus pseudo inside a negation does not select focused elements",
   ]) {
     assert.deepEqual((await focusAuditFor(css)).rules, [FOCUS_RULE], css);
   }
+});
+
+test("ST-07: adjacent static interpolations concatenate; one unknown makes the run unknown", async () => {
+  for (const css of [
+    ":focus { outline: #{n}#{one}; }\n",
+    ":focus { outline: #{no}#{ne}; }\n",
+    ":focus { outline: #{n}#{o}#{n}#{e}; }\n",
+    ":focus { outline: #{no}ne; }\n",
+    ":focus { outline: n#{o}#{ne}; }\n",
+  ]) {
+    const r = await focusAuditFor(css);
+    assert.deepEqual(r.rules, [FOCUS_RULE], css);
+    assert.equal(r.examined, true, css);
+    assert.deepEqual(r.unexaminable, [], css);
+  }
+  for (const css of [":focus { outline: #{n}#{$one}; }\n", ":focus { outline: #{$n}#{one}; }\n"]) {
+    const r = await focusAuditFor(css);
+    assert.equal(r.examined, false, css);
+    assert.equal(r.unexaminable.length, 1, css);
+  }
+});
+
+test("ST-07: a focus pseudo inside :has(...) describes a related element, not the subject", async () => {
+  for (const css of [
+    ":focus { .parent:has(&) { outline: none; } }\n",
+    ".parent:has(:focus) { outline: none; }\n",
+    ".parent:has(:focus-visible, .x) { outline: none; }\n",
+    ".parent:has(:not(:focus)) { outline: none; }\n",
+  ]) {
+    assert.deepEqual((await focusAuditFor(css)).rules.filter((x) => x === FOCUS_RULE), [], css);
+  }
+  // :is/:where are transparent: the subject is the focused element
+  assert.deepEqual((await focusAuditFor(":is(:focus) { outline: none; }\n")).rules, [FOCUS_RULE]);
+  assert.deepEqual((await focusAuditFor(".a:has(.b):focus { outline: none; }\n")).rules, [FOCUS_RULE]);
 });
 
 test("ST-07: an at-rule prelude is not a selector", async () => {
@@ -734,8 +768,18 @@ test("ST-07: an unknown span after the focus pseudo-class can supply the exempti
     assert.equal(r.unexaminable.length, 1, css);
     assert.deepEqual(r.rules, [], css);
   }
-  // before the pseudo-class, or in a later compound, it cannot supply the exemption
-  assert.deepEqual((await focusAuditFor(".#{$p}:focus { outline: none; }\n")).rules.filter((x) => x === FOCUS_RULE), [FOCUS_RULE]);
+  // an unknown BEFORE the pseudo-class in the same compound can supply it too
+  for (const css of [
+    "#{$exclusion}:focus { outline: none; }\n",
+    ".#{$p}:focus { outline: none; }\n",
+    ".#{$p}-btn:focus-visible { outline: none; }\n",
+    ".a#{$x}.b:focus { outline: none; }\n",
+  ]) {
+    const r = await focusAuditFor(css);
+    assert.equal(r.examined, false, css);
+    assert.equal(r.unexaminable.length, 1, css);
+  }
+  // in a later compound it cannot
   assert.deepEqual((await focusAuditFor(":focus .#{$p} { outline: none; }\n")).rules.filter((x) => x === FOCUS_RULE), [FOCUS_RULE]);
 });
 
