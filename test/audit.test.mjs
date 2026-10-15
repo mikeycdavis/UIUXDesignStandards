@@ -15,6 +15,7 @@ import { fileURLToPath } from "node:url";
 import {
   splitSource,
   runAudit,
+  runValidate,
   readCorpus,
   runDetectors,
   DETECTORS,
@@ -557,23 +558,23 @@ test("ST-07: an at-rule prelude is not a selector", async () => {
     assert.deepEqual(r.rules, [], css);
   }
   // Children of an at-rule are examined under the ancestor selector, the at-rule excluded.
-  assert.deepEqual((await focusAuditFor("@supports selector(:focus-visible) { :focus { outline: none; } }\n")).rules, [FOCUS_RULE]);
-  assert.deepEqual((await focusAuditFor(":focus { @media (min-width: 1px) { outline: none; } }\n")).rules, [FOCUS_RULE]);
-  assert.deepEqual((await focusAuditFor(":focus { @media (min-width: 1px) { &.x { outline: none; } } }\n")).rules, [FOCUS_RULE]);
-  assert.deepEqual((await focusAuditFor("@media (min-width: 1px) { .a { &:focus { outline: none; } } }\n")).rules, [FOCUS_RULE]);
+  assert.deepEqual((await focusAuditFor("@supports selector(:focus-visible) { :focus { outline: none; } }\n")).rules.filter((x) => x === FOCUS_RULE), [FOCUS_RULE]);
+  assert.deepEqual((await focusAuditFor(":focus { @media (min-width: 1px) { outline: none; } }\n")).rules.filter((x) => x === FOCUS_RULE), [FOCUS_RULE]);
+  assert.deepEqual((await focusAuditFor(":focus { @media (min-width: 1px) { &.x { outline: none; } } }\n")).rules.filter((x) => x === FOCUS_RULE), [FOCUS_RULE]);
+  assert.deepEqual((await focusAuditFor("@media (min-width: 1px) { .a { &:focus { outline: none; } } }\n")).rules.filter((x) => x === FOCUS_RULE), [FOCUS_RULE]);
 });
 
 test("ST-07: @at-root replaces the ancestor selector, and at-rule names are case-insensitive", async () => {
   // @at-root children are not descendants of the enclosing rule
   assert.deepEqual((await focusAuditFor(":focus { @at-root { .not-focus { outline: none; } } }\n")).rules, []);
-  assert.deepEqual((await focusAuditFor(":focus { @at-root (without: media) { .not-focus { outline: none; } } }\n")).rules, [FOCUS_RULE]); // without: media keeps the rule
+  assert.deepEqual((await focusAuditFor(":focus { @at-root (without: media) { .not-focus { outline: none; } } }\n")).rules.filter((x) => x === FOCUS_RULE), [FOCUS_RULE]); // without: media keeps the rule
   assert.deepEqual((await focusAuditFor(":focus { @at-root .not-focus { outline: none; } }\n")).rules, []);
   // ...but a literal & still names the enclosing rule, and @at-root .x:focus is a focus rule itself
-  assert.deepEqual((await focusAuditFor(".a { @at-root { &:focus { outline: none; } } }\n")).rules, [FOCUS_RULE]);
-  assert.deepEqual((await focusAuditFor(".a { @at-root .b:focus { outline: none; } }\n")).rules, [FOCUS_RULE]);
+  assert.deepEqual((await focusAuditFor(".a { @at-root { &:focus { outline: none; } } }\n")).rules.filter((x) => x === FOCUS_RULE), [FOCUS_RULE]);
+  assert.deepEqual((await focusAuditFor(".a { @at-root .b:focus { outline: none; } }\n")).rules.filter((x) => x === FOCUS_RULE), [FOCUS_RULE]);
   // names are lower-cased before every at-rule comparison
-  assert.deepEqual((await focusAuditFor(":focus { @MEDIA (min-width: 1px) { outline: none; } }\n")).rules, [FOCUS_RULE]);
-  assert.deepEqual((await focusAuditFor(":focus { @Supports (display: grid) { &.x { outline: none; } } }\n")).rules, [FOCUS_RULE]);
+  assert.deepEqual((await focusAuditFor(":focus { @MEDIA (min-width: 1px) { outline: none; } }\n")).rules.filter((x) => x === FOCUS_RULE), [FOCUS_RULE]);
+  assert.deepEqual((await focusAuditFor(":focus { @Supports (display: grid) { &.x { outline: none; } } }\n")).rules.filter((x) => x === FOCUS_RULE), [FOCUS_RULE]);
   assert.deepEqual((await focusAuditFor(":focus { @AT-ROOT { .not-focus { outline: none; } } }\n")).rules, []);
   assert.equal((await focusAuditFor("@SUPPORTS selector(:focus-visible) { .b { color: red; } }\n")).examined, false);
 });
@@ -628,6 +629,49 @@ test("ST-07: @at-root queries x nesting depth (Sass query semantics, reset carri
   }
 });
 
+test("ST-07: an established violation is not suppressed by an unreadable sibling", async () => {
+  const r = await focusAuditFor(":focus { outline: none; }\n:focus { outline: #{$value}; }\n");
+  assert.deepEqual(r.rules, [FOCUS_RULE]);
+  assert.equal(r.examined, true);
+  assert.equal(r.unexaminable.length, 1);
+  // and at validate level the observed violation is a failure, not not-evaluated
+  const dir = await mkdtemp(path.join(tmpdir(), "uiux-st07v-"));
+  try {
+    await cp(path.join(path.dirname(fileURLToPath(import.meta.url)), "fixtures", "compliant"), dir, { recursive: true });
+    await writeFile(path.join(dir, "focus-st07.scss"), ":focus { outline: none; }\n:focus { outline: #{$value}; }\n");
+    const result = await runValidate(dir, { allowUnreleasedFramework: true });
+    const rule = result.envelope.uiCompliance.results.find((x) => x.ruleId === FOCUS_RULE);
+    assert.equal(rule.status, "failed");
+    // the same file with only the unreadable block is not a pass
+    await writeFile(path.join(dir, "focus-st07.scss"), ":focus { outline: #{$value}; }\n");
+    const unreadable = (await runValidate(dir, { allowUnreleasedFramework: true })).envelope.uiCompliance.results.find((x) => x.ruleId === FOCUS_RULE);
+    assert.notEqual(unreadable.status, "passed");
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test("ST-07: at-rules emitted at the stylesheet root do not inherit the enclosing selector", async () => {
+  for (const css of [
+    ":focus { @keyframes pulse { from { outline: none; } to { outline: none; } } }\n",
+    ":focus { @-webkit-keyframes pulse { 50% { outline: none; } } }\n",
+    ":focus { @font-face { outline: none; } }\n",
+    ":focus { @page { outline: none; } }\n",
+    ":focus { @KEYFRAMES pulse { from { outline: none; } } }\n",
+    ":focus { @media print { @keyframes k { from { outline: none; } } } }\n",
+    ":focus { @property --x { outline: none; } }\n",
+  ]) {
+    const r = await focusAuditFor(css);
+    assert.deepEqual(r.rules.filter((x) => x === FOCUS_RULE), [], css);
+  }
+  // inside the root-emitted at-rule a focus rule of its own is still examined
+  assert.deepEqual((await focusAuditFor("@keyframes k { from { outline: none; } }\n:focus { outline: none; }\n")).rules.filter((x) => x === FOCUS_RULE), [FOCUS_RULE]);
+  // an interpolated at-rule name cannot be classified
+  const r = await focusAuditFor(":focus { @#{$name} { .a { outline: none; } } }\n");
+  assert.equal(r.examined, false);
+  assert.equal(r.unexaminable.length >= 1, true);
+});
+
 test("ST-07: a directive whose selector semantics are not modelled makes its contents unexaminable", async () => {
   const cases = [
     "@include breakpoint(md) { :focus { outline: none; } }\n",
@@ -666,8 +710,8 @@ test("ST-07: an unknown span after the focus pseudo-class can supply the exempti
     assert.deepEqual(r.rules, [], css);
   }
   // before the pseudo-class, or in a later compound, it cannot supply the exemption
-  assert.deepEqual((await focusAuditFor(".#{$p}:focus { outline: none; }\n")).rules, [FOCUS_RULE]);
-  assert.deepEqual((await focusAuditFor(":focus .#{$p} { outline: none; }\n")).rules, [FOCUS_RULE]);
+  assert.deepEqual((await focusAuditFor(".#{$p}:focus { outline: none; }\n")).rules.filter((x) => x === FOCUS_RULE), [FOCUS_RULE]);
+  assert.deepEqual((await focusAuditFor(":focus .#{$p} { outline: none; }\n")).rules.filter((x) => x === FOCUS_RULE), [FOCUS_RULE]);
 });
 
 test("ST-07: an unknown span belongs to the block that owns it", async () => {
@@ -678,7 +722,7 @@ test("ST-07: an unknown span belongs to the block that owns it", async () => {
   assert.deepEqual(parent.unexaminable, []);
   // The child's unknown in a deciding position is the child's alone, and it still disqualifies the rule.
   const child = await focusAuditFor(":focus { outline: none; &:hover { outline: #{$o}; } }\n");
-  assert.equal(child.examined, false);
+  assert.equal(child.examined, true); // the parent's failure is established; the child's unknown only prevents a clean pass
   assert.equal(child.unexaminable.length, 1);
   assert.deepEqual(child.rules, [FOCUS_RULE]);
   // A parent's unknown is not attributed to a clean child.

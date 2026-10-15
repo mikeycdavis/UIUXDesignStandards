@@ -534,9 +534,16 @@ function parseBlocks(text) {
         childCtx = { parents: composed, reset: false };
         ownRule = true;
       }
-    } else if (atRule !== null) {
+    } else if (GROUP_AT_RULES.has(atRule)) {
       composed = ctx.reset ? [""] : ctx.parents;
       childCtx = ctx;
+    } else if (atRule !== null) {
+      // Any other at-rule (@keyframes, @font-face, @page, ...) is emitted at the stylesheet root by
+      // Sass and is not a descendant of the enclosing rule: nothing inside inherits its selector. A
+      // name that is itself interpolated is not knowable.
+      if (atRule === "") opaque = true;
+      composed = [""];
+      childCtx = { parents: [""], reset: true };
     } else {
       composed = composeSelectors(selector, ctx.parents, ctx.reset);
       childCtx = { parents: composed, reset: false };
@@ -1277,6 +1284,7 @@ export function runDetectors(files, context, { auditOnly = false } = {}) {
     if (detector.auditOnly && !auditOnly) continue;
 
     let sawSubject = false;
+    const findingsBefore = findings.length;
     const cannotRead = [];
     if (detector.project) {
       const result = detector.examineProject(files, context);
@@ -1298,8 +1306,11 @@ export function runDetectors(files, context, { auditOnly = false } = {}) {
     }
 
     // A rule with a span the detector could not read is not evaluated, even where it examined other
-    // instances: a clean result over the readable ones would otherwise stand in for the whole.
-    if (sawSubject && cannotRead.length === 0) examined.add(detector.rule);
+    // instances: a clean result over the readable ones would otherwise stand in for the whole. A
+    // failure the detector DID establish is not suppressed by an unreadable sibling: unreadable
+    // spans prevent a clean pass, not an observed violation.
+    const establishedFailure = findings.length > findingsBefore;
+    if (sawSubject && (cannotRead.length === 0 || establishedFailure)) examined.add(detector.rule);
     else if (cannotRead.length > 0) {
       unexamined.push({
         rule: detector.rule,
