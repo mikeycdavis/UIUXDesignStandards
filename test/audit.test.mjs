@@ -1053,6 +1053,43 @@ test("ST-07: a same-element child that disables an inherited replacement removes
   }
 });
 
+test("ST-07: indicators and disablers are resolved by importance, specificity and source position", async () => {
+  const cases = [
+    // a parent declaration written AFTER an equally specific nested rule is later, so it wins
+    [":focus { & { outline: none; box-shadow: 0 0 0 2px blue; } box-shadow: none; }\n", [FOCUS_RULE]],
+    [":focus { box-shadow: none; & { outline: none; box-shadow: 0 0 0 2px blue; } }\n", []],
+    // a more specific nested rule wins whatever the order
+    [":focus { &.x { outline: none; box-shadow: 0 0 0 2px blue; } box-shadow: none; }\n", []],
+    // :where(&) has zero specificity: the parent's more specific indicator survives it
+    [":focus { border: 2px solid blue; :where(&) { outline: none; border-style: none; } }\n", []],
+    [":focus { border: 2px solid blue; :is(&) { outline: none; border-style: none; } }\n", [FOCUS_RULE]],
+    [":focus { border: 2px solid blue; &:hover { outline: none; border-style: none; } }\n", [FOCUS_RULE]],
+    // equal specificity: the later declaration wins, in either direction
+    [":focus { border-style: none; & { outline: none; border: 2px solid blue; } }\n", []],
+    [":focus { border: 2px solid blue; & { outline: none; border-style: none; } }\n", [FOCUS_RULE]],
+    // ring utilities take part in the same cascade
+    [":focus { & { outline: none; @apply ring-2; } @apply ring-0; }\n", [FOCUS_RULE]],
+    [":focus { @apply ring-0; & { outline: none; @apply ring-2; } }\n", []],
+    [":focus { & { outline: none; @apply ring-2; } @apply ring-0 !important; &.x { margin: 0; } }\n", [FOCUS_RULE]],
+  ];
+  for (const [css, expected] of cases) {
+    assert.deepEqual((await focusAuditFor(css)).rules.filter((x) => x === FOCUS_RULE), expected, css);
+  }
+});
+
+test("ST-07: a cascade the detector cannot decide is unexaminable, never a guess", async () => {
+  // a selector list gives the nested rule two specificities; one of them ties with the parent
+  for (const css of [
+    ":focus { border: 2px solid blue; &, &.x { outline: none; border-style: none; } }\n",
+    ":focus, .a:focus { border: 2px solid blue; & { outline: none; border-style: none; } }\n",
+    ":focus, .a.b:focus { border: 2px solid blue; &.x { outline: none; border-style: none; } }\n",
+  ]) {
+    const r = await focusAuditFor(css);
+    assert.deepEqual(r.rules.filter((x) => x === FOCUS_RULE), [], css);
+    assert.equal(r.unexaminable.length >= 1, true, css);
+  }
+});
+
 // --- ST-05 / #39 (owner decision, option A): the reported line is the line of the selector's first
 // non-whitespace character, the rule head. A declaration line is not required.
 

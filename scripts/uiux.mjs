@@ -361,39 +361,6 @@ const MARKUP_EXTENSIONS = new Set([".html", ".htm", ".vue", ".svelte", ".jsx", "
 const STYLE_EXTENSIONS = new Set([".css", ".scss", ".less"]);
 
 /**
- * True when the ring width a declaration block `@apply`s ends up non-zero.
- *
- * Model, from the Tailwind v3 documentation (https://v3.tailwindcss.com/docs/functions-and-directives):
- * "If you'd like to @apply an existing class and make it !important, simply add !important to the
- * end of the declaration" — so a trailing standalone `!important` makes every utility in that one
- * @apply declaration important, and a per-token `!ring-N` / `ring-N!` makes that token important.
- * An important declaration beats a non-important one regardless of order; among declarations of the
- * same importance the later one wins, as utilities are applied in source order. Tokens are read
- * across every @apply in the block. Only exact width tokens (`ring`, `ring-0|1|2|4|8`) count; a
- * variant-prefixed token (`dark:ring-2`) is ignored, which fails toward reporting.
- */
-function appliesRingWidth(body) {
-  let important = false;
-  let ring = false;
-  for (const applied of body.matchAll(/@apply\s+([^;]*)/gi)) {
-    const tokens = applied[1].trim().split(/\s+/);
-    const declarationImportant = tokens.length > 0 && /^!important$/i.test(tokens[tokens.length - 1]);
-    for (const raw of tokens) {
-      const tokenImportant = declarationImportant || raw.startsWith("!") || raw.endsWith("!");
-      const token = raw.replace(/^!|!$/g, "");
-      let nonZero;
-      if (token === "ring-0") nonZero = false;
-      else if (/^ring(-(1|2|4|8))?$/.test(token)) nonZero = true;
-      else continue;
-      if (important && !tokenImportant) continue;
-      important = tokenImportant;
-      ring = nonZero;
-    }
-  }
-  return ring;
-}
-
-/**
  * Resolve SCSS interpolation spans (`#{ ... }`) without changing the text's length or line structure.
  *
  * The block matcher splits on braces, so an interpolation cuts a rule into fragments. Resolving keeps
@@ -597,26 +564,28 @@ function parseBlocks(text) {
     // declarations (a box-shadow ring) still apply to it. A descendant, a pseudo-element, a name
     // suffix (`&-x`) or any other combinator names a different subject. A group at-rule passes the
     // enclosing rule through, but its own (conditional) body is not counted as unconditional.
-    let elementBodies = [];
+    let elementNodes = [];
     if (parent) {
       // Only a parent that is itself a focus rule: `.btn { box-shadow: ...; &:focus { outline: none } }`
       // carries a shadow that is present unfocused, which is no focus indicator.
       const carried =
         !parent.rootEmitted && parent.propNest === null && !parent.dataBlock && parent.composed.length > 0 &&
         parent.composed.every((selector) => isFocusSelector(selector))
-          ? [parent.body]
+          ? [parent]
           : [];
       if (atRule !== null) {
-        if (keepsSubject) elementBodies = [...parent.elementBodies, ...carried];
+        if (keepsSubject) elementNodes = [...parent.elementNodes, ...carried];
       } else if (declaration === null && !ctx.reset) {
         const parts = splitSelectorList(selector);
         if (parts.length > 0 && parts.every((part) => namesSameSubject(part))) {
-          elementBodies = [...parent.elementBodies, ...carried];
+          elementNodes = [...parent.elementNodes, ...carried];
         }
       }
     }
     const node = {
-      elementBodies,
+      elementNodes,
+      elementBodies: elementNodes.map((n) => n.body),
+      bodyStart: frame.open + 1,
       selector,
       selectorStart: frame.selStart,
       atRule,
@@ -701,37 +670,158 @@ function replacementFamily(property) {
 const IMPORTANT = /!\s*important\s*$/i;
 const DISABLED_VALUE = /^(none|hidden|0|0(px|em|rem)|initial|unset|revert|transparent)(\s*!important)?$/i;
 
+/** Specificity of a selector as [ids, classes/attributes/pseudo-classes, types/pseudo-elements]. */
+function specificity(selector) {
+  const out = [0, 0, 0];
+  const add = (spec) => {
+    for (let k = 0; k < 3; k++) out[k] += spec[k];
+  };
+  const identEnd = (from) => {
+    let j = from;
+    while (j < selector.length && /[\w -￿-]/.test(selector[j])) j++;
+    return j;
+  };
+  const parenEnd = (open) => {
+    let depth = 1;
+    let j = open + 1;
+    for (; j < selector.length && depth > 0; j++) {
+      if (selector[j] === "(") depth++;
+      else if (selector[j] === ")") depth--;
+    }
+    return j;
+  };
+  for (let i = 0; i < selector.length; ) {
+    const ch = selector[i];
+    if (ch === "#") {
+      out[0]++;
+      i = identEnd(i + 1);
+    } else if (ch === ".") {
+      out[1]++;
+      i = identEnd(i + 1);
+    } else if (ch === "[") {
+      out[1]++;
+      const close = selector.indexOf("]", i);
+      i = close === -1 ? selector.length : close + 1;
+    } else if (ch === ":") {
+      const element = selector[i + 1] === ":";
+      const nameEnd = identEnd(i + (element ? 2 : 1));
+      const name = selector.slice(i + (element ? 2 : 1), nameEnd).toLowerCase();
+      i = nameEnd;
+      if (element || ["before", "after", "first-line", "first-letter"].includes(name)) out[2]++;
+      else if (selector[i] === "(") {
+        const end = parenEnd(i);
+        const inner = selector.slice(i + 1, end - 1);
+        if (["is", "not", "has", "matches", "-webkit-any", "-moz-any"].includes(name)) {
+          const specs = splitSelectorList(inner).map(specificity);
+          specs.sort(compareSpecificity);
+          if (specs.length > 0) add(specs[specs.length - 1]);
+        } else if (name !== "where") out[1]++;
+        i = end;
+        continue;
+      } else out[1]++;
+      if (selector[i] === "(") i = parenEnd(i);
+    } else if (/[A-Za-z_ -￿]/.test(ch)) {
+      out[2]++;
+      i = identEnd(i);
+    } else i++;
+  }
+  return out;
+}
+
+function compareSpecificity(a, b) {
+  for (let k = 0; k < 3; k++) if (a[k] !== b[k]) return a[k] - b[k];
+  return 0;
+}
+
+/** Lowest and highest specificity with which a node's declarations reach the focused element. */
+function specificityRange(node) {
+  const focus = node.composed.filter((selector) => isFocusSelector(selector));
+  const specs = (focus.length > 0 ? focus : node.composed).map(specificity).sort(compareSpecificity);
+  if (specs.length === 0) return [[0, 0, 0], [0, 0, 0]];
+  return [specs[0], specs[specs.length - 1]];
+}
+
 /**
- * An indicator declared by an enclosing same-element rule survives unless a LATER declaration - in a
- * more deeply nested body, or the rule's own - disables its family (`border-style: none` after an
- * inherited `border: 2px solid`). Bodies are given outermost first, so source order is cascade order
- * for equal specificity, and a nested child is at least as specific as its parent.
+ * Do the declarations that style the focused element leave a replacement indicator? Every
+ * declaration of the rule and of the enclosing same-element rules is put in one cascade: an indicator
+ * (a non-disabled box-shadow/border/background/... or a ring-width @apply) is removed by a
+ * declaration of its family (or \`all\`) with a disabled value that WINS - important beats not,
+ * then higher specificity, then later source position (the offsets are absolute, so a parent's
+ * declaration written after a nested rule is later than it). Returns "present", "absent" or, when a
+ * disabling declaration's specificity or selector list cannot decide the cascade, "unknown".
  */
-function inheritedReplacementSurvives(ancestors, own, compensating) {
-  const declarations = [...ancestors, own].flatMap((body, depth) =>
-    body
-      .split(";")
-      .map((raw) => {
-        const colon = raw.indexOf(":");
-        return colon === -1 ? null : { depth, property: raw.slice(0, colon).trim(), value: raw.slice(colon + 1).trim() };
-      })
-      .filter((d) => d !== null && d.property !== ""),
-  );
-  return declarations.some((candidate, index) => {
-    if (candidate.depth === ancestors.length || !compensating.test(candidate.property + ":") || DISABLED_VALUE.test(candidate.value)) return false;
-    const family = replacementFamily(candidate.property);
-    const important = IMPORTANT.test(candidate.value);
-    return !declarations.slice(index + 1).some(
-      (later) =>
-        // later in source order (a nested body, or the same body: `border: 2px solid; border-style: none`)
-        later.depth >= candidate.depth &&
-        // `all` resets every family; otherwise the same family
-        (later.property.toLowerCase() === "all" || replacementFamily(later.property) === family) &&
-        DISABLED_VALUE.test(later.value) &&
-        // an important indicator is not displaced by a declaration that is not
-        (!important || IMPORTANT.test(later.value)),
-    );
+function replacementVerdict(node, compensating) {
+  const chain = [...node.elementNodes, node];
+  const decls = [];
+  for (const owner of chain) {
+    const [lo, hi] = specificityRange(owner);
+    let position = 0;
+    for (const raw of owner.body.split(";")) {
+      // the declaration starts after the whitespace (and blanked nested rules) that precede it
+      const at = owner.bodyStart + position + (raw.length - raw.trimStart().length);
+      position += raw.length + 1;
+      const text = raw.trim();
+      if (text === "") continue;
+      const apply = /^@apply\s+([\s\S]*)$/i.exec(text);
+      if (apply) {
+        // Only exact, unprefixed ring-width tokens are interpreted; each is a box-shadow declaration
+        // in source order, important when the token or the whole declaration is.
+        const tokens = apply[1].trim().split(/\s+/);
+        const wholeImportant = tokens.length > 0 && /^!important$/i.test(tokens[tokens.length - 1]);
+        for (const rawToken of tokens) {
+          const token = rawToken.replace(/^!|!$/g, "");
+          const important = wholeImportant || rawToken.startsWith("!") || rawToken.endsWith("!");
+          if (token === "ring-0") decls.push({ at, lo, hi, property: "box-shadow", value: "none", important });
+          else if (/^ring(-(1|2|4|8))?$/.test(token)) {
+            decls.push({ at, lo, hi, property: "box-shadow", value: "0 0 0 1px ring", important });
+          }
+        }
+        continue;
+      }
+      const colon = text.indexOf(":");
+      if (colon === -1) continue;
+      const property = text.slice(0, colon).trim().toLowerCase();
+      if (property === "") continue;
+      const value = text.slice(colon + 1).trim();
+      decls.push({ at, lo, hi, property, value, important: IMPORTANT.test(value) });
+    }
+  }
+  // source order is absolute position (a stable sort keeps the tokens of one @apply in order)
+  decls.sort((x, y) => x.at - y.at);
+  decls.forEach((d, order) => {
+    d.order = order;
   });
+  const sameSpecificity = (d) => compareSpecificity(d.lo, d.hi) === 0;
+  const outcome = (disabler, indicator) => {
+    if (disabler.important !== indicator.important) return disabler.important ? "wins" : "loses";
+    if (compareSpecificity(disabler.lo, indicator.hi) > 0) return "wins";
+    if (compareSpecificity(disabler.hi, indicator.lo) < 0) return "loses";
+    if (sameSpecificity(disabler) && sameSpecificity(indicator) && compareSpecificity(disabler.lo, indicator.lo) === 0) {
+      return disabler.order > indicator.order ? "wins" : "loses";
+    }
+    return "unknown";
+  };
+  let unknown = false;
+  for (const indicator of decls) {
+    if (!compensating.test(indicator.property + ":") || DISABLED_VALUE.test(indicator.value)) continue;
+    const family = replacementFamily(indicator.property);
+    let survives = true;
+    let undecided = false;
+    for (const disabler of decls) {
+      if (disabler === indicator || !DISABLED_VALUE.test(disabler.value)) continue;
+      if (disabler.property !== "all" && replacementFamily(disabler.property) !== family) continue;
+      const result = outcome(disabler, indicator);
+      if (result === "wins") {
+        survives = false;
+        undecided = false;
+        break;
+      }
+      if (result === "unknown") undecided = true;
+    }
+    if (survives && !undecided) return "present";
+    if (survives && undecided) unknown = true;
+  }
+  return unknown ? "unknown" : "absent";
 }
 
 /**
@@ -1261,16 +1351,25 @@ export const DETECTORS = [
           unexaminable.push({ index: where, reason });
           continue;
         }
+        const exempt = focusSelectors.every((selector) => /:focus\s*:not\(\s*:focus-visible\s*\)/i.test(selector));
+        let verdict = "present";
+        if (!exempt && removesOutline) {
+          // The declarations of the rules this one is attached to on the same element count as well:
+          // in `:focus { box-shadow: ...; &.danger { outline: none } }` the ring still applies, and a
+          // later declaration that wins the cascade can remove it again.
+          verdict = replacementVerdict(node, compensating);
+          if (verdict === "unknown") {
+            unexaminable.push({
+              index: where,
+              reason:
+                "the specificity or selector list of a disabling declaration leaves the cascade between nested same-element rules undecided",
+            });
+            continue;
+          }
+        }
         examined = true;
-        if (focusSelectors.every((selector) => /:focus\s*:not\(\s*:focus-visible\s*\)/i.test(selector))) continue;
-        if (!removesOutline) continue;
-        // Declarations of the rules this one is attached to on the same element count as well: in
-        // `:focus { box-shadow: ...; &.danger { outline: none } }` the ring still applies.
-        // outermost first: a later declaration of the same importance wins, and the rule itself is last
-        const sameElement = [...node.elementBodies, node.body];
-        if (compensating.test(node.body)) continue;
-        if (inheritedReplacementSurvives(node.elementBodies, node.body, compensating)) continue;
-        if (appliesRingWidth(sameElement.join(" ; "))) continue;
+        if (exempt || !removesOutline) continue;
+        if (verdict === "present") continue;
         const own = text.slice(node.selectorStart, node.selectorStart + node.selector.length).trim();
         const spelled = node.parent ? "(nested) " + own : own;
         findings.push(
