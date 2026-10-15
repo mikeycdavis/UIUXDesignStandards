@@ -592,7 +592,6 @@ test("ST-07: adjacent static interpolations concatenate; one unknown makes the r
 
 test("ST-07: a focus pseudo inside :has(...) describes a related element, not the subject", async () => {
   for (const css of [
-    ":focus { .parent:has(&) { outline: none; } }\n",
     ".parent:has(:focus) { outline: none; }\n",
     ".parent:has(:focus-visible, .x) { outline: none; }\n",
     ".parent:has(:not(:focus)) { outline: none; }\n",
@@ -963,6 +962,36 @@ test("ST-07: a replacement declared inside a group at-rule covers a same-element
     // a sibling rule of the at-rule, or an unfocused enclosing rule, does not carry it
     [":focus { @media (min-width: 1px) { box-shadow: 0 0 0 2px blue; } &.x { outline: none; } }\n", [FOCUS_RULE]],
     [".btn { @media (min-width: 1px) { box-shadow: 0 0 0 2px blue; &:focus { outline: none; } } }\n", [FOCUS_RULE]],
+  ];
+  for (const [css, expected] of cases) {
+    assert.deepEqual((await focusAuditFor(css)).rules.filter((x) => x === FOCUS_RULE), expected, css);
+  }
+});
+
+test("ST-07: a child's own ring utilities come after the ones it inherits", async () => {
+  const cases = [
+    [":focus { @apply ring-2; &.danger { outline: none; @apply ring-0; } }\n", [FOCUS_RULE]],
+    [":focus { @apply ring-0; &.danger { outline: none; @apply ring-2; } }\n", []],
+    [":focus { @apply ring-2; &.a { &.b { outline: none; @apply ring-0; } } }\n", [FOCUS_RULE]],
+    [":focus { @apply ring-2 !important; &.danger { outline: none; @apply ring-0; } }\n", []],
+  ];
+  for (const [css, expected] of cases) {
+    assert.deepEqual((await focusAuditFor(css)).rules.filter((x) => x === FOCUS_RULE), expected, css);
+  }
+});
+
+test("ST-07: a subject-preserving functional nesting carries the parent's replacement", async () => {
+  const cases = [
+    [":focus { box-shadow: 0 0 0 2px blue; :is(&) { outline: none; } }\n", []],
+    [":focus { box-shadow: 0 0 0 2px blue; .x:where(&) { outline: none; } }\n", []],
+    [":focus { box-shadow: 0 0 0 2px blue; :is(&.a, &:hover) { outline: none; } }\n", []],
+    [":focus { box-shadow: 0 0 0 2px blue; & { outline: none; } }\n", []],
+    // an alternative that is not the parent's subject, or any other wrapper, does not carry it
+    [":focus { box-shadow: 0 0 0 2px blue; :is(&, .b) { outline: none; } }\n", [FOCUS_RULE]],
+    [":focus { box-shadow: 0 0 0 2px blue; :is(& .c) { outline: none; } }\n", [FOCUS_RULE]],
+    [":focus { box-shadow: 0 0 0 2px blue; :is(&)::before { outline: none; } }\n", [FOCUS_RULE]],
+    [":focus { box-shadow: 0 0 0 2px blue; &.x::after { outline: none; } }\n", [FOCUS_RULE]],
+    [":focus { box-shadow: 0 0 0 2px blue; &-x { outline: none; } }\n", [FOCUS_RULE]],
   ];
   for (const [css, expected] of cases) {
     assert.deepEqual((await focusAuditFor(css)).rules.filter((x) => x === FOCUS_RULE), expected, css);

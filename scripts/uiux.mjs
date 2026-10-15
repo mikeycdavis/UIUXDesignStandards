@@ -607,7 +607,7 @@ function parseBlocks(text) {
         if (keepsSubject) elementBodies = [...parent.elementBodies, ...carried];
       } else if (declaration === null && !ctx.reset) {
         const parts = splitSelectorList(selector);
-        if (parts.length > 0 && parts.every((part) => /^&[.:#[]/.test(part) && !part.startsWith("&::"))) {
+        if (parts.length > 0 && parts.every((part) => namesSameSubject(part))) {
           elementBodies = [...parent.elementBodies, ...carried];
         }
       }
@@ -685,6 +685,39 @@ function composeSelectors(selector, parents, reset = false) {
     }
   }
   return composed;
+}
+
+/**
+ * True when a nested selector part compiles to a compound on the PARENT'S OWN subject: it starts with
+ * `&` joined to a class, id, attribute or pseudo-class (or is `&` alone), or wraps `&` in a
+ * subject-preserving functional pseudo-class whose every alternative does the same (`:is(&)`,
+ * `.x:where(&)`). A descendant or sibling combinator, a name suffix (`&-x`), a pseudo-element, a
+ * negation (`:not(&)`) or a relational `:has(&)` names a different subject.
+ */
+function namesSameSubject(part) {
+  if (/::|:(before|after|first-line|first-letter)(?![\w-])/i.test(part)) return false;
+  if (selectorCompounds(part).length !== 1) return false;
+  let rest = part;
+  let anchored = false;
+  const wrapper = /:(?:is|where|matches|-webkit-any|-moz-any)\(/i;
+  for (let m = wrapper.exec(rest); m !== null; m = wrapper.exec(rest)) {
+    let depth = 1;
+    let end = m.index + m[0].length;
+    for (; end < rest.length && depth > 0; end++) {
+      if (rest[end] === "(") depth++;
+      else if (rest[end] === ")") depth--;
+    }
+    if (depth !== 0) return false;
+    const args = splitSelectorList(rest.slice(m.index + m[0].length, end - 1));
+    if (args.length === 0 || !args.every((arg) => namesSameSubject(arg))) return false;
+    anchored = true;
+    rest = rest.slice(0, m.index) + rest.slice(end);
+  }
+  if (rest.includes("&")) {
+    if (rest.indexOf("&") !== rest.lastIndexOf("&") || !/^&([.:#[]|$)/.test(rest)) return false;
+    anchored = true;
+  }
+  return anchored;
 }
 
 /** A focus pseudo-class a selector names. `:focus-within` is one: it is matched by the `:focus` prefix. */
@@ -1182,7 +1215,8 @@ export const DETECTORS = [
         if (!removesOutline) continue;
         // Declarations of the rules this one is attached to on the same element count as well: in
         // `:focus { box-shadow: ...; &.danger { outline: none } }` the ring still applies.
-        const sameElement = [node.body, ...node.elementBodies];
+        // outermost first: a later declaration of the same importance wins, and the rule itself is last
+        const sameElement = [...node.elementBodies, node.body];
         if (sameElement.some((body) => compensating.test(body))) continue;
         if (appliesRingWidth(sameElement.join(" ; "))) continue;
         const own = text.slice(node.selectorStart, node.selectorStart + node.selector.length).trim();
