@@ -1028,6 +1028,23 @@ test("ST-07: a static interpolation that names a functional pseudo-class is unkn
   assert.deepEqual((await focusAuditFor(":focus:not(.x) { outline: none; }\n")).rules, [FOCUS_RULE]);
 });
 
+test("ST-07: a same-element child that disables an inherited replacement removes it", async () => {
+  const cases = [
+    [":focus { border: 2px solid blue; &:focus { outline: none; border-style: none; } }\n", [FOCUS_RULE]],
+    [":focus { border: 2px solid blue; &.x { outline: none; border-width: 0; } }\n", [FOCUS_RULE]],
+    [":focus { border: 2px solid blue; &.x { outline: none; border-top-style: none; } }\n", [FOCUS_RULE]],
+    [":focus { box-shadow: 0 0 0 2px blue; &.a { box-shadow: none; &.b { outline: none; } } }\n", [FOCUS_RULE]],
+    // a sibling's override does not reach, and a re-enabling inner declaration restores it
+    [":focus { box-shadow: 0 0 0 2px blue; &.a { box-shadow: none; } &.b { outline: none; } }\n", []],
+    [":focus { border: 2px solid blue; &.x { border-style: none; &.y { outline: none; border-color: red; } } }\n", []],
+    // an inherited indicator of another family is untouched
+    [":focus { border: 2px solid blue; box-shadow: 0 0 0 2px blue; &.x { outline: none; border-style: none; } }\n", []],
+  ];
+  for (const [css, expected] of cases) {
+    assert.deepEqual((await focusAuditFor(css)).rules.filter((x) => x === FOCUS_RULE), expected, css);
+  }
+});
+
 // --- ST-05 / #39 (owner decision, option A): the reported line is the line of the selector's first
 // non-whitespace character, the rule head. A declaration line is not required.
 

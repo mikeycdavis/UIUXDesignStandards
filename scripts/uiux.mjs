@@ -690,6 +690,41 @@ function composeSelectors(selector, parents, reset = false) {
   return composed;
 }
 
+/** Which declarations override which: a longhand or shorthand of the same family disables it. */
+function replacementFamily(property) {
+  const p = property.toLowerCase();
+  if (p.startsWith("border")) return "border";
+  if (p.startsWith("background")) return "background";
+  if (p.startsWith("text-decoration")) return "text-decoration";
+  return p;
+}
+const DISABLED_VALUE = /^(none|hidden|0|0(px|em|rem)|initial|unset|revert|transparent)(\s*!important)?$/i;
+
+/**
+ * An indicator declared by an enclosing same-element rule survives unless a LATER declaration - in a
+ * more deeply nested body, or the rule's own - disables its family (`border-style: none` after an
+ * inherited `border: 2px solid`). Bodies are given outermost first, so source order is cascade order
+ * for equal specificity, and a nested child is at least as specific as its parent.
+ */
+function inheritedReplacementSurvives(ancestors, own, compensating) {
+  const declarations = [...ancestors, own].flatMap((body, depth) =>
+    body
+      .split(";")
+      .map((raw) => {
+        const colon = raw.indexOf(":");
+        return colon === -1 ? null : { depth, property: raw.slice(0, colon).trim(), value: raw.slice(colon + 1).trim() };
+      })
+      .filter((d) => d !== null && d.property !== ""),
+  );
+  return declarations.some((candidate, index) => {
+    if (candidate.depth === ancestors.length || !compensating.test(candidate.property + ":") || DISABLED_VALUE.test(candidate.value)) return false;
+    const family = replacementFamily(candidate.property);
+    return !declarations.slice(index + 1).some(
+      (later) => later.depth > candidate.depth && replacementFamily(later.property) === family && DISABLED_VALUE.test(later.value),
+    );
+  });
+}
+
 /**
  * True when a nested selector part compiles to a compound on the PARENT'S OWN subject: it starts with
  * `&` joined to a class, id, attribute or pseudo-class (or is `&` alone), or wraps `&` in a
@@ -1224,7 +1259,8 @@ export const DETECTORS = [
         // `:focus { box-shadow: ...; &.danger { outline: none } }` the ring still applies.
         // outermost first: a later declaration of the same importance wins, and the rule itself is last
         const sameElement = [...node.elementBodies, node.body];
-        if (sameElement.some((body) => compensating.test(body))) continue;
+        if (compensating.test(node.body)) continue;
+        if (inheritedReplacementSurvives(node.elementBodies, node.body, compensating)) continue;
         if (appliesRingWidth(sameElement.join(" ; "))) continue;
         const own = text.slice(node.selectorStart, node.selectorStart + node.selector.length).trim();
         const spelled = node.parent ? "(nested) " + own : own;
