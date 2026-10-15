@@ -1012,6 +1012,22 @@ test("ST-07: an unreadable inherited replacement makes the same-element child un
   assert.deepEqual((await focusAuditFor(":focus { margin: #{$m}; &.danger { outline: none; } }\n")).rules, [FOCUS_RULE]);
 });
 
+test("ST-07: a static interpolation that names a functional pseudo-class is unknown, not padded", async () => {
+  // `:#{not}(:focus)` is `:not(:focus)`: a selector that excludes focused elements, which padding would
+  // have turned into `:not   (:focus)` and reported as a focus rule.
+  for (const css of [
+    ":#{not}(:focus) { outline: none; }\n",
+    ":#{not}(:focus-visible) { outline: none; }\n",
+    "a:#{not}(:focus) { outline: none; }\n",
+  ]) {
+    const r = await focusAuditFor(css);
+    assert.deepEqual(r.rules.filter((x) => x === FOCUS_RULE), [], css);
+  }
+  // a readable spelling of the same selector is still read
+  assert.deepEqual((await focusAuditFor(":not(:focus) { outline: none; }\n")).rules, []);
+  assert.deepEqual((await focusAuditFor(":focus:not(.x) { outline: none; }\n")).rules, [FOCUS_RULE]);
+});
+
 // --- ST-05 / #39 (owner decision, option A): the reported line is the line of the selector's first
 // non-whitespace character, the rule head. A declaration line is not required.
 

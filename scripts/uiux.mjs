@@ -462,7 +462,10 @@ function resolveInterpolation(text, sourceText = text, rawText = sourceText) {
     // Fixed length cannot keep BOTH the colon's adjacency and an ident suffix (`:#{focus}-visible`
     // is `:focus-visible`, three characters shorter): spaces after a colon would split the pseudo-class
     // name, so that position is not readable and the span is masked rather than misread.
-    const splitsPseudo = before === ":" && isIdent(after) && literal !== null && literal.length < width;
+    // The same holds before an opening parenthesis (`:#{not}(:focus)` is `:not(:focus)`): padding on the
+    // right would turn the functional pseudo-class into a name and a parenthesised group.
+    const splitsPseudo =
+      literal !== null && literal.length < width && ((before === ":" && isIdent(after)) || after === "(");
     if (literal !== null && literal.length <= width && !(isIdent(before) && isIdent(after)) && !splitsPseudo) {
       out += isIdent(after) ? literal.padStart(width, " ") : literal.padEnd(width, " ");
     } else {
