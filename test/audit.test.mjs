@@ -997,6 +997,21 @@ test("ST-07: a subject-preserving functional nesting carries the parent's replac
   }
 });
 
+test("ST-07: an unreadable inherited replacement makes the same-element child unexaminable", async () => {
+  for (const css of [
+    ":focus { @apply #{$ring}; &.danger { outline: none; } }\n",
+    ":focus { box-shadow: #{$s}; &.danger { outline: none; } }\n",
+    ":focus { #{$p}: 0 0 0 2px blue; &:hover { outline: none; } }\n",
+    ":focus { @apply #{$ring}; @media (min-width: 1px) { &.danger { outline: none; } } }\n",
+  ]) {
+    const r = await focusAuditFor(css);
+    assert.deepEqual(r.rules.filter((x) => x === FOCUS_RULE), [], css);
+    assert.equal(r.unexaminable.length >= 1, true, css);
+  }
+  // an unknown that cannot decide the answer is not inherited as one
+  assert.deepEqual((await focusAuditFor(":focus { margin: #{$m}; &.danger { outline: none; } }\n")).rules, [FOCUS_RULE]);
+});
+
 // --- ST-05 / #39 (owner decision, option A): the reported line is the line of the selector's first
 // non-whitespace character, the rule head. A declaration line is not required.
 

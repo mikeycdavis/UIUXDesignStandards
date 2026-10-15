@@ -790,7 +790,11 @@ function unexaminableReason(node) {
       }
     }
   }
-  for (const raw of node.body.split(";")) {
+  // The rule's own body AND the bodies of enclosing rules on the same element: an inherited
+  // replacement that cannot be read (`:focus { @apply #{$ring}; &.x { outline: none } }`) may be a
+  // valid indicator, so it makes the child unexaminable rather than an established failure.
+  const bodies = [node.body, ...node.elementBodies];
+  for (const raw of bodies.flatMap((body) => body.split(";"))) {
     if (!raw.includes(UNKNOWN)) continue;
     if (/^\s*@apply\b/i.test(raw)) return "an interpolation in an @apply list may name a ring utility";
     const colon = raw.indexOf(":");
