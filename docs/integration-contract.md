@@ -350,6 +350,8 @@ running.
 
 `detectorsUnexaminable` lists spans a detector met but could not read statically (for example a SCSS interpolation whose value is a variable in an outline or ring declaration). A span is never counted as examined-clean: a rule with any such span and no established finding is not in `detectorsExamined` and appears in `detectorsWithoutSubject`. The one exception is a rule for which the detector also established a definite violation: it stays in `detectorsExamined` (so validation reports the failure) and is omitted from `detectorsWithoutSubject`, while the unreadable span is still listed in `detectorsUnexaminable`.
 
+**Line anchor.** In `findings[].evidence` and `detectorsUnexaminable[].evidence` an entry `path:line` names the line containing the first non-whitespace character of the construct's head: for a style rule, the first character of its selector (the rule head), not the line of any declaration inside it and not the end of the preceding rule. A declaration line is not reported; a multi-line rule reports the line it starts on. For a one-line rule the two coincide. (Owner decision on ST-05, option A.)
+
 `evidenceSurface` is present on both commands, always, with not-attempted defaults:
 
 ```json

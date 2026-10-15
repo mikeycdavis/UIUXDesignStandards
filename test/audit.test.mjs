@@ -887,6 +887,76 @@ test("ST-07: an unknown span belongs to the block that owns it", async () => {
 
 // --- The audit command ------------------------------------------------------------------------------
 
+test("ST-07: a custom property is a declaration whatever token follows its colon", async () => {
+  for (const css of [
+    ":focus { --theme:foo { outline: none; }; }\n",
+    ":focus { --theme:func({ outline: none; }); }\n",
+    ":focus { --theme:foo bar { outline: none; }; }\n",
+    ":focus { --Theme :x { outline: none; }; }\n",
+  ]) {
+    const r = await focusAuditFor(css);
+    assert.deepEqual(r.rules.filter((x) => x === FOCUS_RULE), [], css);
+  }
+  // an ordinary pseudo-class selector is still a rule
+  assert.deepEqual((await focusAuditFor(".a { a:hover { outline: none; } :focus { outline: none; } }\n")).rules, [FOCUS_RULE]);
+});
+
+test("ST-07: a same-element nested rule inherits the replacement indicators of the rules it is attached to", async () => {
+  const cases = [
+    // the parent's ring still applies to the focused .danger element
+    [":focus { box-shadow: 0 0 0 2px blue; &.danger { outline: none; } }\n", []],
+    [":focus { @apply ring-2; &.danger { outline: none; } }\n", []],
+    [":focus { box-shadow: 0 0 0 2px blue; &:hover { outline: none; } }\n", []],
+    [":focus { box-shadow: 0 0 0 2px blue; &[data-x] { &.y { outline: none; } } }\n", []],
+    [":focus { box-shadow: 0 0 0 2px blue; @media (min-width: 1px) { &.a { outline: none; } } }\n", []],
+    // a parent's ring does not reach a different element
+    [":focus { box-shadow: 0 0 0 2px blue; .child { outline: none; } }\n", [FOCUS_RULE]],
+    [":focus { box-shadow: 0 0 0 2px blue; & .child { outline: none; } }\n", [FOCUS_RULE]],
+    [":focus { box-shadow: 0 0 0 2px blue; & > .child { outline: none; } }\n", [FOCUS_RULE]],
+    [":focus { box-shadow: 0 0 0 2px blue; &::before { outline: none; } }\n", [FOCUS_RULE]],
+    [":focus { box-shadow: 0 0 0 2px blue; &.a, .b { outline: none; } }\n", [FOCUS_RULE]],
+    // a parent without a replacement gives the child nothing
+    [":focus { color: red; &.danger { outline: none; } }\n", [FOCUS_RULE]],
+    // @at-root with a query that drops rules detaches the subject
+    [":focus { box-shadow: 0 0 0 2px blue; @at-root { &.a { outline: none; } } }\n", [FOCUS_RULE]],
+  ];
+  for (const [css, expected] of cases) {
+    assert.deepEqual((await focusAuditFor(css)).rules.filter((x) => x === FOCUS_RULE), expected, css);
+  }
+});
+
+// --- ST-05 / #39 (owner decision, option A): the reported line is the line of the selector's first
+// non-whitespace character, the rule head. A declaration line is not required.
+
+test("ST-05 criterion 1: the reported line is the selector's first non-whitespace character", async () => {
+  const lineFor = async (css, file = "focus.css") => {
+    const dir = await mkdtemp(path.join(tmpdir(), "uiux-st05-"));
+    try {
+      await writeFile(path.join(dir, file), css);
+      return (await runAudit(dir)).findings.filter((f) => f.rule === FOCUS_RULE).map((f) => f.evidence[0]);
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  };
+  // the issue's reproduction: main reported line 3 (the closing line of the preceding rule)
+  assert.deepEqual(
+    await lineFor("/* header */\n\n.a { color: red; }\n\n/* note */\n\n:focus-visible {\n  outline: none;\n}\n"),
+    ["focus.css:7"],
+  );
+  // `{` and the declaration on a later line than the selector's own line; other declarations first
+  assert.deepEqual(
+    await lineFor("/* header */\n\n.a { color: red; }\n\n/* note */\n\n:focus-visible\n{\n  color: red;\n  outline: none;\n}\n"),
+    ["focus.css:7"],
+  );
+  // indented selector, and a multi-line selector list: the line of the first character of the rule head
+  assert.deepEqual(await lineFor("@media print {\n\n    .x,\n    .y:focus {\n      outline: 0;\n    }\n}\n"), ["focus.css:3"]);
+  // a one-line rule: both anchors coincide
+  assert.deepEqual(await lineFor(".btn:focus { outline: none; }\n"), ["focus.css:1"]);
+  // the same anchor in SCSS, with an interpolated selector, and for a nested rule
+  assert.deepEqual(await lineFor("// h\n\n.a { margin: 1px; }\n\n.#{p}-x:focus {\n  outline: none;\n}\n", "f.scss"), ["f.scss:5"]);
+  assert.deepEqual(await lineFor(".a {\n\n  &:focus {\n    outline: none;\n  }\n}\n", "f.scss"), ["f.scss:3"]);
+});
+
 test("audit reaches no verdict: no status, no score, and no policy is consulted", async () => {
   const result = await runAudit(fixture("never-violations"));
   assert.ok(!("status" in result));

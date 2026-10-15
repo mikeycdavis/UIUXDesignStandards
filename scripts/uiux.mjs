@@ -537,17 +537,23 @@ function parseBlocks(text) {
     //                        through and none of it is focus-relevant.
     // A colon followed by whitespace (or the end) after a property name makes a prelude a declaration;
     // `a:hover` and `:focus` are selectors.
-    const declaration = atRule === null ? /^(--[\w-]*|[\w\u{E000}-]+)\s*:(\s|$)/u.exec(trimmed) : null;
+    // A custom property is a declaration whatever follows its colon (`--x:foo {`, `--x:fn({`); an
+    // ordinary property needs whitespace or the end, because `a:hover` is a selector.
+    const declaration =
+      atRule === null ? /^(?:(--[\w-]*)\s*:|([\w\u{E000}-]+)\s*:(?:\s|$))/u.exec(trimmed) : null;
+    const declarationName = declaration ? (declaration[1] ?? declaration[2]) : null;
     let opaque = (parent?.opaque ?? false) || (atRule !== null && OPAQUE_AT_RULES.has(atRule));
     let composed;
     let childCtx;
     let rootEmitted = false;
+    let keepsSubject = false; // an at-rule whose contents still style the enclosing rule's element
     if (atRule === "at-root") {
       const prelude = trimmed.replace(/^@at-root/i, "").trim();
       if (prelude === "" || prelude.startsWith("(")) {
         const resets = prelude === "" ? true : atRootResets(prelude);
         if (resets === null) opaque = true; // a query that cannot be read is not guessed at
         const drops = resets !== false;
+        keepsSubject = !drops && !ctx.reset;
         childCtx = { parents: ctx.parents, reset: ctx.reset || drops };
         composed = drops ? [""] : ctx.reset ? [""] : ctx.parents;
       } else {
@@ -564,6 +570,7 @@ function parseBlocks(text) {
       // Every other at-rule - the conditional group rules and generic CSS at-rules alike - keeps the
       // enclosing rule around its declarations. A name that is itself interpolated is not knowable.
       if (atRule === "") opaque = true;
+      keepsSubject = !ctx.reset;
       composed = ctx.reset ? [""] : ctx.parents;
       childCtx = ctx;
     } else if (declaration) {
@@ -575,15 +582,33 @@ function parseBlocks(text) {
       composed = composeSelectors(selector, ctx.parents, ctx.reset);
       childCtx = { parents: composed, reset: false };
     }
+    // Bodies of ENCLOSING rules that style the SAME element as this block. A child written `&.x`,
+    // `&:hover` or `&[x]` compiles to a compound on the parent's own subject, so the parent's
+    // declarations (a box-shadow ring) still apply to it. A descendant, a pseudo-element, a name
+    // suffix (`&-x`) or any other combinator names a different subject. A group at-rule passes the
+    // enclosing rule through, but its own (conditional) body is not counted as unconditional.
+    let elementBodies = [];
+    if (parent) {
+      const carried = parent.atRule === null && parent.propNest === null && !parent.dataBlock ? [parent.body] : [];
+      if (atRule !== null) {
+        if (keepsSubject) elementBodies = [...parent.elementBodies, ...carried];
+      } else if (declaration === null && !ctx.reset) {
+        const parts = splitSelectorList(selector);
+        if (parts.length > 0 && parts.every((part) => /^&[.:#[]/.test(part) && !part.startsWith("&::"))) {
+          elementBodies = [...parent.elementBodies, ...carried];
+        }
+      }
+    }
     const node = {
+      elementBodies,
       selector,
       selectorStart: frame.selStart,
       atRule,
       rootEmitted,
       // dataBlock: a custom property's value; propNest: the property name of a Sass nested property
       // block. Neither is a rule, and nothing inside either is read as one.
-      dataBlock: declaration !== null && declaration[1].startsWith("--"),
-      propNest: declaration !== null && !declaration[1].startsWith("--") ? declaration[1] : null,
+      dataBlock: declaration !== null && declarationName.startsWith("--"),
+      propNest: declaration !== null && !declarationName.startsWith("--") ? declarationName : null,
       inside: parent !== null && (parent.inside || parent.dataBlock || parent.propNest !== null),
       opaque,
       ctx: childCtx,
@@ -1142,8 +1167,11 @@ export const DETECTORS = [
         examined = true;
         if (focusSelectors.every((selector) => /:focus\s*:not\(\s*:focus-visible\s*\)/i.test(selector))) continue;
         if (!removesOutline) continue;
-        if (compensating.test(node.body)) continue;
-        if (appliesRingWidth(node.body)) continue;
+        // Declarations of the rules this one is attached to on the same element count as well: in
+        // `:focus { box-shadow: ...; &.danger { outline: none } }` the ring still applies.
+        const sameElement = [node.body, ...node.elementBodies];
+        if (sameElement.some((body) => compensating.test(body))) continue;
+        if (appliesRingWidth(sameElement.join(" ; "))) continue;
         const own = text.slice(node.selectorStart, node.selectorStart + node.selector.length).trim();
         const spelled = node.parent ? "(nested) " + own : own;
         findings.push(
