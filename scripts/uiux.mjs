@@ -459,7 +459,11 @@ function resolveInterpolation(text, sourceText = text, rawText = sourceText) {
     const literal = run.parts.every((part) => part !== null) ? run.parts.join("") : null;
     const before = text[run.start - 1];
     const after = text[run.end];
-    if (literal !== null && literal.length <= width && !(isIdent(before) && isIdent(after))) {
+    // Fixed length cannot keep BOTH the colon's adjacency and an ident suffix (`:#{focus}-visible`
+    // is `:focus-visible`, three characters shorter): spaces after a colon would split the pseudo-class
+    // name, so that position is not readable and the span is masked rather than misread.
+    const splitsPseudo = before === ":" && isIdent(after) && literal !== null && literal.length < width;
+    if (literal !== null && literal.length <= width && !(isIdent(before) && isIdent(after)) && !splitsPseudo) {
       out += isIdent(after) ? literal.padStart(width, " ") : literal.padEnd(width, " ");
     } else {
       out += text.slice(run.start, run.end).replace(/[^\n]/g, UNKNOWN);
@@ -512,7 +516,10 @@ function parseBlocks(text) {
     const selector = text.slice(frame.selStart, frame.open);
     const trimmed = selector.trim();
     // At-rule names are ASCII case-insensitive: @MEDIA is @media.
-    const atRule = trimmed.startsWith("@") ? (/^@([A-Za-z-]+)/.exec(trimmed)?.[1] ?? "").toLowerCase() : null;
+    let atRule = trimmed.startsWith("@") ? (/^@([A-Za-z-]+)/.exec(trimmed)?.[1] ?? "").toLowerCase() : null;
+    // A name that is only partly interpolated (`@-#{$v}-keyframes`, `@med#{$x}`) is not knowable
+    // either: it is treated as the unknown name, never as the readable prefix.
+    if (atRule !== null && trimmed.slice(1).replace(/^[A-Za-z-]*/, "").startsWith(UNKNOWN)) atRule = "";
     const body = text.slice(frame.open + 1, frame.close).split("");
     for (const [from, to] of frame.children) {
       for (let k = Math.max(from, frame.open + 1); k < Math.min(to, frame.close); k++) {
@@ -592,7 +599,7 @@ function parseBlocks(text) {
       // Only a parent that is itself a focus rule: `.btn { box-shadow: ...; &:focus { outline: none } }`
       // carries a shadow that is present unfocused, which is no focus indicator.
       const carried =
-        parent.atRule === null && parent.propNest === null && !parent.dataBlock && parent.composed.length > 0 &&
+        !parent.rootEmitted && parent.propNest === null && !parent.dataBlock && parent.composed.length > 0 &&
         parent.composed.every((selector) => isFocusSelector(selector))
           ? [parent.body]
           : [];

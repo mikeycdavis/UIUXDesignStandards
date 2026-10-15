@@ -929,6 +929,46 @@ test("ST-07: a same-element nested rule inherits the replacement indicators of t
   }
 });
 
+test("ST-07: a static interpolation that begins a pseudo-class name is not read as split", async () => {
+  // `:#{focus}-visible` is `:focus-visible`; fixed-length resolution cannot spell it, so it is
+  // unknown - never read as whitespace-separated text - and a block that removes the outline is
+  // unexaminable, so a sibling that is safe cannot let the rule pass.
+  for (const head of [":#{focus}-visible", "a:#{focus}-within", ":#{focus}-#{visible}"]) {
+    const r = await focusAuditFor(`${head} { outline: none; }\n:focus { outline: none; box-shadow: 0 0 0 2px blue; }\n`);
+    assert.deepEqual(r.rules.filter((x) => x === FOCUS_RULE), [], head);
+    assert.equal(r.unexaminable.length >= 1, true, head);
+    assert.equal(r.examined, false, head);
+  }
+  // a whole-name interpolation is readable and a real finding; so is one elsewhere
+  assert.deepEqual((await focusAuditFor(":#{focus} { outline: none; }\n")).rules, [FOCUS_RULE]);
+  assert.deepEqual((await focusAuditFor(".#{prefix}-btn:focus { outline: none; }\n")).rules, [FOCUS_RULE]);
+  assert.deepEqual((await focusAuditFor(":focus { outline:#{none}; }\n")).rules, [FOCUS_RULE]);
+});
+
+test("ST-07: a partly interpolated at-rule name is the unknown name", async () => {
+  for (const css of [
+    ":focus { @-#{$vendor}-keyframes spin { from { outline: none; } } }\n",
+    ":focus { @#{$name} spin { from { outline: none; } } }\n",
+    ":focus { @med#{$x} { outline: none; } }\n",
+  ]) {
+    const r = await focusAuditFor(css);
+    assert.deepEqual(r.rules.filter((x) => x === FOCUS_RULE), [], css);
+  }
+});
+
+test("ST-07: a replacement declared inside a group at-rule covers a same-element rule inside it", async () => {
+  const cases = [
+    [":focus { @media (min-width: 1px) { box-shadow: 0 0 0 2px blue; &.x { outline: none; } } }\n", []],
+    [":focus { @supports (display: grid) { @apply ring-2; &:hover { outline: none; } } }\n", []],
+    // a sibling rule of the at-rule, or an unfocused enclosing rule, does not carry it
+    [":focus { @media (min-width: 1px) { box-shadow: 0 0 0 2px blue; } &.x { outline: none; } }\n", [FOCUS_RULE]],
+    [".btn { @media (min-width: 1px) { box-shadow: 0 0 0 2px blue; &:focus { outline: none; } } }\n", [FOCUS_RULE]],
+  ];
+  for (const [css, expected] of cases) {
+    assert.deepEqual((await focusAuditFor(css)).rules.filter((x) => x === FOCUS_RULE), expected, css);
+  }
+});
+
 // --- ST-05 / #39 (owner decision, option A): the reported line is the line of the selector's first
 // non-whitespace character, the rule head. A declaration line is not required.
 
