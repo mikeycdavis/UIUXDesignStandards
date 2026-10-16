@@ -1474,6 +1474,20 @@ test("ST-07: a filter list on an anchored subject narrows it", async () => {
   }
 });
 
+test("ST-07: a wrapped bare :focus is bare; the exemption is read on the subject only", async () => {
+  const cases = [
+    [":where(:focus) { box-shadow: 0 0 0 2px blue; :is(&, .special) { outline: none; } }\n", []],
+    [":is(:where(:focus)) { box-shadow: 0 0 0 2px blue; :is(&, .special) { outline: none; } }\n", []],
+    [":where(.btn:focus) { box-shadow: 0 0 0 2px blue; :is(&, .special) { outline: none; } }\n", [FOCUS_RULE]],
+    ["div:has(:focus:not(.x)) :focus:not(:focus-visible) { outline: none; }\n", []],
+    ["div:has(:focus:not(:focus-visible)) :focus { outline: none; }\n", [FOCUS_RULE]],
+    [":focus:not(.x) { outline: none; }\n", [FOCUS_RULE]],
+  ];
+  for (const [css, expected] of cases) {
+    assert.deepEqual((await focusAuditFor(css)).rules.filter((x) => x === FOCUS_RULE), expected, css);
+  }
+});
+
 test("ST-07: a doubly negated reference to the parent keeps the subject", async () => {
   const cases = [
     [":focus { box-shadow: 0 0 0 2px blue; :not(:not(&)) { outline: none; } }\n", []],

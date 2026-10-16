@@ -583,7 +583,7 @@ function parseBlocks(text) {
         const parts = splitSelectorList(selector);
         // a parent that is nothing but a focus pseudo-class matches every focused element
         const bareFocus = parent.composed.length > 0 &&
-          parent.composed.every((sel) => /^\s*\*?\s*:focus\s*$/i.test(sel));
+          parent.composed.every((sel) => isBareFocus(sel));
         if (parts.length > 0 && parts.every((part) => namesSameSubject(part, bareFocus))) {
           elementNodes = [...parent.elementNodes, ...carried];
         }
@@ -1104,18 +1104,40 @@ function namesSameSubject(part, parentIsBareFocus = false) {
  * alone or as one member of the `:not()` list (any other member, however nested, only narrows it).
  */
 function hidesRingFromMouseOnly(selector) {
-  const start = /:focus\s*:not\(/i.exec(selector);
-  if (start === null) return false;
-  let depth = 1;
-  let end = start.index + start[0].length;
-  for (; end < selector.length && depth > 0; end++) {
-    if (selector[end] === "(") depth++;
-    else if (selector[end] === ")") depth--;
+  // only the subject (the last compound) and only a negation written on it, not one inside a
+  // relational or functional argument (`div:has(:focus:not(.x)) :focus:not(:focus-visible)`)
+  const compounds = selectorCompounds(selector);
+  const subject = compounds.length > 0 ? compounds[compounds.length - 1] : selector;
+  const pattern = /:focus\s*:not\(/gi;
+  for (let start = pattern.exec(subject); start !== null; start = pattern.exec(subject)) {
+    let outer = 0;
+    for (let i = 0; i < start.index; i++) {
+      if (subject[i] === "(") outer++;
+      else if (subject[i] === ")") outer--;
+    }
+    if (outer !== 0) continue;
+    let depth = 1;
+    let end = start.index + start[0].length;
+    for (; end < subject.length && depth > 0; end++) {
+      if (subject[end] === "(") depth++;
+      else if (subject[end] === ")") depth--;
+    }
+    if (depth !== 0) continue;
+    const members = splitSelectorList(subject.slice(start.index + start[0].length, end - 1));
+    if (members.some((member) => /^:focus-visible$/i.test(member.trim()))) return true;
   }
-  if (depth !== 0) return false;
-  return splitSelectorList(selector.slice(start.index + start[0].length, end - 1)).some((member) =>
-    /^:focus-visible$/i.test(member.trim()),
-  );
+  return false;
+}
+
+/** A selector that matches every focused element and nothing else: :focus, *:focus, :where(:focus), :is(:focus). */
+function isBareFocus(selector) {
+  let current = selector.trim();
+  for (;;) {
+    const wrapped = /^:(?:is|where)\(\s*([\s\S]*)\)$/i.exec(current);
+    if (wrapped === null) break;
+    current = wrapped[1].trim();
+  }
+  return /^\*?\s*:focus$/i.test(current);
 }
 
 /** A Sass placeholder selector: %name at the start of a compound (50% is a keyframe selector). */
