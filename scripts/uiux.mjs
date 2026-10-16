@@ -381,7 +381,7 @@ const STYLE_EXTENSIONS = new Set([".css", ".scss", ".less"]);
 /** Stands in for every character of an interpolation whose value is not statically knowable. */
 const UNKNOWN = "\uE000";
 
-function resolveInterpolation(text, sourceText = text, rawText = sourceText) {
+function resolveInterpolation(text, sourceText = text, rawText = sourceText, readable = true) {
   const isIdent = (ch) => ch !== undefined && /[A-Za-z0-9_-]/.test(ch);
   // Pass 1: find every span, and read its content when it is statically readable.
   const spans = [];
@@ -391,7 +391,8 @@ function resolveInterpolation(text, sourceText = text, rawText = sourceText) {
       i++;
       continue;
     }
-    const lessSpan = text[i] === "@"; // a Less span is never read: its value is a variable
+    // a Less span is never read (its value is a variable), and neither is Sass interpolation outside Sass
+    const lessSpan = text[i] === "@" || !readable;
     let depth = 0;
     let j = i + 1;
     for (; j < text.length; j++) {
@@ -676,6 +677,8 @@ function headPartReason(rawPart) {
   // comments LEADING the part are not inside it (and may mention anything)
   const inner = rawPart.replace(/^(?:\s|\/\*[\s\S]*?\*\/|\/\/[^\n]*(?:\n|$))*/, "");
   if (inner.includes("#{") || inner.includes("@{")) return "interpolation";
+  // Sass allows the parent selector only at the start of a compound (span& and .a& are errors)
+  if (/[^\s>+~,(&]&/.test(inner.replace(/\[[^\]]*\]/g, ""))) return "syntax";
   // an attribute selector is validated against the RAW text, where a quoted value is still a quoted value
   for (const m of inner.matchAll(/\[([^\]]*)\]/g)) if (!ATTRIBUTE_RAW.test(m[1])) return "syntax";
   // a comment INSIDE the part would be replaced by padding that reads as a combinator;
@@ -1114,6 +1117,12 @@ function replacementReason(declarations) {
     // a value that cannot be shown to paint (a gradient, url(), rgba(), transparent, an 8-digit hex) is off the list;
     // the border shorthand has its own, stricter reading below
     if (!/^border/i.test(d.property) && !positiveIndicatorValue(d.property, d.value)) return UNEXAMINABLE_REASONS.replacementForm;
+    // a border colour longhand (border-color, border-top-color, ...) can override the shorthand's colour: one to four
+    // opaque colours, or it is off the list
+    if (/^border(-(top|right|bottom|left|block|inline)(-(start|end))?)?-color$/i.test(d.property)) {
+      const colours = d.value.trim().split(/\s+(?![^(]*\))/).filter(Boolean);
+      if (colours.length < 1 || colours.length > 4 || !colours.every((c) => opaqueColour(c))) return UNEXAMINABLE_REASONS.replacementForm;
+    }
     const bare = d.value.trim();
     // a border shorthand draws only with a drawn style and a non-zero literal width; an omitted style is none
     if (/^border(-(top|right|bottom|left|block|inline)(-(start|end))?)?$/i.test(d.property) && !restoresOutline(bare, false)) {
@@ -1531,7 +1540,8 @@ export const DETECTORS = [
       // same length: statically readable spans are substituted (#{none} reads as none) and unknowable
       // ones become UNKNOWN. Every style rule is then read under its COMPOSED selector against the
       // closed list of decided forms above; whatever is off the list is recorded, never decided.
-      const resolved = resolveInterpolation(text, file.views.sourceOf, file.text);
+      // Sass interpolation is read only in .scss; in CSS and Less it is not valid, and every span is unknown
+      const resolved = resolveInterpolation(text, file.views.sourceOf, file.text, file.ext === ".scss");
       const nodes = parseBlocks(resolved, file.text);
       // A control directive or @include inside a rule may change its declarations, and parseBlocks has
       // blanked it from the rule's own body: every rule that encloses one is not decided as a whole.
@@ -1578,10 +1588,16 @@ export const DETECTORS = [
         // the span's length pads it with spaces that would read as a combinator), and so is a comment inside
         // one (the structure view pads that too). The reason is tracked per composed branch (node.reasons), so
         // a decided branch still decides beside an off-list one.
+        // (a malformed member invalidates the WHOLE list: the browser discards the rule)
+        // (a branch whose head holds an interpolation or comment is padding-damaged and already off the list on its own)
+        const listInvalid = node.composed.some(
+          (selector, k) =>
+            node.reasons[k] === "syntax" || (!node.reasons[k] && offListSelector(selector) === UNEXAMINABLE_REASONS.selectorSyntax),
+        );
         const reasonOf = (b, k) => {
-          if (node.reasons[k] === "syntax") return UNEXAMINABLE_REASONS.selectorSyntax;
           if (node.reasons[k] === "comment") return UNEXAMINABLE_REASONS.selectorComment;
           if (node.reasons[k] === "interpolation") return UNEXAMINABLE_REASONS.selectorInterpolation;
+          if (listInvalid || node.reasons[k] === "syntax") return UNEXAMINABLE_REASONS.selectorSyntax;
           return offListSelector(b);
         };
         const focusBranches = node.composed

@@ -1054,6 +1054,9 @@ const OFF_LIST_FORMS = [
   [":focus { outline: none; border: 0; }\n", REASON.replacement],
   [":focus { outline: none; border: calc(1px + 1px) solid red; }\n", REASON.replacement],
   [":focus { outline: none; border: 0 solid red; }\n", REASON.replacement],
+  [":focus { outline: none; border: 2px solid red; border-color: rgba(0,0,0,0); }\n", REASON.replacement],
+  [":focus { outline: none; border: 2px solid red; border-top-color: transparent; }\n", REASON.replacement],
+  [":focus { outline: none; border: 2px solid red; border-color: red blue green yellow orange; }\n", REASON.replacement],
   [":focus { outline: none; box-shadow: 1px 0 0 -9999px red; }\n", REASON.replacement],
   [":focus { outline: none; box-shadow: 0 0 2px -1px red; }\n", REASON.replacement],
   [":focus { outline: none; text-decoration: underline +0px red; }\n", REASON.replacement],
@@ -1498,6 +1501,25 @@ test("closed list: blockless @extend, @include and Less mixin calls make the blo
     assert.equal(r.examined, false, css);
     assert.equal(r.unexaminable.length >= 1, true, css);
   }
+});
+
+test("closed list: dialects and the parent selector - interpolation only in scss, & only at a compound start, one bad member kills the list", async () => {
+  for (const [css, file] of [
+    [":focus { outline: #{none}; }\n", "f.css"],
+    [":focus { outline: #{none}; }\n", "f.less"],
+    [".x { span&:focus { outline: none; } }\n", "f.scss"],
+    [".x { .a&:focus { outline: none; } }\n", "f.scss"],
+    [":focus, .x..y { outline: none; }\n", "f.scss"],
+    [":focus, a >> b { outline: none; }\n", "f.css"],
+    [":focus, .a[foo=] { outline: none; }\n", "f.css"],
+  ]) {
+    const r = await focusAuditFor(css, file);
+    assert.deepEqual(r.rules.filter((x) => x === FOCUS_RULE), [], css + " " + file);
+    assert.equal(r.unexaminable.length >= 1, true, css + " " + file);
+  }
+  // the same interpolation in a Sass file is read
+  assert.deepEqual((await focusAuditFor(":focus { outline: #{none}; }\n", "f.scss")).rules.filter((x) => x === FOCUS_RULE), [FOCUS_RULE]);
+  assert.deepEqual((await focusAuditFor(".x { &-y:focus, &.z:focus { outline: none; } }\n", "f.scss")).rules.filter((x) => x === FOCUS_RULE).length, 1);
 });
 
 test("closed list: a decided branch is not hidden by an off-list branch beside it", async () => {
