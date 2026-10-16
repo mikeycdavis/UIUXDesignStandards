@@ -1274,7 +1274,7 @@ test("ST-07: declarations that share a cascade layer are resolved; a negation li
 test("ST-07: an unknown value matters only if it can survive the cascade", async () => {
   const cases = [
     // overridden afterwards: the unknown cannot be the winner
-    [":focus { outline: none; box-shadow: #{$maybe}; box-shadow: none; }\n", [FOCUS_RULE]],
+    [":focus { outline: none; box-shadow: #{$maybe}; box-shadow: none !important; }\n", [FOCUS_RULE]],
     [":focus { outline: none; @apply #{$ring}; @apply ring-0 !important; }\n", [FOCUS_RULE]],
     // not overridden: undecided
     [":focus { outline: none; box-shadow: none; box-shadow: #{$maybe}; }\n", "unexaminable"],
@@ -1315,6 +1315,21 @@ test("ST-07: an interpolated background shorthand is unknown; :is() lists may mi
   for (const [css, expected] of cases) {
     assert.deepEqual((await focusAuditFor(css)).rules.filter((x) => x === FOCUS_RULE), expected, css);
   }
+});
+
+test("ST-07: a constrained parent does not carry its indicator to other elements of an :is() list; interpolated importance is unknown", async () => {
+  const cases = [
+    [".btn:focus { box-shadow: 0 0 0 2px blue; :is(&, .special) { outline: none; } }\n", [FOCUS_RULE]],
+    [".btn:focus { box-shadow: 0 0 0 2px blue; :is(&.a, &.b) { outline: none; } }\n", []],
+    [":focus-visible { box-shadow: 0 0 0 2px blue; :is(&, .special) { outline: none; } }\n", []],
+    ["*:focus { box-shadow: 0 0 0 2px blue; :is(&, .special) { outline: none; } }\n", []],
+  ];
+  for (const [css, expected] of cases) {
+    assert.deepEqual((await focusAuditFor(css)).rules.filter((x) => x === FOCUS_RULE), expected, css);
+  }
+  const important = await focusAuditFor(":focus { outline: none; background: red !important; background: #{$maybe}; }\n");
+  assert.deepEqual(important.rules.filter((x) => x === FOCUS_RULE), []);
+  assert.equal(important.unexaminable.length >= 1, true);
 });
 
 test("ST-07: a doubly negated reference to the parent keeps the subject", async () => {

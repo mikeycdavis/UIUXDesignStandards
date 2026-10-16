@@ -581,7 +581,10 @@ function parseBlocks(text) {
         if (keepsSubject) elementNodes = [...parent.elementNodes, ...carried];
       } else if (declaration === null && !ctx.reset) {
         const parts = splitSelectorList(selector);
-        if (parts.length > 0 && parts.every((part) => namesSameSubject(part))) {
+        // a parent that is nothing but a focus pseudo-class matches every focused element
+        const bareFocus = parent.composed.length > 0 &&
+          parent.composed.every((sel) => /^\s*\*?\s*:focus(-visible|-within)?\s*$/i.test(sel));
+        if (parts.length > 0 && parts.every((part) => namesSameSubject(part, bareFocus))) {
           elementNodes = [...parent.elementNodes, ...carried];
         }
       }
@@ -837,7 +840,7 @@ function replacementVerdict(node, compensating) {
           const important = wholeImportant || rawToken.startsWith("!") || rawToken.endsWith("!");
           if (token.includes(UNKNOWN)) {
             // an interpolated utility may be a ring width: an unknown declaration in the cascade
-            decls.push({ at, lo, hi, layer, property: "box-shadow", value: token, important });
+            decls.push({ at, lo, hi, layer, property: "box-shadow", value: token, important: "unknown" });
           } else if (token === "ring-0") decls.push({ at, lo, hi, layer, property: "box-shadow", value: "none", important });
           else if (/^ring(-(1|2|4|8))?$/.test(token)) {
             decls.push({ at, lo, hi, layer, property: "box-shadow", value: "0 0 0 1px ring", important });
@@ -850,7 +853,8 @@ function replacementVerdict(node, compensating) {
       const property = text.slice(0, colon).trim().toLowerCase();
       if (property === "") continue;
       const value = text.slice(colon + 1).trim();
-      const important = IMPORTANT.test(value);
+      // an interpolation may expand to a value ending in !important
+      const important = value.includes(UNKNOWN) ? "unknown" : IMPORTANT.test(value);
       const longhand = /^border-(style|width|color)$/.exec(property);
       const logical = /^border-(block|inline)-(style|width|color)$/.exec(property);
       const values = value.replace(IMPORTANT, "").trim().split(/\s+(?![^(]*\))/);
@@ -902,6 +906,16 @@ function replacementVerdict(node, compensating) {
   const beats = (a, b) => {
     // declarations in different cascade layers are ranked by layer order, which is not modelled
     if (a.layer !== b.layer) return "unknown";
+    if (a.important === "unknown" || b.important === "unknown") {
+      // the outcome under both readings of the unknown importance: decided only if they agree
+      const readings = [true, false].map((value) =>
+        beats(
+          a.important === "unknown" ? { ...a, important: value } : a,
+          b.important === "unknown" ? { ...b, important: value } : b,
+        ),
+      );
+      return readings[0] === readings[1] ? readings[0] : "unknown";
+    }
     if (a.important !== b.important) return a.important ? "wins" : "loses";
     if (compareSpecificity(a.lo, b.hi) > 0) return "wins";
     if (compareSpecificity(a.hi, b.lo) < 0) return "loses";
@@ -965,7 +979,7 @@ function replacementVerdict(node, compensating) {
  * `.x:where(&)`). A descendant or sibling combinator, a name suffix (`&-x`), a pseudo-element, a
  * negation (`:not(&)`) or a relational `:has(&)` names a different subject.
  */
-function namesSameSubject(part) {
+function namesSameSubject(part, parentIsBareFocus = false) {
   if (/::|:(before|after|first-line|first-letter)(?![\w-])/i.test(part)) return false;
   // Ancestor constraints may precede the subject (`.wrapper &`): the LAST compound is the subject, and
   // it alone may carry the reference to the parent.
@@ -992,7 +1006,7 @@ function namesSameSubject(part) {
         // every other argument (ordinary or parent-qualified) only narrows it further
         const doubled = referencing.some((arg) => {
           const inner = /^:not\(([\s\S]*)\)$/i.exec(arg);
-          return inner !== null && splitSelectorList(inner[1]).every((part) => namesSameSubject(part));
+          return inner !== null && splitSelectorList(inner[1]).every((part) => namesSameSubject(part, parentIsBareFocus));
         });
         if (!doubled) return false;
         anchored = true;
@@ -1002,10 +1016,15 @@ function namesSameSubject(part) {
       // :is(&, .special): the focus-relevant alternative is the parent; an alternative that does not
       // reference it and cannot be a focus rule matches other elements and does not matter. One that
       // is a focus selector of its own is a different rule and is not the parent.
-      const same = args.filter((arg) => namesSameSubject(arg));
-      const others = args.filter((arg) => !namesSameSubject(arg));
+      const same = args.filter((arg) => namesSameSubject(arg, parentIsBareFocus));
+      const others = args.filter((arg) => !namesSameSubject(arg, parentIsBareFocus));
       if (same.length === 0) return false;
-      if (others.some((arg) => arg.includes("&") || isFocusSelector(arg))) return false;
+      if (others.length > 0) {
+        // another element may be focused without being the parent: it carries the parent's indicator
+        // only when the parent selects EVERY focused element (a bare :focus)
+        if (!parentIsBareFocus) return false;
+        if (others.some((arg) => arg.includes("&") || isFocusSelector(arg))) return false;
+      }
       anchored = true;
     }
     rest = rest.slice(0, m.index) + rest.slice(end);
