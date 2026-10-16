@@ -988,7 +988,9 @@ function positiveIndicatorValue(property, value) {
       const insets = tokens.filter((t) => /^inset$/i.test(t)).length;
       const colours = tokens.filter((t) => opaqueColour(t)).length;
       const contiguous = lengths.length > 0 && lengths[lengths.length - 1] - lengths[0] === lengths.length - 1;
-      return contiguous && lengths.length >= 2 && lengths.length <= 4 && insets <= 1 && colours === 1 &&
+      // the third length is the blur radius, which must not be negative
+      const blur = lengths.length >= 3 ? tokens[lengths[2]] : "0";
+      return contiguous && lengths.length >= 2 && lengths.length <= 4 && !blur.startsWith("-") && insets <= 1 && colours === 1 &&
         lengths.length + insets + colours === tokens.length;
     });
   }
@@ -1000,12 +1002,13 @@ function positiveIndicatorValue(property, value) {
   // each line keyword at most once; a decoration has at most one style, one thickness and one colour
   const lines = tokens.filter((t) => line.test(t)).map((t) => t.toLowerCase());
   const uniqueLines = new Set(lines).size === lines.length;
-  if (p === "text-decoration-line") return tokens.length > 0 && lines.length === tokens.length && uniqueLines;
+  // a decoration's colour defaults to currentcolor, which cannot be shown to paint: text-decoration-line alone is off the list
+  if (p === "text-decoration-line") return false;
   if (p === "text-decoration") {
     const styles = tokens.filter((t) => /^(solid|double|dotted|dashed|wavy)$/i.test(t)).length;
     const lengths = tokens.filter((t) => length(t)).length;
     const colours = tokens.filter((t) => opaqueColour(t)).length;
-    return lines.length > 0 && uniqueLines && styles <= 1 && lengths <= 1 && colours <= 1 &&
+    return lines.length > 0 && uniqueLines && styles <= 1 && lengths <= 1 && colours === 1 &&
       lines.length + styles + lengths + colours === tokens.length;
   }
   return false;

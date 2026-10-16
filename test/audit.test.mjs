@@ -962,7 +962,8 @@ const DECIDED_FORMS = [
   [":focus { outline: none; box-shadow: 0 0 2px red, 0 0 4px blue; }\n", false],
   [":focus { outline: none; border: 2px solid blue; }\n", false],
   [":focus { outline: none; background-color: yellow; }\n", false],
-  [":focus { outline: none; text-decoration: underline; }\n", false],
+  [":focus { outline: none; text-decoration: underline red; }\n", false],
+  [":focus { outline: none; box-shadow: -2px -2px 2px red; }\n", false],
   [":focus { outline: none; outline-offset: 2px; }\n", false],
   [":focus { outline: none; @apply ring-2; }\n", false],
   [":focus { outline: none; @apply ring-0 !important; @apply ring-2; }\n", true],
@@ -1053,6 +1054,11 @@ const OFF_LIST_FORMS = [
   [":focus { outline: none; border: 0; }\n", REASON.replacement],
   [":focus { outline: none; border: calc(1px + 1px) solid red; }\n", REASON.replacement],
   [":focus { outline: none; border: 0 solid red; }\n", REASON.replacement],
+  [":focus { outline: none; box-shadow: 0 0 -2px red; }\n", REASON.replacement],
+  [":focus { outline: none; box-shadow: 0 0 -0.1em 2px red; }\n", REASON.replacement],
+  [":focus { outline: none; text-decoration-line: underline; }\n", REASON.replacement],
+  [":focus { outline: none; text-decoration: underline; }\n", REASON.replacement],
+  [":focus { outline: none; text-decoration: underline wavy; }\n", REASON.replacement],
   [":focus { outline: none; box-shadow: 2 2 red; }\n", REASON.replacement],
   [":focus { outline: none; box-shadow: 10% 10% red; }\n", REASON.replacement],
   [":focus { outline: none; box-shadow: 0 0 2px; }\n", REASON.replacement],
@@ -1190,7 +1196,6 @@ test("closed list: every accepted indicator property compensates; a resetting @a
   for (const css of [
     ":focus { outline: none; border-top: 2px solid red; }\n",
     ":focus { outline: none; border-block-end: 2px solid red; }\n",
-    ":focus { outline: none; text-decoration-line: underline; }\n",
   ]) {
     const r = await focusAuditFor(css);
     assert.deepEqual(r.rules.filter((x) => x === FOCUS_RULE), [], css);
@@ -1317,7 +1322,7 @@ test("closed list: a generated box-shadow or text-decoration is a finding unless
       const styles = tokens.filter((x) => ["solid", "wavy"].includes(x)).length;
       const lengths = tokens.filter((x) => x === "2px").length;
       const colours = tokens.filter(isColour).length;
-      return lines.length > 0 && new Set(lines).size === lines.length && styles <= 1 && lengths <= 1 && colours <= 1 &&
+      return lines.length > 0 && new Set(lines).size === lines.length && styles <= 1 && lengths <= 1 && colours === 1 &&
         lines.length + styles + lengths + colours === tokens.length;
     };
     const forms = [];
