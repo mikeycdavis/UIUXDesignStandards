@@ -814,7 +814,7 @@ const REPLACEMENT_FAMILY = (property) => {
 };
 /** The properties that ARE a replacement indicator when their literal value is not disabled (facet longhands only modify one). */
 const INDICATOR_PROPERTY =
-  /^(box-shadow|border(-(top|right|bottom|left|block|inline)(-(start|end))?)?|background(-(color|image))?|text-decoration(-line)?|outline-offset|outline-color)$/i;
+  /^(box-shadow|border(-(top|right|bottom|left|block|inline)(-(start|end))?)?|background(-color)?|text-decoration(-line)?|outline-offset|outline-color)$/i;
 
 /** The declarations of a block as {property, value}; the value keeps its `!important`. */
 function declarationsOf(body) {
@@ -921,6 +921,40 @@ function outlineForm(declarations) {
 }
 
 /**
+ * A colour token that is positively opaque: a 3- or 6-digit hex, a three-component rgb()/hsl() (no alpha), a
+ * colour name other than transparent/currentcolor/the keywords, or a var()/env() in the colour place. A
+ * 4- or 8-digit hex, rgba()/hsla(), color-mix(), a gradient or a url() can paint nothing and is not decided.
+ */
+function opaqueColour(token) {
+  if (/^#(?:[0-9a-f]{3}|[0-9a-f]{6})$/i.test(token)) return true;
+  if (/^(?:rgb|hsl)\(\s*[\d.]+(?:deg)?%?\s*[, ]\s*[\d.]+%?\s*[, ]\s*[\d.]+%?\s*\)$/i.test(token)) return true;
+  if (/^(?:var|env)\(.*\)$/i.test(token)) return true;
+  return (
+    /^[a-z]+$/i.test(token) &&
+    !/^(transparent|currentcolor|none|hidden|auto|medium|thin|thick|initial|inherit|unset|revert|dotted|dashed|solid|double|groove|ridge|inset|outset)$/i.test(token)
+  );
+}
+
+/**
+ * An indicator value read token by token (comma layers one by one): lengths, drawn style keywords, text
+ * decoration keywords, and opaque colours. Anything else - a gradient, a url(), rgba(), a 4/8-digit hex,
+ * transparent - cannot be shown to paint, so it is off the list.
+ */
+function positiveIndicatorValue(value) {
+  const keywords = /^(inset|underline|overline|line-through|dotted|dashed|solid|double|groove|ridge|wavy|outset)$/i;
+  for (const layer of splitSelectorList(value)) {
+    const tokens = layer.trim().split(/\s+(?![^(]*\))/).filter(Boolean);
+    if (tokens.length === 0) return false;
+    for (const token of tokens) {
+      if (/^[+-]?(?:\d+\.?\d*|\.\d+)(?:px|em|rem|%)?$/i.test(token)) continue;
+      if (keywords.test(token)) continue;
+      if (!opaqueColour(token)) return false;
+    }
+  }
+  return true;
+}
+
+/**
  * The decided restoring form: a non-zero literal width, a style other than none/hidden and at most one
  * more token (the colour, which may be a var() custom property: the style and the width decide).
  */
@@ -935,11 +969,7 @@ function restoresOutline(value, allowAuto = true) {
   // the one more token must be a colour: a hex, a function (rgb(), var()), or a colour name - not a
   // number, a style or width keyword, or a CSS-wide value, which would make the shorthand invalid
   const c = rest[0];
-  if (/^#[0-9a-f]{3,8}$/i.test(c) || /^(rgb|rgba|hsl|hsla|hwb|lab|lch|oklab|oklch|color|color-mix|light-dark|var|env)\(.*\)$/i.test(c)) return true;
-  return (
-    /^[a-z]+$/i.test(c) &&
-    !/^(none|hidden|auto|medium|thin|thick|initial|inherit|unset|revert|dotted|dashed|solid|double|groove|ridge|inset|outset)$/i.test(c)
-  );
+  return opaqueColour(c);
 }
 
 /** Why a block's replacement declarations are outside the closed list, or null. */
@@ -963,6 +993,9 @@ function replacementReason(declarations) {
         return UNEXAMINABLE_REASONS.replacementForm;
       }
     }
+    // a value that cannot be shown to paint (a gradient, url(), rgba(), transparent, an 8-digit hex) is off the list;
+    // the border shorthand has its own, stricter reading below
+    if (!/^border/i.test(d.property) && !positiveIndicatorValue(d.value)) return UNEXAMINABLE_REASONS.replacementForm;
     const bare = d.value.trim();
     // a border shorthand draws only with a drawn style and a non-zero literal width; an omitted style is none
     if (/^border(-(top|right|bottom|left|block|inline)(-(start|end))?)?$/i.test(d.property) && !restoresOutline(bare, false)) {
