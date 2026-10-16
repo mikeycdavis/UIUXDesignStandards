@@ -583,7 +583,7 @@ function parseBlocks(text) {
         const parts = splitSelectorList(selector);
         // a parent that is nothing but a focus pseudo-class matches every focused element
         const bareFocus = parent.composed.length > 0 &&
-          parent.composed.every((sel) => /^\s*\*?\s*:focus(-visible|-within)?\s*$/i.test(sel));
+          parent.composed.every((sel) => /^\s*\*?\s*:focus\s*$/i.test(sel));
         if (parts.length > 0 && parts.every((part) => namesSameSubject(part, bareFocus))) {
           elementNodes = [...parent.elementNodes, ...carried];
         }
@@ -1082,7 +1082,8 @@ function namesSameSubject(part, parentIsBareFocus = false) {
         // another element may be focused without being the parent: it carries the parent's indicator
         // only when the parent selects EVERY focused element (a bare :focus)
         if (!parentIsBareFocus) return false;
-        if (others.some((arg) => arg.includes("&") || isFocusSelector(arg))) return false;
+        // :focus-within matches an ancestor of the focused element, which the parent does not style
+        if (others.some((arg) => arg.includes("&") || /:focus-within/i.test(arg))) return false;
       }
       anchored = true;
     }
@@ -1093,6 +1094,25 @@ function namesSameSubject(part, parentIsBareFocus = false) {
     anchored = true;
   }
   return anchored;
+}
+
+/**
+ * True for the idiom that hides the ring from mouse users only: `:focus` negated by `:focus-visible`,
+ * alone or as one member of the `:not()` list (any other member, however nested, only narrows it).
+ */
+function hidesRingFromMouseOnly(selector) {
+  const start = /:focus\s*:not\(/i.exec(selector);
+  if (start === null) return false;
+  let depth = 1;
+  let end = start.index + start[0].length;
+  for (; end < selector.length && depth > 0; end++) {
+    if (selector[end] === "(") depth++;
+    else if (selector[end] === ")") depth--;
+  }
+  if (depth !== 0) return false;
+  return splitSelectorList(selector.slice(start.index + start[0].length, end - 1)).some((member) =>
+    /^:focus-visible$/i.test(member.trim()),
+  );
 }
 
 /** A Sass placeholder selector: %name at the start of a compound (50% is a keyframe selector). */
@@ -1623,7 +1643,7 @@ export const DETECTORS = [
           unexaminable.push({ index: where, reason });
           continue;
         }
-        const exempt = focusSelectors.every((selector) => /:focus\s*:not\(\s*(?:[^(),]*,\s*)*:focus-visible\s*(?:,[^()]*)?\)/i.test(selector));
+        const exempt = focusSelectors.every((selector) => hidesRingFromMouseOnly(selector));
         let verdict = "present";
         if (!exempt && removesOutline) {
           // The declarations of the rules this one is attached to on the same element count as well:

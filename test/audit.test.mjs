@@ -1321,7 +1321,7 @@ test("ST-07: a constrained parent does not carry its indicator to other elements
   const cases = [
     [".btn:focus { box-shadow: 0 0 0 2px blue; :is(&, .special) { outline: none; } }\n", [FOCUS_RULE]],
     [".btn:focus { box-shadow: 0 0 0 2px blue; :is(&.a, &.b) { outline: none; } }\n", []],
-    [":focus-visible { box-shadow: 0 0 0 2px blue; :is(&, .special) { outline: none; } }\n", []],
+
     ["*:focus { box-shadow: 0 0 0 2px blue; :is(&, .special) { outline: none; } }\n", []],
   ];
   for (const [css, expected] of cases) {
@@ -1438,6 +1438,22 @@ test("ST-07: :nth-child(... of &) keeps the subject; a focus-visible negation wi
     [":focus { &:not(.disabled, :focus-visible) { outline: none; } }\n", []],
     [":focus:not(.a, :focus-visible, .b) { outline: none; }\n", []],
     [":focus:not(.a, .b) { outline: none; }\n", [FOCUS_RULE]],
+  ];
+  for (const [css, expected] of cases) {
+    assert.deepEqual((await focusAuditFor(css)).rules.filter((x) => x === FOCUS_RULE), expected, css);
+  }
+});
+
+test("ST-07: the focus-visible exemption parses its list; a bare :focus carries across focused alternatives", async () => {
+  const cases = [
+    [":focus:not(:focus-visible, :is(.disabled)) { outline: none; }\n", []],
+    [":focus:not(.a:is(.b, .c), :focus-visible) { outline: none; }\n", []],
+    [":focus:not(:is(:focus-visible)) { outline: none; }\n", [FOCUS_RULE]],
+    [":focus { box-shadow: 0 0 0 2px blue; :is(&, :focus.x) { outline: none; } }\n", []],
+    [":focus { box-shadow: 0 0 0 2px blue; :is(&, :focus-visible.x) { outline: none; } }\n", []],
+    [":focus { box-shadow: 0 0 0 2px blue; :is(&, .a:focus-within) { outline: none; } }\n", [FOCUS_RULE]],
+    [".btn:focus { box-shadow: 0 0 0 2px blue; :is(&, :focus.x) { outline: none; } }\n", [FOCUS_RULE]],
+    [":focus-visible { box-shadow: 0 0 0 2px blue; :is(&, .special) { outline: none; } }\n", [FOCUS_RULE]],
   ];
   for (const [css, expected] of cases) {
     assert.deepEqual((await focusAuditFor(css)).rules.filter((x) => x === FOCUS_RULE), expected, css);
