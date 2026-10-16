@@ -1604,6 +1604,36 @@ test("ST-07: only a styled outline restores it; quoted literals interpolate thei
   }
 });
 
+test("ST-07: the outline shorthand and its longhands are resolved per part", async () => {
+  const cases = [
+    [":focus { outline: none; outline: 2px solid blue; outline-style: none; }\n", [FOCUS_RULE]],
+    [":focus { outline: none; outline-style: solid; outline-width: 2px; }\n", []],
+    [":focus { outline: none; outline-style: solid; }\n", []],
+    [":focus { outline: 2px solid blue; outline-width: 0; }\n", [FOCUS_RULE]],
+    [":focus { outline: none; outline: 2px solid blue; outline-style: none !important; outline-style: solid; }\n", [FOCUS_RULE]],
+    [":focus { outline: none; outline: 2px solid blue; outline-width: 0 !important; }\n", [FOCUS_RULE]],
+    [":focus { outline: none; outline: solid; outline-width: 0; outline-width: 3px; }\n", []],
+    [":focus { outline: none; outline: 2px solid blue; outline-style: initial; }\n", [FOCUS_RULE]],
+    // a longhand without a shorthand removes only what it names
+    [":focus { outline-style: none; }\n", [FOCUS_RULE]],
+    [":focus { outline-width: 0; outline-style: solid; }\n", [FOCUS_RULE]],
+  ];
+  for (const [css, expected] of cases) {
+    assert.deepEqual((await focusAuditFor(css)).rules.filter((x) => x === FOCUS_RULE), expected, css);
+  }
+  for (const css of [
+    ":focus { outline: none; outline: var(--width) solid red; }\n",
+    ":focus { outline: none; outline-style: var(--s); }\n",
+    ":focus { outline: none; outline: solid var(--c); }\n",
+  ]) {
+    const r = await focusAuditFor(css);
+    assert.deepEqual(r.rules.filter((x) => x === FOCUS_RULE), [], css);
+    assert.equal(r.unexaminable.length >= 1, true, css);
+  }
+  // a known style and width decide whatever the colour is
+  assert.deepEqual((await focusAuditFor(":focus { outline: none; outline: 2px solid var(--c); }\n")).rules, []);
+});
+
 test("ST-07: a doubly negated reference to the parent keeps the subject", async () => {
   const cases = [
     [":focus { box-shadow: 0 0 0 2px blue; :not(:not(&)) { outline: none; } }\n", []],
