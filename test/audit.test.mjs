@@ -1271,6 +1271,35 @@ test("ST-07: declarations that share a cascade layer are resolved; a negation li
   }
 });
 
+test("ST-07: an unknown value matters only if it can survive the cascade", async () => {
+  const cases = [
+    // overridden afterwards: the unknown cannot be the winner
+    [":focus { outline: none; box-shadow: #{$maybe}; box-shadow: none; }\n", [FOCUS_RULE]],
+    [":focus { outline: none; @apply #{$ring}; @apply ring-0 !important; }\n", [FOCUS_RULE]],
+    // not overridden: undecided
+    [":focus { outline: none; box-shadow: none; box-shadow: #{$maybe}; }\n", "unexaminable"],
+    [":focus { outline: none; @apply #{$ring}; }\n", "unexaminable"],
+    [":focus { outline: none; border: #{$b}; }\n", "unexaminable"],
+    // an unknown that cannot be an indicator never mattered
+    [":focus { outline: none; margin: #{$m}; }\n", [FOCUS_RULE]],
+  ];
+  for (const [css, expected] of cases) {
+    const r = await focusAuditFor(css);
+    const found = r.rules.filter((x) => x === FOCUS_RULE);
+    if (expected === "unexaminable") {
+      assert.deepEqual(found, [], css);
+      assert.equal(r.unexaminable.length >= 1, true, css);
+    } else assert.deepEqual(found, expected, css);
+  }
+  // a filter that is itself parent-qualified may sit beside the doubled reference
+  for (const css of [
+    ":focus { box-shadow: 0 0 0 2px blue; :not(:not(&), &.disabled) { outline: none; } }\n",
+    ":focus { box-shadow: 0 0 0 2px blue; :not(&.a, :not(&)) { outline: none; } }\n",
+  ]) {
+    assert.deepEqual((await focusAuditFor(css)).rules.filter((x) => x === FOCUS_RULE), [], css);
+  }
+});
+
 test("ST-07: a doubly negated reference to the parent keeps the subject", async () => {
   const cases = [
     [":focus { box-shadow: 0 0 0 2px blue; :not(:not(&)) { outline: none; } }\n", []],

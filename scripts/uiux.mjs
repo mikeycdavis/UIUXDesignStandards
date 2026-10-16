@@ -834,7 +834,10 @@ function replacementVerdict(node, compensating) {
         for (const rawToken of tokens) {
           const token = rawToken.replace(/^!|!$/g, "");
           const important = wholeImportant || rawToken.startsWith("!") || rawToken.endsWith("!");
-          if (token === "ring-0") decls.push({ at, lo, hi, layer, property: "box-shadow", value: "none", important });
+          if (token.includes(UNKNOWN)) {
+            // an interpolated utility may be a ring width: an unknown declaration in the cascade
+            decls.push({ at, lo, hi, layer, property: "box-shadow", value: token, important });
+          } else if (token === "ring-0") decls.push({ at, lo, hi, layer, property: "box-shadow", value: "none", important });
           else if (/^ring(-(1|2|4|8))?$/.test(token)) {
             decls.push({ at, lo, hi, layer, property: "box-shadow", value: "0 0 0 1px ring", important });
           }
@@ -888,7 +891,9 @@ function replacementVerdict(node, compensating) {
   decls.sort((x, y) => x.at - y.at);
   decls.forEach((d, order) => {
     d.order = order;
-    d.enabled = !DISABLED_VALUE.test(d.value);
+    // an interpolated value is unknown: it may or may not be an indicator, and the cascade decides
+    // whether it can matter at all
+    d.enabled = d.value.includes(UNKNOWN) ? "unknown" : !DISABLED_VALUE.test(d.value);
     d.covers = declarationCovers(d.property);
   });
   const isSingle = (d) => compareSpecificity(d.lo, d.hi) === 0;
@@ -982,8 +987,9 @@ function namesSameSubject(part) {
       const referencing = args.filter((arg) => arg.includes("&"));
       if (referencing.length > 0) {
         // a negation of the parent preserves the subject only when it is itself negated:
-        // :not(:not(&)) is &, while :not(&) is everything else; the other arguments only narrow it
-        const doubled = referencing.every((arg) => {
+        // :not(:not(&)) is &, while :not(&) is everything else; one doubled argument is enough and
+        // every other argument (ordinary or parent-qualified) only narrows it further
+        const doubled = referencing.some((arg) => {
           const inner = /^:not\(([\s\S]*)\)$/i.exec(arg);
           return inner !== null && splitSelectorList(inner[1]).every((part) => namesSameSubject(part));
         });
@@ -1078,12 +1084,14 @@ function unexaminableReason(node) {
   const bodies = [node.body, ...node.elementBodies];
   for (const raw of bodies.flatMap((body) => body.split(";"))) {
     if (!raw.includes(UNKNOWN)) continue;
-    if (/^\s*@apply\b/i.test(raw)) return "an interpolation in an @apply list may name a ring utility";
+    // an unknown ring token and an unknown value of a property the cascade models are resolved there:
+    // an overridden unknown cannot change the answer
+    if (/^\s*@apply\b/i.test(raw)) continue;
     const colon = raw.indexOf(":");
     if (colon === -1) return "an interpolation outside a property: value declaration";
     if (raw.slice(0, colon).includes(UNKNOWN)) return "an interpolation in a property name may be outline or a ring property";
     const property = raw.slice(0, colon).trim();
-    if (FOCUS_RELEVANT_PROPERTY.test(property)) {
+    if (FOCUS_RELEVANT_PROPERTY.test(property) && declarationCovers(property) === null) {
       return `an interpolation in the value of '${property}' cannot be read statically`;
     }
   }
