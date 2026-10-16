@@ -1051,17 +1051,14 @@ const FOCUS_RELEVANT_PROPERTY = /^(outline(-[a-z]+)?|box-shadow|border(-[a-z]+)*
  * outline / ring / shadow-like property, in an `@apply` list, or in the same compound as a focus
  * pseudo-class. Only text the block owns is read, so a child's unknown is the child's.
  */
+function unexaminableSelectorBranch(selector) {
+  if (!isFocusSelector(selector)) return false;
+  // An unknown span in the same compound as a focus pseudo-class, before it or after it, can
+  // supply the exempting `:not(:focus-visible)` (`#{$x}:focus`, `:focus#{$x}`, `.#{$x}:focus`).
+  return selectorCompounds(selector).some((compound) => FOCUS_SELECTOR.test(compound) && compound.includes(UNKNOWN));
+}
+
 function unexaminableReason(node) {
-  for (const selector of node.composed) {
-    if (!isFocusSelector(selector)) continue;
-    // An unknown span in the same compound as a focus pseudo-class, before it or after it, can
-    // supply the exempting `:not(:focus-visible)` (`#{$x}:focus`, `:focus#{$x}`, `.#{$x}:focus`).
-    for (const compound of selectorCompounds(selector)) {
-      if (FOCUS_SELECTOR.test(compound) && compound.includes(UNKNOWN)) {
-        return "an interpolation in the same compound as the focus pseudo-class may supply the :not(:focus-visible) exemption";
-      }
-    }
-  }
   // The rule's own body AND the bodies of enclosing rules on the same element: an inherited
   // replacement that cannot be read (`:focus { @apply #{$ring}; &.x { outline: none } }`) may be a
   // valid indicator, so it makes the child unexaminable rather than an established failure.
@@ -1451,25 +1448,26 @@ export const DETECTORS = [
         // A conditional group at-rule nested in a rule bubbles its declarations to that rule, so it is
         // examined under the inherited selector; any other at-rule owns no style declarations.
         if (node.rootEmitted || node.inside || node.dataBlock) continue;
+        const where = node.selectorStart + Math.max(0, node.selector.search(/\S/));
         // A Sass placeholder (%name) emits nothing unless it is @extend-ed, and what an extension
-        // would emit is not modelled.
-        if (node.composed.some((composed) => PLACEHOLDER.test(composed))) {
+        // would emit is not modelled. Only the placeholder BRANCHES of a selector list are set aside: the
+        // concrete branches are still emitted, and a violation they establish stands.
+        const placeholders = node.composed.filter((composed) => PLACEHOLDER.test(composed));
+        const concrete = node.composed.filter((composed) => !PLACEHOLDER.test(composed));
+        if (placeholders.length > 0 && /\boutline\s*:\s*(none|0)\b/i.test(node.body)) {
           // An extension can sit in any file of the corpus, which a per-file detector cannot see: a
           // placeholder that removes the outline is unexaminable, never a finding and never a pass.
-          if (/\boutline\s*:\s*(none|0)\b/i.test(node.body)) {
-            unexaminable.push({
-              index: node.selectorStart + Math.max(0, node.selector.search(/\S/)),
-              reason: "a Sass placeholder selector emits nothing unless it is extended, and an @extend may be in another file",
-            });
-          }
-          continue;
+          unexaminable.push({
+            index: where,
+            reason: "a Sass placeholder selector emits nothing unless it is extended, and an @extend may be in another file",
+          });
         }
-        const where = node.selectorStart + Math.max(0, node.selector.search(/\S/));
+        if (concrete.length === 0) continue;
         if (node.propNest !== null) {
           // `outline: { style: none }` spells outline-style: none; the declarations are not flat, so
           // under a focus rule a nested block of a focus-relevant (or unknown) property is not read.
           const relevant = FOCUS_RELEVANT_PROPERTY.test(node.propNest) || node.propNest.includes(UNKNOWN);
-          if (relevant && node.composed.some((selector) => isFocusSelector(selector))) {
+          if (relevant && concrete.some((selector) => isFocusSelector(selector))) {
             unexaminable.push({
               index: where,
               reason: `a nested property block of '${node.propNest}' spells its declarations indirectly`,
@@ -1477,7 +1475,12 @@ export const DETECTORS = [
           }
           continue;
         }
-        const focusSelectors = node.composed.filter((selector) => isFocusSelector(selector));
+        // Branches whose focus compound holds an unknown span could supply the :not(:focus-visible)
+        // exemption: they are recorded and set aside, and a violation another branch establishes stands.
+        const undecidedBranches = concrete.filter((selector) => unexaminableSelectorBranch(selector));
+        const focusSelectors = concrete.filter(
+          (selector) => isFocusSelector(selector) && !unexaminableSelectorBranch(selector),
+        );
         const removesOutline = /\boutline\s*:\s*(none|0)\b/i.test(node.body);
         if (node.opaque && (node.atRule !== null ? removesOutline : focusSelectors.length > 0 || removesOutline)) {
           unexaminable.push({
@@ -1490,10 +1493,17 @@ export const DETECTORS = [
         // beside a readable one (a list's other branch may be exempt); it matters when the rule removes
         // the outline.
         const unknownBranch =
-          removesOutline && node.composed.some((selector) => !isFocusSelector(selector) && selector.includes(UNKNOWN));
+          removesOutline && concrete.some((selector) => !isFocusSelector(selector) && selector.includes(UNKNOWN));
         if (unknownBranch) {
           // recorded, but a violation the readable branches establish is not discarded
           unexaminable.push({ index: where, reason: "an interpolation in the selector may make it a focus rule" });
+        }
+        if (undecidedBranches.length > 0) {
+          unexaminable.push({
+            index: where,
+            reason:
+              "an interpolation in the same compound as the focus pseudo-class may supply the :not(:focus-visible) exemption",
+          });
         }
         if (focusSelectors.length === 0) continue;
         const reason = unexaminableReason(node);

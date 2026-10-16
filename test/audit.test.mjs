@@ -1211,6 +1211,29 @@ test("ST-07: revert-layer resets like the other CSS-wide values; ancestor constr
   }
 });
 
+test("ST-07: a selector list is judged branch by branch: unknown and placeholder branches do not hide a readable violation", async () => {
+  for (const css of [
+    ":focus, :focus#{$state} { outline: none; }\n",
+    ":focus, #{$sel}:focus { outline: none; }\n",
+    ":focus, %silent { outline: none; }\n",
+    "%silent, :focus-visible { outline: none; }\n",
+  ]) {
+    const r = await focusAuditFor(css);
+    assert.deepEqual(r.rules.filter((x) => x === FOCUS_RULE), [FOCUS_RULE], css);
+    assert.equal(r.unexaminable.length >= 1, true, css);
+  }
+  // the readable branch is exempt: nothing is established, and the unknown one keeps it undecided
+  for (const css of [
+    ":focus:not(:focus-visible), :focus#{$state} { outline: none; }\n",
+    ":focus:not(:focus-visible), %silent { outline: none; }\n",
+  ]) {
+    const r = await focusAuditFor(css);
+    assert.deepEqual(r.rules.filter((x) => x === FOCUS_RULE), [], css);
+    assert.equal(r.unexaminable.length >= 1, true, css);
+    assert.equal(r.examined, false, css);
+  }
+});
+
 test("ST-07: a doubly negated reference to the parent keeps the subject", async () => {
   const cases = [
     [":focus { box-shadow: 0 0 0 2px blue; :not(:not(&)) { outline: none; } }\n", []],
