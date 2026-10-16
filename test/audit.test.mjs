@@ -1258,6 +1258,19 @@ test("ST-07: cascade layers are not resolved; background: inherit may be visible
   assert.deepEqual((await focusAuditFor(":focus { outline: none; background: initial; }\n")).rules.filter((x) => x === FOCUS_RULE), [FOCUS_RULE]);
 });
 
+test("ST-07: declarations that share a cascade layer are resolved; a negation list may mix the parent and filters", async () => {
+  const cases = [
+    [":focus { @layer foo { outline: none; box-shadow: 0 0 0 2px blue; box-shadow: none; } }\n", [FOCUS_RULE]],
+    [":focus { @layer foo { outline: none; box-shadow: none; box-shadow: 0 0 0 2px blue; } }\n", []],
+    [":focus { box-shadow: 0 0 0 2px blue; :not(:not(&), .disabled) { outline: none; } }\n", []],
+    [":focus { box-shadow: 0 0 0 2px blue; :not(.a, .b) { outline: none; } }\n", [FOCUS_RULE]],
+    [":focus { box-shadow: 0 0 0 2px blue; :not(&, .disabled) { outline: none; } }\n", []],
+  ];
+  for (const [css, expected] of cases) {
+    assert.deepEqual((await focusAuditFor(css)).rules.filter((x) => x === FOCUS_RULE), expected, css);
+  }
+});
+
 test("ST-07: a doubly negated reference to the parent keeps the subject", async () => {
   const cases = [
     [":focus { box-shadow: 0 0 0 2px blue; :not(:not(&)) { outline: none; } }\n", []],

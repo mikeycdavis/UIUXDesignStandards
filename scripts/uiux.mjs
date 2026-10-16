@@ -814,7 +814,9 @@ function shorthandBackgroundColor(value) {
 function replacementVerdict(node, compensating) {
   const chain = [...node.elementNodes, node];
   const decls = [];
-  for (const owner of chain) {
+  let layer = -1; // the chain position of the nearest @layer block at or above the owner
+  for (const [chainIndex, owner] of chain.entries()) {
+    if (owner.atRule === "layer") layer = chainIndex;
     const [lo, hi] = specificityRange(owner);
     let position = 0;
     for (const raw of owner.body.split(";")) {
@@ -832,9 +834,9 @@ function replacementVerdict(node, compensating) {
         for (const rawToken of tokens) {
           const token = rawToken.replace(/^!|!$/g, "");
           const important = wholeImportant || rawToken.startsWith("!") || rawToken.endsWith("!");
-          if (token === "ring-0") decls.push({ at, lo, hi, property: "box-shadow", value: "none", important });
+          if (token === "ring-0") decls.push({ at, lo, hi, layer, property: "box-shadow", value: "none", important });
           else if (/^ring(-(1|2|4|8))?$/.test(token)) {
-            decls.push({ at, lo, hi, property: "box-shadow", value: "0 0 0 1px ring", important });
+            decls.push({ at, lo, hi, layer, property: "box-shadow", value: "0 0 0 1px ring", important });
           }
         }
         continue;
@@ -853,7 +855,7 @@ function replacementVerdict(node, compensating) {
         const [a, b = a, c = a, d = b] = values;
         const bySide = values.length === 2 ? [a, b, a, b] : values.length === 3 ? [a, b, c, b] : [a, b, c, d];
         BORDER_SIDES.forEach((side, k) => {
-          decls.push({ at, lo, hi, property: "border-" + side + "-" + longhand[1], value: bySide[k], important });
+          decls.push({ at, lo, hi, layer, property: "border-" + side + "-" + longhand[1], value: bySide[k], important });
         });
         continue;
       }
@@ -863,34 +865,25 @@ function replacementVerdict(node, compensating) {
         // inherit keeps whatever the parent paints: potentially visible, never asserted absent
         const inherited = /^inherit(\s*!important)?$/i.test(value);
         const image = inherited || /url\(|gradient\(|image-set\(/i.test(value) ? value : "none";
-        decls.push({ at, lo, hi, property: "background-color", value: shorthandBackgroundColor(value), important });
-        decls.push({ at, lo, hi, property: "background-image", value: image, important, introduces: true });
+        decls.push({ at, lo, hi, layer, property: "background-color", value: shorthandBackgroundColor(value), important });
+        decls.push({ at, lo, hi, layer, property: "background-image", value: image, important, introduces: true });
         continue;
       }
       if (logical && values.length === 2) {
         // border-block-width: 0 0 - start and end (horizontal writing mode: top/bottom, left/right)
         const sides = logical[1] === "block" ? ["top", "bottom"] : ["left", "right"];
         sides.forEach((side, k) => {
-          decls.push({ at, lo, hi, logical: true, property: "border-" + side + "-" + logical[2], value: values[k], important });
+          decls.push({ at, lo, hi, layer, logical: true, property: "border-" + side + "-" + logical[2], value: values[k], important });
         });
         continue;
       }
-      decls.push({ at, lo, hi, property, value, important });
+      decls.push({ at, lo, hi, layer, property, value, important });
     }
   }
   // Logical border sides map to physical ones through writing-mode and direction, which may be set
   // by any rule (an ancestor's, another file's): a logical border declaration is never mapped on an
   // assumption, so the cascade it takes part in is undecided.
   if (decls.some((d) => /^border-(block|inline)(-|$)/.test(d.property) || d.logical)) return "unknown";
-  // Cascade layers rank declarations before specificity and source order (unlayered normal beats
-  // layered normal; layer order, and importance reversing it, decide the rest): a chain that holds an
-  // @layer block is not resolved here.
-  if (
-    chain.some((owner) => owner.atRule === "layer") &&
-    decls.some((d) => !DISABLED_VALUE.test(d.value) && (d.introduces === true || compensating.test(d.property + ":")))
-  ) {
-    return "unknown";
-  }
   // source order is absolute position (a stable sort keeps the tokens of one @apply in order)
   decls.sort((x, y) => x.at - y.at);
   decls.forEach((d, order) => {
@@ -901,6 +894,8 @@ function replacementVerdict(node, compensating) {
   const isSingle = (d) => compareSpecificity(d.lo, d.hi) === 0;
   // does `a` beat `b` in the cascade? "wins" | "loses" | "unknown"
   const beats = (a, b) => {
+    // declarations in different cascade layers are ranked by layer order, which is not modelled
+    if (a.layer !== b.layer) return "unknown";
     if (a.important !== b.important) return a.important ? "wins" : "loses";
     if (compareSpecificity(a.lo, b.hi) > 0) return "wins";
     if (compareSpecificity(a.hi, b.lo) < 0) return "loses";
@@ -984,10 +979,11 @@ function namesSameSubject(part) {
     const args = splitSelectorList(rest.slice(m.index + m[0].length, end - 1));
     if (args.length === 0) return false;
     if (/^:not\(/i.test(m[0])) {
-      if (args.some((arg) => arg.includes("&"))) {
+      const referencing = args.filter((arg) => arg.includes("&"));
+      if (referencing.length > 0) {
         // a negation of the parent preserves the subject only when it is itself negated:
-        // :not(:not(&)) is &, while :not(&) is everything else
-        const doubled = args.every((arg) => {
+        // :not(:not(&)) is &, while :not(&) is everything else; the other arguments only narrow it
+        const doubled = referencing.every((arg) => {
           const inner = /^:not\(([\s\S]*)\)$/i.exec(arg);
           return inner !== null && splitSelectorList(inner[1]).every((part) => namesSameSubject(part));
         });
