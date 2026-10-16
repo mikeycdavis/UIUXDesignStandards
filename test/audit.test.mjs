@@ -1284,13 +1284,17 @@ test("closed list: a comment inside a selector head is off the list; one before 
   for (const css of [
     ":focus/**/.danger { outline: none; }\n",
     ".a:focus /* c */ .b { outline: none; }\n",
-    ":focus,/* c */.a { outline: none; }\n",
     ".x { &:focus/**/.danger { outline: none; } }\n",
   ]) {
     const r = await focusAuditFor(css);
     assert.deepEqual(r.rules.filter((x) => x === FOCUS_RULE), [], css);
     assert.equal(r.unexaminable.length >= 1, true, css);
     assert.match(r.unexaminable[0].reason, /comment inside the selector/, css);
+  }
+  // the comment belongs to ONE branch: a decided focus branch beside it still decides
+  for (const css of [":focus, .x/**/.y { outline: none; }\n", ":focus,/* c */.a { outline: none; }\n", ".a, .b { :focus, .x#{$s} { outline: none; } }\n", ".a, .b { :focus, .x/**/.y { outline: none; } }\n"]) {
+    const r = await focusAuditFor(css);
+    assert.equal(r.rules.filter((x) => x === FOCUS_RULE).length >= 1, true, css);
   }
   // a marker inside a quoted attribute value is data, not a comment
   for (const css of [':focus[href="//example"] { outline: none; }\n', ":focus[data-x='/*'] { outline: none; }\n"]) {

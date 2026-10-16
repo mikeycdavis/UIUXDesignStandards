@@ -457,7 +457,7 @@ function resolveInterpolation(text, sourceText = text, rawText = sourceText) {
  *   body        the text the block OWNS - child blocks blanked - so a declaration, and an unknown
  *               span within it, belongs to exactly one block.
  */
-function parseBlocks(text) {
+function parseBlocks(text, rawText = text) {
   const frames = [];
   const stack = [];
   let boundary = -1;
@@ -514,7 +514,10 @@ function parseBlocks(text) {
     // `&` names, and `reset` says whether a plain child is still a descendant of them. It is
     // carried through every non-rule block, so a reset set by @at-root reaches the first style rule
     // however many group at-rules sit between.
-    const ctx = parent ? parent.ctx : { parents: [""], reset: false };
+    const ctx = parent ? parent.ctx : { parents: [""], reset: false, reasons: [null] };
+    // why each composed branch is off the closed list because of how its HEAD is written (an interpolation, a
+    // comment inside it), carried per branch through nesting: reasons[k] belongs to composed[k]
+    let reasons;
     // Selector semantics of an at-rule:
     //   group at-rules       inherit the context, and own declarations bubble to the enclosing rule
     //   @at-root             follows Sass's query semantics (see atRootResets): a query that drops
@@ -542,37 +545,44 @@ function parseBlocks(text) {
         const resets = prelude === "" ? true : atRootResets(prelude);
         if (resets === null) opaque = true; // a query that cannot be read is not guessed at
         const drops = resets !== false;
-        childCtx = { parents: ctx.parents, reset: ctx.reset || drops };
         composed = drops ? [""] : ctx.reset ? [""] : ctx.parents;
+        reasons = drops || ctx.reset ? [null] : ctx.reasons;
+        childCtx = { parents: ctx.parents, reset: ctx.reset || drops, reasons: ctx.reasons };
       } else {
         composed = composeSelectors(prelude, ctx.parents, true);
-        childCtx = { parents: composed, reset: false };
+        reasons = branchReasons(composed, prelude, rawText.slice(frame.selStart, frame.open), ctx.parents.length, [null]);
+        childCtx = { parents: composed, reset: false, reasons };
       }
     } else if (atRule !== null && ROOT_EMITTED_AT_RULES.has(atRule.replace(/^-[a-z]+-/, ""))) {
       // dart-sass: inside a style rule an at-rule is bubbled to the root and its contents are
       // wrapped in the enclosing rule - except in @keyframes and @font-face, whose contents are not.
       rootEmitted = true;
       composed = [""];
-      childCtx = { parents: [""], reset: true };
+      reasons = [null];
+      childCtx = { parents: [""], reset: true, reasons: [null] };
     } else if (atRule !== null) {
       // Every other at-rule - the conditional group rules and generic CSS at-rules alike - keeps the
       // enclosing rule around its declarations. A name that is itself interpolated is not knowable.
       if (atRule === "") opaque = true;
       composed = ctx.reset ? [""] : ctx.parents;
+      reasons = ctx.reset ? [null] : ctx.reasons;
       childCtx = ctx;
     } else if (declaration) {
       // `name: {` or `name: value {`: a block that belongs to a DECLARATION, not a rule. `--x: { }`
       // is a custom property's value (data); `outline: { style: none }` is Sass property nesting.
       composed = ctx.reset ? [""] : ctx.parents;
+      reasons = ctx.reset ? [null] : ctx.reasons;
       childCtx = ctx;
     } else {
       composed = composeSelectors(selector, ctx.parents, ctx.reset);
-      childCtx = { parents: composed, reset: false };
+      reasons = branchReasons(composed, selector, rawText.slice(frame.selStart, frame.open), ctx.parents.length, ctx.reasons);
+      childCtx = { parents: composed, reset: false, reasons };
     }
     // work is bounded: a rule nested deeper than MAX_DEPTH is not composed at all
     if (depth > MAX_DEPTH) {
       composed = [TOO_DEEP];
-      childCtx = { parents: [TOO_DEEP], reset: false };
+      reasons = [null];
+      childCtx = { parents: [TOO_DEEP], reset: false, reasons: [null] };
     }
     const node = {
       depth,
@@ -590,6 +600,7 @@ function parseBlocks(text) {
       parent,
       body: ownParts.join(" "),
       composed,
+      reasons,
     };
     nodes.set(frame, node);
     out.push(node);
@@ -636,6 +647,51 @@ function splitSelectorList(selector) {
   }
   parts.push(current);
   return parts.map((part) => part.trim()).filter((part) => part.length > 0);
+}
+
+/** A selector head split on top-level commas, with each part's [start, end) offsets in the head. */
+function headPartRanges(head) {
+  const ranges = [];
+  let depth = 0;
+  let start = 0;
+  for (let i = 0; i < head.length; i++) {
+    const ch = head[i];
+    if (ch === "(" || ch === "[") depth++;
+    else if (ch === ")" || ch === "]") depth = Math.max(0, depth - 1);
+    else if (ch === "," && depth === 0) {
+      ranges.push([start, i]);
+      start = i + 1;
+    }
+  }
+  ranges.push([start, head.length]);
+  return ranges.filter(([a, b]) => head.slice(a, b).trim().length > 0);
+}
+
+/** "interpolation" | "comment" | null for one raw part of a selector head. */
+function headPartReason(rawPart) {
+  // comments LEADING the part are not inside it (and may mention anything)
+  const inner = rawPart.replace(/^(?:\s|\/\*[\s\S]*?\*\/|\/\/[^\n]*(?:\n|$))*/, "");
+  if (inner.includes("#{")) return "interpolation";
+  // a comment INSIDE the part would be replaced by padding that reads as a combinator;
+  // quoted attribute values are data
+  const unquoted = inner.replace(/"(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*'/g, "");
+  return unquoted.includes("/*") || unquoted.includes("//") ? "comment" : null;
+}
+
+/**
+ * The head-written reason of every composed branch. Branch k is part Math.floor(k / parents) crossed with
+ * parent k % parents (composeSelectors' order), so a part's reason is replicated across its parent
+ * compositions and a parent's across its parts. When the parts cannot be lined up the whole rule is
+ * flagged if any part is.
+ */
+function branchReasons(composed, resolvedHead, rawHead, parentCount, parentReasons) {
+  const ranges = headPartRanges(resolvedHead);
+  const partReasons = ranges.map(([a, b]) => headPartReason(rawHead.slice(a, b)));
+  if (composed.length === ranges.length * parentCount) {
+    return composed.map((_, k) => partReasons[Math.floor(k / parentCount)] ?? parentReasons[k % parentCount] ?? null);
+  }
+  const any = partReasons.find((r) => r !== null) ?? parentReasons.find((r) => r !== null) ?? null;
+  return composed.map(() => any);
 }
 
 /** Bounds on the work per rule: a longer composed list, or deeper nesting, is routed to unexaminable. */
@@ -798,23 +854,6 @@ function mayBeFocusRule(selector) {
     /:(is|where|not|has|matches|host|host-context|nth-[a-z-]+|-webkit-any|-moz-any)\b/i.test(selector) ||
     /\(/.test(selector)
   );
-}
-
-/** A selector head split on commas outside parentheses, brackets and interpolation braces. */
-function splitHeadParts(head) {
-  const parts = [];
-  let depth = 0;
-  let current = "";
-  for (const ch of head) {
-    if (ch === "(" || ch === "[" || ch === "{") depth++;
-    else if (ch === ")" || ch === "]" || ch === "}") depth = Math.max(0, depth - 1);
-    if (ch === "," && depth === 0) {
-      parts.push(current);
-      current = "";
-    } else current += ch;
-  }
-  parts.push(current);
-  return parts.map((part) => part.trim()).filter((part) => part.length > 0);
 }
 
 /** Why a selector branch is outside the closed list, or null when it is a decided form. */
@@ -1326,7 +1365,7 @@ export const DETECTORS = [
       // ones become UNKNOWN. Every style rule is then read under its COMPOSED selector against the
       // closed list of decided forms above; whatever is off the list is recorded, never decided.
       const resolved = resolveInterpolation(text, file.views.sourceOf, file.text);
-      const nodes = parseBlocks(resolved);
+      const nodes = parseBlocks(resolved, file.text);
       // A control directive or @include inside a rule may change its declarations, and parseBlocks has
       // blanked it from the rule's own body: every rule that encloses one is not decided as a whole.
       const enclosesOpaque = new Set();
@@ -1363,36 +1402,13 @@ export const DETECTORS = [
           note(badShape.indexOf(":") === -1 ? UNEXAMINABLE_REASONS.declarationForm : UNEXAMINABLE_REASONS.propertyName);
           continue;
         }
-        // An interpolation in a selector head is off the list even when its value is readable: resolving it
-        // at the span's length pads it with spaces, which would read as a combinator (:focus#{null}.danger is
-        // the one compound :focus.danger). A top-level list is judged branch by branch (head parts and
-        // composed branches line up one to one); anywhere else an interpolation in this rule's head or an
-        // enclosing one's makes every branch off the list.
-        const headOf = (n) => text.slice(n.selectorStart, n.selectorStart + n.selector.length);
-        const interpolatedAbove = (() => {
-          for (let n = node.parent, k = 0; n && k <= MAX_DEPTH; n = n.parent, k++) if (headOf(n).includes("#{")) return true;
-          return false;
-        })();
-        const headParts = splitHeadParts(headOf(node));
-        const branchFlags =
-          !interpolatedAbove && headParts.length === node.composed.length
-            ? headParts.map((part) => part.includes("#{"))
-            : node.composed.map(() => interpolatedAbove || headOf(node).includes("#{"));
-        // A comment INSIDE a selector head (not before it) is replaced by padding in the structure view, which
-        // would read as a combinator (:focus/**/.danger is the one compound :focus.danger): off the list.
-        const commentInHead = (() => {
-          for (let n = node, k = 0; n && k <= MAX_DEPTH; n = n.parent, k++) {
-            const raw = file.text.slice(n.selectorStart, n.selectorStart + n.selector.length);
-            const inner = raw.replace(/^(?:\s|\/\*[\s\S]*?\*\/|\/\/[^\n]*(?:\n|$))*/, "");
-            // quoted attribute values are data: `[href="//x"]` holds no comment
-            const unquoted = inner.replace(/"(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*'/g, "");
-            if (unquoted.includes("/*") || unquoted.includes("//")) return true;
-          }
-          return false;
-        })();
+        // An interpolation in a selector head is off the list even when its value is readable (resolving it at
+        // the span's length pads it with spaces that would read as a combinator), and so is a comment inside
+        // one (the structure view pads that too). The reason is tracked per composed branch (node.reasons), so
+        // a decided branch still decides beside an off-list one.
         const reasonOf = (b, k) => {
-          if (commentInHead) return UNEXAMINABLE_REASONS.selectorComment;
-          if (branchFlags[k]) return UNEXAMINABLE_REASONS.selectorInterpolation;
+          if (node.reasons[k] === "comment") return UNEXAMINABLE_REASONS.selectorComment;
+          if (node.reasons[k] === "interpolation") return UNEXAMINABLE_REASONS.selectorInterpolation;
           return offListSelector(b);
         };
         const focusBranches = node.composed
