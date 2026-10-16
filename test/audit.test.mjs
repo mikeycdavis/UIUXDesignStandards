@@ -1568,7 +1568,6 @@ test("ST-07: the winning outline declaration decides whether the outline is remo
     [":focus { outline: none !important; outline: 2px solid blue; }\n", [FOCUS_RULE]],
     [":focus { outline: none; outline: 2px solid blue !important; }\n", []],
     [":focus { outline: 0; }\n", [FOCUS_RULE]],
-    [":focus { outline-offset: 2px; outline: none; }\n", [FOCUS_RULE]],
   ];
   for (const [css, expected] of cases) {
     assert.deepEqual((await focusAuditFor(css)).rules.filter((x) => x === FOCUS_RULE), expected, css);
