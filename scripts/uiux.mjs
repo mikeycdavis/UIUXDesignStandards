@@ -935,7 +935,7 @@ function replacementVerdict(node, compensating) {
         continue;
       }
       // an interpolated value of a relevant property may be an indicator
-      const introduces = (value.includes(UNKNOWN) || /\b(var|env)\(/i.test(value)) && FOCUS_RELEVANT_PROPERTY.test(property);
+      const introduces = (value.includes(UNKNOWN) || /\b(var|env)\(/i.test(value)) && FOCUS_RELEVANT_PROPERTY.test(property) && !/^outline(-(style|width))?$/i.test(property);
       decls.push({ at, lo, hi, layer, property, value, important, introduces });
     }
   }
