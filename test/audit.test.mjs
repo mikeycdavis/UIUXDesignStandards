@@ -1159,6 +1159,14 @@ test("closed list: every accepted indicator property compensates; a resetting @a
   }
 });
 
+test("closed list: a selector-form @at-root is an inheritance boundary", async () => {
+  const r = await focusAuditFor(".a { box-shadow: 0 0 2px red; @at-root :focus { outline: none; } }\n");
+  assert.deepEqual(r.rules.filter((x) => x === FOCUS_RULE), [FOCUS_RULE]);
+  assert.deepEqual(r.unexaminable, []);
+  const q = await focusAuditFor(".a:focus { box-shadow: 0 0 2px red; @at-root (with: rule) { outline: none; } }\n");
+  assert.equal(q.unexaminable.length >= 1, true);
+});
+
 test("closed list: a decided branch is not hidden by an off-list branch beside it", async () => {
   for (const css of [
     ":focus, :is(:focus) { outline: none; }\n",

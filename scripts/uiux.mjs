@@ -894,6 +894,8 @@ function declaresStyle(declarations) {
 
 /** Why a nested rule is outside the closed list (inherited declarations, a layer), or null. */
 function nestingReason(node) {
+  // `@at-root :focus { }` emits its selector at the root: it is itself the boundary, nothing above is inherited
+  if (node.atRule === "at-root" && /^\s*@at-root\s*[^(\s]/i.test(node.selector)) return null;
   for (let ancestor = node.parent; ancestor; ancestor = ancestor.parent) {
     // an @at-root that drops style rules emits what is inside at the root: nothing above it is inherited
     if (ancestor.atRule === "at-root" && ancestor.ctx.reset) break;
