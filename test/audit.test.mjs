@@ -1250,6 +1250,14 @@ test("ST-07: a negation filter keeps the subject; a placeholder inside a compoun
   assert.equal((await focusAuditFor("button%silent:focus { outline: none; }\n")).unexaminable.length >= 1, true);
 });
 
+test("ST-07: cascade layers are not resolved; background: inherit may be visible", async () => {
+  const layered = await focusAuditFor(":focus { box-shadow: 0 0 0 2px blue; @layer foo { outline: none; box-shadow: none; } }\n");
+  assert.deepEqual(layered.rules.filter((x) => x === FOCUS_RULE), []);
+  assert.equal(layered.unexaminable.length >= 1, true);
+  assert.deepEqual((await focusAuditFor(":focus { outline: none; background: inherit; }\n")).rules.filter((x) => x === FOCUS_RULE), []);
+  assert.deepEqual((await focusAuditFor(":focus { outline: none; background: initial; }\n")).rules.filter((x) => x === FOCUS_RULE), [FOCUS_RULE]);
+});
+
 test("ST-07: a doubly negated reference to the parent keeps the subject", async () => {
   const cases = [
     [":focus { box-shadow: 0 0 0 2px blue; :not(:not(&)) { outline: none; } }\n", []],

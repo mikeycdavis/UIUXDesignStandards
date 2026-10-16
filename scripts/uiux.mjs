@@ -784,6 +784,7 @@ const BACKGROUND_KEYWORDS = new Set([
 
 /** The colour a background shorthand sets: its colour token, else transparent (the initial value). */
 function shorthandBackgroundColor(value) {
+  if (/^inherit(\s*!important)?$/i.test(value.trim())) return value;
   // image functions and sizes are not colours; var()/env() may be anything and are read as a colour
   const stripped = value.replace(/(url|image-set|-?[a-z-]*gradient)\((?:[^()]|\([^()]*\))*\)/gi, " ");
   for (const token of stripped.split(/[\s/]+/).filter(Boolean)) {
@@ -859,7 +860,9 @@ function replacementVerdict(node, compensating) {
       if (property === "background") {
         // the shorthand sets the colour and resets the image: only url(), a gradient or image-set()
         // supplies one
-        const image = /url\(|gradient\(|image-set\(/i.test(value) ? value : "none";
+        // inherit keeps whatever the parent paints: potentially visible, never asserted absent
+        const inherited = /^inherit(\s*!important)?$/i.test(value);
+        const image = inherited || /url\(|gradient\(|image-set\(/i.test(value) ? value : "none";
         decls.push({ at, lo, hi, property: "background-color", value: shorthandBackgroundColor(value), important });
         decls.push({ at, lo, hi, property: "background-image", value: image, important, introduces: true });
         continue;
@@ -879,6 +882,15 @@ function replacementVerdict(node, compensating) {
   // by any rule (an ancestor's, another file's): a logical border declaration is never mapped on an
   // assumption, so the cascade it takes part in is undecided.
   if (decls.some((d) => /^border-(block|inline)(-|$)/.test(d.property) || d.logical)) return "unknown";
+  // Cascade layers rank declarations before specificity and source order (unlayered normal beats
+  // layered normal; layer order, and importance reversing it, decide the rest): a chain that holds an
+  // @layer block is not resolved here.
+  if (
+    chain.some((owner) => owner.atRule === "layer") &&
+    decls.some((d) => !DISABLED_VALUE.test(d.value) && (d.introduces === true || compensating.test(d.property + ":")))
+  ) {
+    return "unknown";
+  }
   // source order is absolute position (a stable sort keeps the tokens of one @apply in order)
   decls.sort((x, y) => x.at - y.at);
   decls.forEach((d, order) => {
