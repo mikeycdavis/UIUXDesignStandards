@@ -1542,6 +1542,24 @@ test("ST-07: focused unions are focus subjects; a redundant union is bare focus"
   }
 });
 
+test("ST-07: an unresolved part leaves a background shorthand undecided; no-op qualifiers keep a parent bare", async () => {
+  const unresolved = await focusAuditFor(":focus { outline: none; background: red var(--missing); }\n");
+  assert.deepEqual(unresolved.rules.filter((x) => x === FOCUS_RULE), []);
+  assert.equal(unresolved.unexaminable.length >= 1, true);
+  assert.deepEqual(
+    (await focusAuditFor(":focus { outline: none; background: red var(--missing); background: none; }\n")).rules.filter((x) => x === FOCUS_RULE),
+    [FOCUS_RULE],
+  );
+  const cases = [
+    [":focus:where(*) { box-shadow: 0 0 0 2px blue; :is(&, .special) { outline: none; } }\n", []],
+    [":focus:is(*) { box-shadow: 0 0 0 2px blue; :is(&, .special) { outline: none; } }\n", []],
+    [":focus:where(.x) { box-shadow: 0 0 0 2px blue; :is(&, .special) { outline: none; } }\n", [FOCUS_RULE]],
+  ];
+  for (const [css, expected] of cases) {
+    assert.deepEqual((await focusAuditFor(css)).rules.filter((x) => x === FOCUS_RULE), expected, css);
+  }
+});
+
 test("ST-07: a doubly negated reference to the parent keeps the subject", async () => {
   const cases = [
     [":focus { box-shadow: 0 0 0 2px blue; :not(:not(&)) { outline: none; } }\n", []],

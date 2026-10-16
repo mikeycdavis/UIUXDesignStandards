@@ -915,9 +915,11 @@ function replacementVerdict(node, compensating) {
         // the shorthand sets the colour and resets the image: only url(), a gradient or image-set()
         // supplies one
         // inherit keeps whatever the parent paints: potentially visible, never asserted absent
-        const inherited = /^inherit(\s*!important)?$/i.test(value) || value.includes(UNKNOWN);
+        // an unresolved var()/env() can invalidate the whole declaration, so no part of it is known
+        const unresolved = /\b(var|env)\(/i.test(value);
+        const inherited = /^inherit(\s*!important)?$/i.test(value) || value.includes(UNKNOWN) || unresolved;
         const image = inherited || /url\(|gradient\(|image-set\(|paint\(|element\(|cross-fade\(|\bimage\(/i.test(value) ? value : "none";
-        decls.push({ at, lo, hi, layer, property: "background-color", value: shorthandBackgroundColor(value), important });
+        decls.push({ at, lo, hi, layer, property: "background-color", value: unresolved ? value : shorthandBackgroundColor(value), important });
         decls.push({ at, lo, hi, layer, property: "background-image", value: image, important, introduces: true });
         continue;
       }
@@ -1152,7 +1154,8 @@ function coversFocusVisible(member) {
 
 /** A selector that matches every focused element and nothing else: :focus, *:focus, :where(:focus), :is(:focus). */
 function isBareFocus(selector) {
-  let current = selector.trim();
+  // universally true qualifiers change nothing (:focus:where(*), :focus:is(*))
+  let current = selector.replace(/:(?:where|is)\(\s*\*\s*\)/gi, "").trim();
   for (;;) {
     const wrapped = /^:(?:is|where)\(\s*([\s\S]*)\)$/i.exec(current);
     if (wrapped === null) break;
