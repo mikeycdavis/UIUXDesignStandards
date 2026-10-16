@@ -386,10 +386,12 @@ function resolveInterpolation(text, sourceText = text, rawText = sourceText) {
   // Pass 1: find every span, and read its content when it is statically readable.
   const spans = [];
   for (let i = 0; i < text.length; ) {
-    if (text[i] !== "#" || text[i + 1] !== "{") {
+    // Sass #{...} and Less @{...} interpolation: a brace here does not open a block
+    if ((text[i] !== "#" && text[i] !== "@") || text[i + 1] !== "{") {
       i++;
       continue;
     }
+    const lessSpan = text[i] === "@"; // a Less span is never read: its value is a variable
     let depth = 0;
     let j = i + 1;
     for (; j < text.length; j++) {
@@ -402,10 +404,10 @@ function resolveInterpolation(text, sourceText = text, rawText = sourceText) {
     // The views blank quote characters, so quoting is read from the raw file text: the BARE value
     // `null` interpolates to nothing, while the string "null" interpolates to the text null.
     const raw = terminated ? rawText.slice(i + 2, j).trim() : null;
-    let literal = inner !== null && /^!?[A-Za-z0-9_.%-]+$/.test(inner) ? inner : null;
+    let literal = !lessSpan && inner !== null && /^!?[A-Za-z0-9_.%-]+$/.test(inner) ? inner : null;
     // A plain quoted string interpolates to its text, punctuation included (#{":focus"} is :focus).
     const quoted = raw !== null ? /^(["'])([^"'\\\n{}#]*)\1$/.exec(raw) : null;
-    if (quoted !== null) literal = quoted[2];
+    if (quoted !== null && !lessSpan) literal = quoted[2];
     if (literal === "null" && raw === "null") literal = "";
     spans.push({ start: i, end, literal });
     i = end;
@@ -668,10 +670,14 @@ function headPartRanges(head) {
 }
 
 /** "interpolation" | "comment" | null for one raw part of a selector head. */
+const ATTRIBUTE_RAW = /^\s*[A-Za-z_-][\w-]*\s*(?:[~|^$*]?=\s*(?:"[^"]*"|'[^']*'|[A-Za-z_-][\w-]*)\s*[iIsS]?)?$/;
+
 function headPartReason(rawPart) {
   // comments LEADING the part are not inside it (and may mention anything)
   const inner = rawPart.replace(/^(?:\s|\/\*[\s\S]*?\*\/|\/\/[^\n]*(?:\n|$))*/, "");
-  if (inner.includes("#{")) return "interpolation";
+  if (inner.includes("#{") || inner.includes("@{")) return "interpolation";
+  // an attribute selector is validated against the RAW text, where a quoted value is still a quoted value
+  for (const m of inner.matchAll(/\[([^\]]*)\]/g)) if (!ATTRIBUTE_RAW.test(m[1])) return "syntax";
   // a comment INSIDE the part would be replaced by padding that reads as a combinator;
   // quoted attribute values are data
   const unquoted = inner.replace(/"(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*'/g, "");
@@ -883,7 +889,7 @@ const WELL_FORMED_SELECTOR = (() => {
   const simple = "(?:#" + ident + "|\\." + ident + "|\\[[^\\]]*\\]|::?" + ident + "(?:\\([^()]*\\))?)";
   const compound = "(?:(?:\\*|" + ident + ")" + simple + "*|" + simple + "+)";
   const combinator = "(?:\\s*[>+~]\\s*|\\s+)";
-  return new RegExp("^\\s*(?:[>+~]\\s*)?" + compound + "(?:" + combinator + compound + ")*\\s*$");
+  return new RegExp("^\\s*" + compound + "(?:" + combinator + compound + ")*\\s*$");
 })();
 // the structure view blanks a quoted value (quotes included) to two or more spaces, so a value is an identifier
 // or a blanked string; `[foo=]` has neither
@@ -1032,7 +1038,7 @@ function positiveIndicatorValue(property, value) {
   if (p === "text-decoration-line") return false;
   if (p === "text-decoration") {
     const styles = tokens.filter((t) => /^(solid|double|dotted|dashed|wavy)$/i.test(t)).length;
-    const lengths = tokens.filter((t) => length(t) && !t.startsWith("-")).length;
+    const lengths = tokens.filter((t) => length(t) && parseFloat(t) > 0).length;
     const colours = tokens.filter((t) => opaqueColour(t)).length;
     return lines.length > 0 && uniqueLines && styles <= 1 && lengths <= 1 && colours === 1 &&
       lines.length + styles + lengths + colours === tokens.length;

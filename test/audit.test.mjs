@@ -1054,6 +1054,8 @@ const OFF_LIST_FORMS = [
   [":focus { outline: none; border: 0; }\n", REASON.replacement],
   [":focus { outline: none; border: calc(1px + 1px) solid red; }\n", REASON.replacement],
   [":focus { outline: none; border: 0 solid red; }\n", REASON.replacement],
+  [":focus { outline: none; text-decoration: underline +0px red; }\n", REASON.replacement],
+  [":focus { outline: none; text-decoration: underline 0px red; }\n", REASON.replacement],
   [":focus { outline: none; box-shadow: 0 0 0 red; }\n", REASON.replacement],
   [":focus { outline: none; box-shadow: 0 0 0 0 red; }\n", REASON.replacement],
   [":focus { outline: none; box-shadow: 0 0 0 -2px red; }\n", REASON.replacement],
@@ -1442,6 +1444,9 @@ test("closed list: malformed selector syntax is not decided as a focus rule", as
     ".1a:focus { outline: none; }\n",
     "a:focus: { outline: none; }\n",
     ":focus:::before { outline: none; }\n",
+    ":focus[foo=  ] { outline: none; }\n",
+    "> :focus { outline: none; }\n",
+    "+ :focus { outline: none; }\n",
     ":focus, { outline: none; }\n",
     ", :focus { outline: none; }\n",
     ":focus,, .a { outline: none; }\n",
@@ -1455,6 +1460,20 @@ test("closed list: malformed selector syntax is not decided as a focus rule", as
   for (const css of [":focus > .a:hover { outline: none; }\n", "a[href]:focus[data-x=y] { outline: none; }\n", "ul > li + li ~ a:focus { outline: none; }\n", "*:focus { outline: none; }\n"]) {
     assert.deepEqual((await focusAuditFor(css)).rules.filter((x) => x === FOCUS_RULE).length, css.startsWith(":focus >") ? 0 : 1, css);
   }
+});
+
+test("closed list: Less @{...} interpolation is never read", async () => {
+  for (const css of [
+    "@state: -visible;\n:focus@{state} { outline: none; }\n",
+    ".a@{x}:focus { outline: none; }\n",
+    ":focus { outline: @{v}; }\n",
+  ]) {
+    const r = await focusAuditFor(css, "f.less");
+    assert.deepEqual(r.rules.filter((x) => x === FOCUS_RULE), [], css);
+    assert.equal(r.unexaminable.length >= 1, true, css);
+  }
+  // a nested rule's leading combinator is fine once composed
+  assert.deepEqual((await focusAuditFor(".a { > :focus { outline: none; } }\n")).rules.filter((x) => x === FOCUS_RULE), [FOCUS_RULE]);
 });
 
 test("closed list: a decided branch is not hidden by an off-list branch beside it", async () => {
