@@ -1424,6 +1424,27 @@ test("closed list: escapes in a property name, empty or negative layers, an omit
   }
 });
 
+test("closed list: malformed selector syntax is not decided as a focus rule", async () => {
+  for (const css of [
+    ":focus..x { outline: none; }\n",
+    ":focus.#x { outline: none; }\n",
+    ":focus## { outline: none; }\n",
+    ":focus >> a { outline: none; }\n",
+    "a >:focus > { outline: none; }\n",
+    ":focus[ { outline: none; }\n",
+    ":focus[=x] { outline: none; }\n",
+    ".1a:focus { outline: none; }\n",
+    "a:focus: { outline: none; }\n",
+    ":focus:::before { outline: none; }\n",
+  ]) {
+    const r = await focusAuditFor(css);
+    assert.deepEqual(r.rules.filter((x) => x === FOCUS_RULE), [], css);
+  }
+  for (const css of [":focus > .a:hover { outline: none; }\n", "a[href]:focus[data-x=y] { outline: none; }\n", "ul > li + li ~ a:focus { outline: none; }\n", "*:focus { outline: none; }\n"]) {
+    assert.deepEqual((await focusAuditFor(css)).rules.filter((x) => x === FOCUS_RULE).length, css.startsWith(":focus >") ? 0 : 1, css);
+  }
+});
+
 test("closed list: a decided branch is not hidden by an off-list branch beside it", async () => {
   for (const css of [
     ":focus, :is(:focus) { outline: none; }\n",

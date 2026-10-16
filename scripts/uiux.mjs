@@ -782,6 +782,7 @@ const UNEXAMINABLE_REASONS = {
   selectorPlaceholder: "a Sass placeholder selector emits nothing unless it is extended, and an @extend may be in another file",
   selectorBound: "the rule is nested deeper, or its composed selector list is longer, than the decided bound (32 levels, 256 selectors)",
   selectorComment: "a comment inside the selector may split or join its compounds",
+  selectorSyntax: "a selector the closed list does not positively recognise (malformed or unlisted syntax)",
   selectorEscape: "a CSS escape in the selector may spell a focus pseudo-class",
   selectorFunctional: "a functional or unlisted pseudo-class selector is outside the decided list of selector forms",
   selectorOpaque: "it sits inside an @include / control directive / mixin whose selector semantics are not modelled",
@@ -867,6 +868,21 @@ function mayBeFocusRule(selector) {
 }
 
 /** Why a selector branch is outside the closed list, or null when it is a decided form. */
+/**
+ * The decided selector syntax, positively recognised: compounds of an optional type or universal selector and
+ * any number of #id, .class, [attribute], :pseudo-class and ::pseudo-element parts, joined by a descendant,
+ * child, next-sibling or subsequent-sibling combinator (a leading one is allowed: a nested rule). A selector
+ * that does not match (`:focus..x`, `a >> b`, a trailing combinator) is not valid CSS or is not recognised.
+ */
+const WELL_FORMED_SELECTOR = (() => {
+  const ident = "-?[A-Za-z_][\\w-]*";
+  const simple = "(?:#" + ident + "|\\." + ident + "|\\[[^\\]]*\\]|::?" + ident + "(?:\\([^()]*\\))?)";
+  const compound = "(?:(?:\\*|" + ident + ")" + simple + "*|" + simple + "+)";
+  const combinator = "(?:\\s*[>+~]\\s*|\\s+)";
+  return new RegExp("^\\s*(?:[>+~]\\s*)?" + compound + "(?:" + combinator + compound + ")*\\s*$");
+})();
+const ATTRIBUTE = /^\s*[A-Za-z_-][\w-]*\s*(?:[~|^$*]?=[^\]]*)?$/;
+
 function offListSelector(selector) {
   if (selector.includes(OVER_CAP) || selector.includes(TOO_DEEP)) return UNEXAMINABLE_REASONS.selectorBound;
   if (selector.includes(UNKNOWN)) return UNEXAMINABLE_REASONS.selectorInterpolation;
@@ -883,6 +899,9 @@ function offListSelector(selector) {
       return UNEXAMINABLE_REASONS.selectorFunctional;
     }
   }
+  // the remaining syntax must be positively recognised, attribute selectors included
+  for (const m of selector.matchAll(/\[([^\]]*)\]/g)) if (!ATTRIBUTE.test(m[1])) return UNEXAMINABLE_REASONS.selectorSyntax;
+  if (!WELL_FORMED_SELECTOR.test(selector)) return UNEXAMINABLE_REASONS.selectorSyntax;
   return null;
 }
 
