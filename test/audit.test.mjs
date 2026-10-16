@@ -1122,6 +1122,14 @@ test("closed list: the repo's fixtures decide as before; only the anchor line mo
   assert.deepEqual(violations.findings.filter((f) => f.rule === FOCUS_RULE).map((f) => f.evidence[0]), ["styles.css:5"]);
 });
 
+test("closed list: properties that cannot be an indicator do not matter", async () => {
+  for (const css of [":focus { outline: none; border-radius: var(--r); }\n", ":focus { outline: none; background-position: calc(1px + 1px) 0; }\n", ":focus { outline: none; filter: var(--f); }\n", ":focus { outline: none; --tw-ring-width: $w; }\n", ":focus { outline: none; border-collapse: collapse; border-spacing: 0; }\n"]) {
+    const r = await focusAuditFor(css);
+    assert.deepEqual(r.rules.filter((x) => x === FOCUS_RULE), [FOCUS_RULE], css);
+    assert.deepEqual(r.unexaminable, [], css);
+  }
+});
+
 test("closed list: a decided branch is not hidden by an off-list branch beside it", async () => {
   for (const css of [
     ":focus, :is(:focus) { outline: none; }\n",

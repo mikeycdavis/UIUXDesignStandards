@@ -718,13 +718,14 @@ const DISABLED_LITERAL = /^(none|hidden|0+(\.0*)?[a-z%]*|initial|unset|revert|re
 /** Declaration properties whose value decides whether a focus indicator exists. */
 const FOCUS_RELEVANT_PROPERTY = /^(outline(-[a-z]+)?|box-shadow|border(-[a-z]+)*|background(-[a-z]+)?|text-decoration(-[a-z]+)?|--tw-ring[a-z-]*|ring[a-z-]*|filter|all)$/i;
 const REPLACEMENT_FAMILY = (property) => {
+  // only the properties that can BE a replacement indicator or disable one: border-radius, background-position,
+  // filter, ring variables and the rest are not indicators and do not matter
   const p = property.toLowerCase();
   if (p === "box-shadow") return "box-shadow";
-  if (p.startsWith("border")) return "border";
-  if (p.startsWith("background")) return "background";
-  if (p.startsWith("text-decoration")) return "text-decoration";
+  if (/^border(-(top|right|bottom|left|block|inline)(-(start|end))?)?(-(style|width|color))?$/.test(p)) return "border";
+  if (/^background(-(color|image))?$/.test(p)) return "background";
+  if (/^text-decoration(-(line|color|style|thickness))?$/.test(p)) return "text-decoration";
   if (p === "outline-offset" || p === "outline-color") return p;
-  if (p === "filter" || p.startsWith("--tw-ring") || p.startsWith("ring")) return "ring";
   return null;
 };
 const COMPENSATING = /\b(box-shadow|border|border-bottom|border-color|background|background-color|text-decoration|outline-offset|outline-color)\s*:/i;
