@@ -633,7 +633,7 @@ function atRootResets(prelude) {
 
 /** At-rules whose contents Sass does NOT wrap in the enclosing style rule (vendor prefix ignored). */
 const ROOT_EMITTED_AT_RULES = new Set(["keyframes", "font-face"]);
-const OPAQUE_AT_RULES = new Set(["include", "each", "if", "else", "for", "while", "function", "mixin", "content", "return"]);
+const OPAQUE_AT_RULES = new Set(["include", "each", "if", "else", "for", "while", "function", "mixin", "content", "return", "scope"]);
 
 /** Split on commas outside parentheses and brackets. */
 function splitSelectorList(selector) {
@@ -934,6 +934,16 @@ function hasUnknownPseudoName(selector) {
       if (!DECIDED_PSEUDO_ELEMENTS.has(name)) return true;
     } else if (m[3] === "(") {
       if (!KNOWN_FUNCTIONAL_PSEUDO.has(name)) return true;
+      // its argument must be balanced, non-empty and, for the nth-* family, an An+B expression
+      let depth = 1;
+      let end = m.index + m[0].length;
+      for (; end < stripped.length && depth > 0; end++) {
+        if (stripped[end] === "(") depth++;
+        else if (stripped[end] === ")") depth--;
+      }
+      const argument = depth === 0 ? stripped.slice(m.index + m[0].length, end - 1).trim() : "";
+      if (argument === "") return true;
+      if (/^nth-/.test(name) && !/^(?:even|odd|[+-]?\d*n(?:\s*[+-]\s*\d+)?|[+-]?\d+)(?:\s+of\s+[\s\S]+)?$/i.test(argument)) return true;
     } else if (!DECIDED_PSEUDO_CLASSES.has(name) && !["before", "after", "first-line", "first-letter"].includes(name)) {
       return true;
     }

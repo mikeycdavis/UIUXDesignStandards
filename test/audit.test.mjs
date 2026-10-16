@@ -1555,6 +1555,22 @@ test("closed list: a data: URL holds a semicolon; an unknown pseudo-class leaves
   assert.deepEqual((await focusAuditFor(":focus, :is(:focus) { outline: none; }\n")).rules.filter((y) => y === FOCUS_RULE), [FOCUS_RULE]);
 });
 
+test("closed list: @scope contents and malformed functional pseudo-classes are not decided", async () => {
+  for (const css of [
+    "@scope (:focus) { :scope { outline: none; } }\n",
+    "@scope (.card) to (.x) { :scope:focus { outline: none; } }\n",
+  ]) {
+    const r = await focusAuditFor(css, "f.css");
+    assert.deepEqual(r.rules.filter((x) => x === FOCUS_RULE), [], css);
+    assert.equal(r.unexaminable.length >= 1, true, css);
+  }
+  for (const css of [":focus, :not() { outline: none; }\n", ":focus, :is(:focus { outline: none; }\n", ":focus, :nth-child(foo) { outline: none; }\n", ":focus, :nth-child() { outline: none; }\n"]) {
+    const r = await focusAuditFor(css);
+    assert.deepEqual(r.rules.filter((x) => x === FOCUS_RULE), [], css);
+  }
+  assert.deepEqual((await focusAuditFor(":focus, :nth-child(2n+1 of .a) { outline: none; }\n")).rules.filter((x) => x === FOCUS_RULE), [FOCUS_RULE]);
+});
+
 test("closed list: a decided branch is not hidden by an off-list branch beside it", async () => {
   for (const css of [
     ":focus, :is(:focus) { outline: none; }\n",
