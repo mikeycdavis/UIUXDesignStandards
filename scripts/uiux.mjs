@@ -972,14 +972,19 @@ function namesSameSubject(part) {
     const args = splitSelectorList(rest.slice(m.index + m[0].length, end - 1));
     if (args.length === 0) return false;
     if (/^:not\(/i.test(m[0])) {
-      // a negation preserves the subject only when it is itself negated: :not(:not(&)) is &
-      const doubled = args.every((arg) => {
-        const inner = /^:not\(([\s\S]*)\)$/i.exec(arg);
-        return inner !== null && splitSelectorList(inner[1]).every((part) => namesSameSubject(part));
-      });
-      if (!doubled) return false;
+      if (args.some((arg) => arg.includes("&"))) {
+        // a negation of the parent preserves the subject only when it is itself negated:
+        // :not(:not(&)) is &, while :not(&) is everything else
+        const doubled = args.every((arg) => {
+          const inner = /^:not\(([\s\S]*)\)$/i.exec(arg);
+          return inner !== null && splitSelectorList(inner[1]).every((part) => namesSameSubject(part));
+        });
+        if (!doubled) return false;
+        anchored = true;
+      }
+      // an ordinary negation filter (&:not(.disabled)) narrows the subject and is otherwise ignored
     } else if (!args.every((arg) => namesSameSubject(arg))) return false;
-    anchored = true;
+    else anchored = true;
     rest = rest.slice(0, m.index) + rest.slice(end);
   }
   if (rest.includes("&")) {
@@ -990,7 +995,7 @@ function namesSameSubject(part) {
 }
 
 /** A Sass placeholder selector: %name at the start of a compound (50% is a keyframe selector). */
-const PLACEHOLDER = /(^|[\s>+~,(&.#:])%[A-Za-z_-]/;
+const PLACEHOLDER = /(?<![\d.])%[A-Za-z_-]/;
 
 /** A focus pseudo-class a selector names. `:focus-within` is one: it is matched by the `:focus` prefix. */
 const FOCUS_SELECTOR = /:focus(-visible|-within)?(?![A-Za-z0-9_-])/i;

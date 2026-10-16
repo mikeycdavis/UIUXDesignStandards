@@ -1234,6 +1234,22 @@ test("ST-07: a selector list is judged branch by branch: unknown and placeholder
   }
 });
 
+test("ST-07: a negation filter keeps the subject; a placeholder inside a compound is a placeholder", async () => {
+  const cases = [
+    [":focus { box-shadow: 0 0 0 2px blue; &:not(.disabled) { outline: none; } }\n", []],
+    [":focus { box-shadow: 0 0 0 2px blue; .a &:not(.disabled):hover { outline: none; } }\n", []],
+    [":focus { box-shadow: 0 0 0 2px blue; :not(.x) { outline: none; } }\n", [FOCUS_RULE]],
+    [":focus { box-shadow: 0 0 0 2px blue; &:not(&.x) { outline: none; } }\n", [FOCUS_RULE]],
+    ["button%silent:focus { outline: none; }\n", []],
+    [".a%x:focus, .b:focus { outline: none; }\n", [FOCUS_RULE]],
+    ["@keyframes k { 50% { outline: none; } }\n:focus { outline: none; }\n", [FOCUS_RULE]],
+  ];
+  for (const [css, expected] of cases) {
+    assert.deepEqual((await focusAuditFor(css)).rules.filter((x) => x === FOCUS_RULE), expected, css);
+  }
+  assert.equal((await focusAuditFor("button%silent:focus { outline: none; }\n")).unexaminable.length >= 1, true);
+});
+
 test("ST-07: a doubly negated reference to the parent keeps the subject", async () => {
   const cases = [
     [":focus { box-shadow: 0 0 0 2px blue; :not(:not(&)) { outline: none; } }\n", []],
