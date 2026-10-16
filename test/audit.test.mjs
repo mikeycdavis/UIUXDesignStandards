@@ -1065,6 +1065,14 @@ test("ST-07: a same-element child that disables an inherited replacement removes
     [":focus { border: 2px solid blue; &.x { outline: none; border-style: none solid; } }\n", []],
     [":focus { border-bottom: 2px solid blue; &.x { outline: none; border-width: 0 0 0 0; } }\n", [FOCUS_RULE]],
     [":focus { border-bottom: 2px solid blue; &.x { outline: none; border-width: 0 0 2px; } }\n", []],
+    [":focus { border-bottom: 2px solid blue; &.x { outline: none; border-block-width: 0 0; } }\n", [FOCUS_RULE]],
+    [":focus { border-bottom: 2px solid blue; &.x { outline: none; border-block-width: 0 2px; } }\n", []],
+    [":focus { border-bottom: 2px solid blue; &.x { outline: none; border-inline-width: 0 0; } }\n", []],
+    [":focus { outline: none; background: red; background-image: none; }\n", []],
+    [":focus { outline: none; background: red; background-color: transparent; }\n", [FOCUS_RULE]],
+    [":focus { outline: none; background: red; background-color: transparent; background-image: none; }\n", [FOCUS_RULE]],
+    [":focus { outline: none; background-image: none; background: red; }\n", []],
+    [":focus { outline: none; background: none; }\n", [FOCUS_RULE]],
     // an inherited indicator of another family is untouched
     [":focus { border: 2px solid blue; box-shadow: 0 0 0 2px blue; &.x { outline: none; border-style: none; } }\n", []],
   ];
@@ -1140,6 +1148,17 @@ test("ST-07: a selector list is carried branch by branch", async () => {
   ];
   for (const [css, expected] of cases) {
     assert.deepEqual((await focusAuditFor(css)).rules.filter((x) => x === FOCUS_RULE), expected, css);
+  }
+});
+
+test("ST-07: an unknown branch beside a readable focus branch is unexaminable", async () => {
+  for (const css of [
+    ":focus:not(:focus-visible), #{$sel} { outline: none; }\n",
+    ":focus { outline: none; box-shadow: 0 0 0 2px blue; }\n.a, #{$sel} { outline: none; }\n",
+  ]) {
+    const r = await focusAuditFor(css);
+    assert.deepEqual(r.rules.filter((x) => x === FOCUS_RULE), [], css);
+    assert.equal(r.unexaminable.length >= 1, true, css);
   }
 });
 

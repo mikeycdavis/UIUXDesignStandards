@@ -752,7 +752,10 @@ function declarationCovers(property) {
   if (p === "all") return "all";
   if (p === "box-shadow") return [["box-shadow", "*"]];
   if (p === "outline-offset" || p === "outline-color") return [[p, "*"]];
-  if (p === "background" || p === "background-color" || p === "background-image") return [["background", "*"]];
+  // a background is on when EITHER its colour or its image is (see replacementVerdict)
+  if (p === "background") return [["background", "color"], ["background", "image"]];
+  if (p === "background-color") return [["background", "color"]];
+  if (p === "background-image") return [["background", "image"]];
   if (/^text-decoration(-(line|color|style|thickness))?$/.test(p)) return [["text-decoration", "*"]];
   const border = /^border(?:-(top|right|bottom|left|block-start|block-end|inline-start|inline-end|block|inline))?(?:-(style|width|color))?$/.exec(p);
   if (border) {
@@ -809,6 +812,7 @@ function replacementVerdict(node, compensating) {
       const value = text.slice(colon + 1).trim();
       const important = IMPORTANT.test(value);
       const longhand = /^border-(style|width|color)$/.exec(property);
+      const logical = /^border-(block|inline)-(style|width|color)$/.exec(property);
       const values = value.replace(IMPORTANT, "").trim().split(/\s+(?![^(]*\))/);
       if (longhand && values.length > 1 && values.length <= 4) {
         // border-width: 0 0 0 0 - one to four values are top, right, bottom, left (CSS 1-4 value syntax)
@@ -816,6 +820,22 @@ function replacementVerdict(node, compensating) {
         const bySide = values.length === 2 ? [a, b, a, b] : values.length === 3 ? [a, b, c, b] : [a, b, c, d];
         BORDER_SIDES.forEach((side, k) => {
           decls.push({ at, lo, hi, property: "border-" + side + "-" + longhand[1], value: bySide[k], important });
+        });
+        continue;
+      }
+      if (property === "background") {
+        // the shorthand sets the colour and resets the image: only url(), a gradient or image-set()
+        // supplies one
+        const image = /url\(|gradient\(|image-set\(/i.test(value) ? value : "none";
+        decls.push({ at, lo, hi, property: "background-color", value, important });
+        decls.push({ at, lo, hi, property: "background-image", value: image, important });
+        continue;
+      }
+      if (logical && values.length === 2) {
+        // border-block-width: 0 0 - start and end (horizontal writing mode: top/bottom, left/right)
+        const sides = logical[1] === "block" ? ["top", "bottom"] : ["left", "right"];
+        sides.forEach((side, k) => {
+          decls.push({ at, lo, hi, property: "border-" + side + "-" + logical[2], value: values[k], important });
         });
         continue;
       }
@@ -869,16 +889,21 @@ function replacementVerdict(node, compensating) {
         compensating.test(d.property + ":"),
     );
     if (!introduced) continue;
-    let on = true;
-    let undecided = false;
+    const states = [];
     for (const [key, facetDecls] of components) {
       if (key.split("|")[0] !== component) continue;
-      const state = facetState([...facetDecls, ...resets]);
-      if (state === "unknown") undecided = true;
-      else if (state === false) on = false;
+      states.push(facetState([...facetDecls, ...resets]));
     }
-    if (on && !undecided) return "present";
-    if (on && undecided) unknown = true;
+    // A border needs EVERY facet it declares (style and width and colour); a background is visible
+    // with EITHER its colour or its image.
+    const undecided = states.includes("unknown");
+    if (component === "background") {
+      if (states.includes(true)) return "present";
+      if (undecided) unknown = true;
+    } else if (!states.includes(false)) {
+      if (!undecided) return "present";
+      unknown = true;
+    }
   }
   return unknown ? "unknown" : "absent";
 }
@@ -1421,14 +1446,16 @@ export const DETECTORS = [
           });
           continue;
         }
-        if (focusSelectors.length === 0) {
-          // A selector with an unknown span and no literal focus pseudo-class could still be a focus
-          // rule; it matters only when it also removes the outline.
-          if (removesOutline && node.composed.some((selector) => selector.includes(UNKNOWN))) {
-            unexaminable.push({ index: where, reason: "an interpolation in the selector may make it a focus rule" });
-          }
+        // A branch with an unknown span and no literal focus pseudo-class could still be a focus rule,
+        // beside a readable one (a list's other branch may be exempt); it matters when the rule removes
+        // the outline.
+        const unknownBranch =
+          removesOutline && node.composed.some((selector) => !isFocusSelector(selector) && selector.includes(UNKNOWN));
+        if (unknownBranch) {
+          unexaminable.push({ index: where, reason: "an interpolation in the selector may make it a focus rule" });
           continue;
         }
+        if (focusSelectors.length === 0) continue;
         const reason = unexaminableReason(node);
         if (reason !== null) {
           unexaminable.push({ index: where, reason });
