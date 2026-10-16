@@ -1280,6 +1280,26 @@ test("closed list: perf guards - work is bounded on small hostile inputs (select
   }
 });
 
+test("closed list: a comment inside a selector head is off the list; one before it is not", async () => {
+  for (const css of [
+    ":focus/**/.danger { outline: none; }\n",
+    ".a:focus /* c */ .b { outline: none; }\n",
+    ":focus,/* c */.a { outline: none; }\n",
+    ".x { &:focus/**/.danger { outline: none; } }\n",
+  ]) {
+    const r = await focusAuditFor(css);
+    assert.deepEqual(r.rules.filter((x) => x === FOCUS_RULE), [], css);
+    assert.equal(r.unexaminable.length >= 1, true, css);
+    assert.match(r.unexaminable[0].reason, /comment inside the selector/, css);
+  }
+  // a comment before the head, or after the block, is not inside it
+  for (const css of ["/* header */\n:focus { outline: none; }\n", "// note\n:focus { outline: none; } /* tail */\n"]) {
+    const r = await focusAuditFor(css, "f.scss");
+    assert.deepEqual(r.rules.filter((x) => x === FOCUS_RULE), [FOCUS_RULE], css);
+    assert.deepEqual(r.unexaminable, [], css);
+  }
+});
+
 test("closed list: a decided branch is not hidden by an off-list branch beside it", async () => {
   for (const css of [
     ":focus, :is(:focus) { outline: none; }\n",

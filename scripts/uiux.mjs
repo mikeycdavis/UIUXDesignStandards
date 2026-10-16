@@ -725,6 +725,7 @@ const UNEXAMINABLE_REASONS = {
   selectorInterpolation: "an interpolation in the selector may make it a focus rule",
   selectorPlaceholder: "a Sass placeholder selector emits nothing unless it is extended, and an @extend may be in another file",
   selectorBound: "the rule is nested deeper, or its composed selector list is longer, than the decided bound (32 levels, 256 selectors)",
+  selectorComment: "a comment inside the selector may split or join its compounds",
   selectorEscape: "a CSS escape in the selector may spell a focus pseudo-class",
   selectorFunctional: "a functional or unlisted pseudo-class selector is outside the decided list of selector forms",
   selectorOpaque: "it sits inside an @include / control directive / mixin whose selector semantics are not modelled",
@@ -1377,13 +1378,27 @@ export const DETECTORS = [
           !interpolatedAbove && headParts.length === node.composed.length
             ? headParts.map((part) => part.includes("#{"))
             : node.composed.map(() => interpolatedAbove || headOf(node).includes("#{"));
-        const indexed = node.composed.map((selector, k) => ({ selector, interpolated: branchFlags[k] }));
-        const focusBranches = indexed.filter((b) => mayBeFocusRule(b.selector));
-        const offList = focusBranches
-          .map((b) => (b.interpolated ? UNEXAMINABLE_REASONS.selectorInterpolation : offListSelector(b.selector)))
-          .filter((reason) => reason !== null);
+        // A comment INSIDE a selector head (not before it) is replaced by padding in the structure view, which
+        // would read as a combinator (:focus/**/.danger is the one compound :focus.danger): off the list.
+        const commentInHead = (() => {
+          for (let n = node, k = 0; n && k <= MAX_DEPTH; n = n.parent, k++) {
+            const raw = file.text.slice(n.selectorStart, n.selectorStart + n.selector.length);
+            const inner = raw.replace(/^(?:\s|\/\*[\s\S]*?\*\/|\/\/[^\n]*(?:\n|$))*/, "");
+            if (inner.includes("/*") || inner.includes("//")) return true;
+          }
+          return false;
+        })();
+        const reasonOf = (b, k) => {
+          if (commentInHead) return UNEXAMINABLE_REASONS.selectorComment;
+          if (branchFlags[k]) return UNEXAMINABLE_REASONS.selectorInterpolation;
+          return offListSelector(b);
+        };
+        const focusBranches = node.composed
+          .map((selector, k) => ({ selector, reason: reasonOf(selector, k) }))
+          .filter((b) => mayBeFocusRule(b.selector));
+        const offList = focusBranches.map((b) => b.reason).filter((reason) => reason !== null);
         const plainFocus = focusBranches
-          .filter((b) => !b.interpolated && offListSelector(b.selector) === null && isFocusSelector(b.selector))
+          .filter((b) => b.reason === null && isFocusSelector(b.selector))
           .map((b) => b.selector);
         // a selector whose subject is not focused and that has no off-list branch is not a focus rule at all:
         // nothing about its declarations can matter

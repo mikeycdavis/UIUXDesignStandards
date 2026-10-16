@@ -371,6 +371,7 @@ functional selectors, cross-rule interaction). A form is added to this list only
 | --- | --- |
 | a functional or unlisted pseudo-class selector is outside the decided list of selector forms | `:is() :where() :not()` other than `:not(:focus-visible)`, `:has() :host() :nth-*()`, any other pseudo-class or functional selector, an unresolved `&` |
 | an interpolation in the selector may make it a focus rule | an unknown interpolation anywhere in a selector, or any interpolation in a selector head |
+| a comment inside the selector may split or join its compounds | a `/* */` or `//` comment between the parts of a selector head (a comment before the head is not inside it) |
 | a CSS escape in the selector may spell a focus pseudo-class | a backslash escape anywhere in a selector (for example the escaped spelling of focus) |
 | a Sass placeholder selector emits nothing unless it is extended, and an @extend may be in another file | `%name` anywhere in a selector |
 | the outline is not removed by exactly one plain 'outline: none\|0' declaration (several declarations, a longhand, all:, an important or unresolved value are not decided) | several `outline` declarations, `outline-style`, `outline-width`, `all`, `!important`, `var()`, `env()`, a Sass variable, an interpolation or a calculation in the outline, or an outline that is neither the removal nor the not-a-removal form |
