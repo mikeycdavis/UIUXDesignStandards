@@ -564,9 +564,10 @@ function parseBlocks(text, rawText = text) {
       reasons = [null];
       childCtx = { parents: [""], reset: true, reasons: [null] };
     } else if (atRule !== null) {
-      // Every other at-rule - the conditional group rules and generic CSS at-rules alike - keeps the
-      // enclosing rule around its declarations. A name that is itself interpolated is not knowable.
-      if (atRule === "") opaque = true;
+      // The conditional group at-rules keep the enclosing rule around their declarations. Any other at-rule
+      // (@page and the descriptor at-rules, an unknown one) is not decided: its contents are not selector
+      // context the list reads. A name that is itself interpolated is not knowable either.
+      if (atRule === "" || !GROUP_AT_RULES.has(atRule.replace(/^-[a-z]+-/, ""))) opaque = true;
       composed = ctx.reset ? [""] : ctx.parents;
       reasons = ctx.reset ? [null] : ctx.reasons;
       childCtx = ctx;
@@ -633,6 +634,8 @@ function atRootResets(prelude) {
 
 /** At-rules whose contents Sass does NOT wrap in the enclosing style rule (vendor prefix ignored). */
 const ROOT_EMITTED_AT_RULES = new Set(["keyframes", "font-face"]);
+/** The at-rules whose contents are selector context: a conditional group rule wraps its rules and declarations. */
+const GROUP_AT_RULES = new Set(["media", "supports", "container", "layer", "document", "starting-style"]);
 const OPAQUE_AT_RULES = new Set(["include", "each", "if", "else", "for", "while", "function", "mixin", "content", "return", "scope"]);
 
 /** Split on commas outside parentheses and brackets. */
@@ -1210,6 +1213,10 @@ function replacementReason(declarations) {
       return UNEXAMINABLE_REASONS.replacementForm;
     }
   }
+  // a border built from style/width longhands without a shorthand: the combination is not modelled
+  const borderShorthand = declarations.some((d) => /^border(-(top|right|bottom|left|block|inline)(-(start|end))?)?$/i.test(d.property));
+  const borderFacets = declarations.some((d) => /^border(-(top|right|bottom|left|block|inline)(-(start|end))?)?-(style|width)$/i.test(d.property));
+  if (borderFacets && !borderShorthand) return UNEXAMINABLE_REASONS.replacementForm;
   // something that can hide an indicator matters only when there is an indicator to hide
   const indicated = seen.size > 0 || declarations.some((d) => d.property === "@apply");
   return paintAffecting && indicated ? UNEXAMINABLE_REASONS.replacementForm : null;

@@ -750,21 +750,28 @@ test("ST-07: at-rules emitted at the stylesheet root do not inherit the enclosin
   assert.equal(r.unexaminable.length >= 1, true);
 });
 
-test("ST-07: generic CSS at-rules keep the enclosing rule around their declarations", async () => {
-  // dart-sass wraps the contents of every at-rule except @keyframes and @font-face in the style rule
+test("ST-07: only conditional group at-rules keep the enclosing rule; any other at-rule is not decided", async () => {
+  for (const css of [
+    ":focus { @media (min-width: 1px) { outline: none; } }\n",
+    ":focus { @supports (display: grid) { &.x { outline: none; } } }\n",
+    ":focus { @media print { @supports (a: b) { outline: none; } } }\n",
+    ":focus { @-moz-document url-prefix() { outline: none; } }\n",
+  ]) {
+    const r = await focusAuditFor(css);
+    assert.deepEqual(r.rules.filter((x) => x === FOCUS_RULE), [FOCUS_RULE], css);
+  }
   for (const css of [
     ":focus { @custom state { outline: none; } }\n",
     ":focus { @page { outline: none; } }\n",
     ":focus { @property --x { outline: none; } }\n",
-    ":focus { @-moz-document url-prefix() { outline: none; } }\n",
     ":focus { @CUSTOM state { outline: none; } }\n",
-    ":focus { @custom a { @custom b { outline: none; } } }\n",
-    ":focus { @custom state { &.x { outline: none; } } }\n",
+    "@page { :focus { outline: none; } }\n",
+    "@counter-style x { :focus { outline: none; } }\n",
   ]) {
-    assert.deepEqual((await focusAuditFor(css)).rules.filter((x) => x === FOCUS_RULE), [FOCUS_RULE], css);
+    const r = await focusAuditFor(css);
+    assert.deepEqual(r.rules.filter((x) => x === FOCUS_RULE), [], css);
+    assert.equal(r.unexaminable.length >= 1, true, css);
   }
-  // a descendant of the focused element is not the focused element
-  assert.deepEqual((await focusAuditFor(":focus { @custom state { .x { outline: none; } } }\n")).rules.filter((x) => x === FOCUS_RULE), []);
   // not under a focus rule: nothing to report
   assert.deepEqual((await focusAuditFor(".a { @custom state { outline: none; } }\n")).rules.filter((x) => x === FOCUS_RULE), []);
   // a keyframes/font-face between the rule and the generic at-rule still breaks the context
@@ -1054,6 +1061,8 @@ const OFF_LIST_FORMS = [
   [":focus { outline: none; border: 0; }\n", REASON.replacement],
   [":focus { outline: none; border: calc(1px + 1px) solid red; }\n", REASON.replacement],
   [":focus { outline: none; border: 0 solid red; }\n", REASON.replacement],
+  [":focus { outline: none; border-style: solid; border-width: 2px; border-color: red; }\n", REASON.replacement],
+  [":focus { outline: none; border-top-style: solid; border-top-width: 2px; }\n", REASON.replacement],
   [":focus { outline: none; border: 2px solid red; border-image: linear-gradient(transparent, transparent) 1; }\n", REASON.replacement],
   [":focus { outline: none; box-shadow: 0 0 2px red; box-shadow: 0 0 3px blue; }\n", REASON.replacement],
   [":focus { outline: none; border: 2px solid red; border: 2px solid blue; }\n", REASON.replacement],
