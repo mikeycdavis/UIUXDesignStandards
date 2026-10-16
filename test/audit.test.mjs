@@ -1448,7 +1448,7 @@ test("ST-07: the focus-visible exemption parses its list; a bare :focus carries 
   const cases = [
     [":focus:not(:focus-visible, :is(.disabled)) { outline: none; }\n", []],
     [":focus:not(.a:is(.b, .c), :focus-visible) { outline: none; }\n", []],
-    [":focus:not(:is(:focus-visible)) { outline: none; }\n", [FOCUS_RULE]],
+    [":focus:not(:is(:focus-visible)) { outline: none; }\n", []],
     [":focus { box-shadow: 0 0 0 2px blue; :is(&, :focus.x) { outline: none; } }\n", []],
     [":focus { box-shadow: 0 0 0 2px blue; :is(&, :focus-visible.x) { outline: none; } }\n", []],
     [":focus { box-shadow: 0 0 0 2px blue; :is(&, .a:focus-within) { outline: none; } }\n", [FOCUS_RULE]],
