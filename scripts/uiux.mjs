@@ -1032,7 +1032,8 @@ function namesSameSubject(part, parentIsBareFocus = false) {
   // Ancestor constraints may precede the subject (`.wrapper &`): the LAST compound is the subject, and
   // it alone may carry the reference to the parent.
   const compounds = selectorCompounds(part);
-  if (compounds.length === 0 || compounds.slice(0, -1).some((compound) => compound.includes("&"))) return false;
+  // (an earlier compound that also names the parent - `& + &` - is context, not the subject)
+  if (compounds.length === 0) return false;
   let rest = compounds[compounds.length - 1];
   let anchored = false;
   const wrapper = /:(?:is|where|matches|-webkit-any|-moz-any|not|nth-child|nth-last-child)\(/i;
@@ -1107,7 +1108,13 @@ function hidesRingFromMouseOnly(selector) {
   // only the subject (the last compound) and only a negation written on it, not one inside a
   // relational or functional argument (`div:has(:focus:not(.x)) :focus:not(:focus-visible)`)
   const compounds = selectorCompounds(selector);
-  const subject = compounds.length > 0 ? compounds[compounds.length - 1] : selector;
+  let subject = compounds.length > 0 ? compounds[compounds.length - 1] : selector;
+  // a single-argument :is()/:where() only restates its argument (:is(:focus):not(:focus-visible))
+  for (;;) {
+    const flat = subject.replace(/:(?:is|where)\(([^(),]*)\)/gi, "$1");
+    if (flat === subject) break;
+    subject = flat;
+  }
   const depthAt = (index) => {
     let outer = 0;
     for (let i = 0; i < index; i++) {

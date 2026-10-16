@@ -1502,6 +1502,20 @@ test("ST-07: a qualifier may sit between :focus and its focus-visible negation",
   }
 });
 
+test("ST-07: a wrapped focus subject is the exemption; a repeated parent reference is context", async () => {
+  const cases = [
+    [":is(:focus):not(:focus-visible) { outline: none; }\n", []],
+    [":where(:is(:focus)):not(:focus-visible) { outline: none; }\n", []],
+    [":is(:focus, .a):not(:focus-visible) { outline: none; }\n", [FOCUS_RULE]],
+    [":focus { box-shadow: 0 0 0 2px blue; & + & { outline: none; } }\n", []],
+    [":focus { box-shadow: 0 0 0 2px blue; & > .a & { outline: none; } }\n", []],
+    [":focus { box-shadow: 0 0 0 2px blue; & + & .x { outline: none; } }\n", [FOCUS_RULE]],
+  ];
+  for (const [css, expected] of cases) {
+    assert.deepEqual((await focusAuditFor(css)).rules.filter((x) => x === FOCUS_RULE), expected, css);
+  }
+});
+
 test("ST-07: a doubly negated reference to the parent keeps the subject", async () => {
   const cases = [
     [":focus { box-shadow: 0 0 0 2px blue; :not(:not(&)) { outline: none; } }\n", []],
