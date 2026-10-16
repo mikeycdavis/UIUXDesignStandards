@@ -924,7 +924,7 @@ function offListSelector(selector) {
   // within a compound only pseudo-classes may follow a pseudo-element (.x::before.foo and ::before::after are errors)
   for (const compound of compounds) {
     const element = /(?:::[A-Za-z-]+|:(?:before|after|first-line|first-letter)(?![A-Za-z-]))/i.exec(compound);
-    if (element !== null && !/^(?::(?!:)[A-Za-z-]+)*$/.test(compound.slice(element.index + element[0].length))) {
+    if (element !== null && !/^(?::(?:hover|active|focus|focus-visible)(?![A-Za-z-]))*$/i.test(compound.slice(element.index + element[0].length))) {
       return UNEXAMINABLE_REASONS.selectorSyntax;
     }
   }
@@ -1101,9 +1101,26 @@ function restoresOutline(value, allowAuto = true) {
   return opaqueColour(c);
 }
 
+/**
+ * Properties that can hide or replace what an indicator paints (a transparent border-image over the border, opacity,
+ * a clip or mask, a filter ...): the cascade between them and an indicator is not modelled, so a block that declares one
+ * is not decided.
+ */
+const PAINT_AFFECTING_PROPERTY =
+  /^(opacity|visibility|display|clip|clip-path|mask(-[a-z-]+)?|filter|backdrop-filter|mix-blend-mode|forced-color-adjust|content-visibility|border-image(-[a-z-]+)?)$/i;
+
 /** Why a block's replacement declarations are outside the closed list, or null. */
 function replacementReason(declarations) {
+  const seen = new Set();
+  let paintAffecting = false;
   for (const d of declarations) {
+    if (PAINT_AFFECTING_PROPERTY.test(d.property)) paintAffecting = true;
+    // a repeated indicator property: which declaration wins is the cascade, which is not modelled
+    const key = d.property.toLowerCase();
+    if (REPLACEMENT_FAMILY(d.property) !== null) {
+      if (seen.has(key)) return UNEXAMINABLE_REASONS.replacementForm;
+      seen.add(key);
+    }
     if (d.property === "@apply") {
       // an @apply list is read for exact ring tokens only; an unresolved token may be one
       if (d.raw.includes(UNKNOWN) || UNRESOLVED_VALUE.test(d.raw)) return UNEXAMINABLE_REASONS.replacementForm;
@@ -1142,7 +1159,9 @@ function replacementReason(declarations) {
       return UNEXAMINABLE_REASONS.replacementForm;
     }
   }
-  return null;
+  // something that can hide an indicator matters only when there is an indicator to hide
+  const indicated = seen.size > 0 || declarations.some((d) => d.property === "@apply");
+  return paintAffecting && indicated ? UNEXAMINABLE_REASONS.replacementForm : null;
 }
 
 /**
