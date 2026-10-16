@@ -1384,7 +1384,9 @@ export const DETECTORS = [
           for (let n = node, k = 0; n && k <= MAX_DEPTH; n = n.parent, k++) {
             const raw = file.text.slice(n.selectorStart, n.selectorStart + n.selector.length);
             const inner = raw.replace(/^(?:\s|\/\*[\s\S]*?\*\/|\/\/[^\n]*(?:\n|$))*/, "");
-            if (inner.includes("/*") || inner.includes("//")) return true;
+            // quoted attribute values are data: `[href="//x"]` holds no comment
+            const unquoted = inner.replace(/"(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*'/g, "");
+            if (unquoted.includes("/*") || unquoted.includes("//")) return true;
           }
           return false;
         })();

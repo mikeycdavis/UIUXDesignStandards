@@ -1292,6 +1292,12 @@ test("closed list: a comment inside a selector head is off the list; one before 
     assert.equal(r.unexaminable.length >= 1, true, css);
     assert.match(r.unexaminable[0].reason, /comment inside the selector/, css);
   }
+  // a marker inside a quoted attribute value is data, not a comment
+  for (const css of [':focus[href="//example"] { outline: none; }\n', ":focus[data-x='/*'] { outline: none; }\n"]) {
+    const r = await focusAuditFor(css);
+    assert.deepEqual(r.rules.filter((x) => x === FOCUS_RULE), [FOCUS_RULE], css);
+    assert.deepEqual(r.unexaminable, [], css);
+  }
   // a comment before the head, or after the block, is not inside it
   for (const css of ["/* header */\n:focus { outline: none; }\n", "// note\n:focus { outline: none; } /* tail */\n"]) {
     const r = await focusAuditFor(css, "f.scss");
