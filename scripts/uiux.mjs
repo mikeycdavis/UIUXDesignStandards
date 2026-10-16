@@ -480,7 +480,13 @@ function parseBlocks(text) {
     }
   }
   // A block still open at end of input (an unterminated interpolation swallowed its brace) keeps
-  // close = end of input, and is still a block.
+  // close = end of input, and is still a block. It is also a child of its parent, so the parent's own
+  // text does not include it (parsing stays linear however many blocks are left open).
+  while (stack.length > 0) {
+    const frame = stack.pop();
+    frame.close = text.length;
+    if (frame.parent) frame.parent.children.push([frame.selStart, text.length]);
+  }
 
   const nodes = new Map();
   const out = [];
@@ -493,13 +499,17 @@ function parseBlocks(text) {
     // A name that is only partly interpolated (`@-#{$v}-keyframes`, `@med#{$x}`) is not knowable
     // either: it is treated as the unknown name, never as the readable prefix.
     if (atRule !== null && trimmed.slice(1).replace(/^[A-Za-z-]*/, "").startsWith(UNKNOWN)) atRule = "";
-    const body = text.slice(frame.open + 1, frame.close).split("");
+    // the text the block OWNS: its own segments between child blocks, joined by one space
+    const ownParts = [];
+    let pos = frame.open + 1;
     for (const [from, to] of frame.children) {
-      for (let k = Math.max(from, frame.open + 1); k < Math.min(to, frame.close); k++) {
-        if (body[k - frame.open - 1] !== "\n") body[k - frame.open - 1] = " ";
-      }
+      const start = Math.max(from, pos);
+      if (start > pos) ownParts.push(text.slice(pos, start));
+      pos = Math.max(pos, Math.min(to, frame.close));
     }
+    if (pos < frame.close) ownParts.push(text.slice(pos, frame.close));
     const parent = frame.parent ? nodes.get(frame.parent) : null;
+    const depth = (parent ? parent.depth : 0) + 1;
     // The inherited CONTEXT is what a child composes against: `parents` are the selectors a
     // `&` names, and `reset` says whether a plain child is still a descendant of them. It is
     // carried through every non-rule block, so a reset set by @at-root reaches the first style rule
@@ -559,7 +569,13 @@ function parseBlocks(text) {
       composed = composeSelectors(selector, ctx.parents, ctx.reset);
       childCtx = { parents: composed, reset: false };
     }
+    // work is bounded: a rule nested deeper than MAX_DEPTH is not composed at all
+    if (depth > MAX_DEPTH) {
+      composed = [TOO_DEEP];
+      childCtx = { parents: [TOO_DEEP], reset: false };
+    }
     const node = {
+      depth,
       selector,
       selectorStart: frame.selStart,
       atRule,
@@ -572,7 +588,7 @@ function parseBlocks(text) {
       opaque,
       ctx: childCtx,
       parent,
-      body: body.join(""),
+      body: ownParts.join(" "),
       composed,
     };
     nodes.set(frame, node);
@@ -622,9 +638,17 @@ function splitSelectorList(selector) {
   return parts.map((part) => part.trim()).filter((part) => part.length > 0);
 }
 
+/** Bounds on the work per rule: a longer composed list, or deeper nesting, is routed to unexaminable. */
+const MAX_COMPOSED = 256;
+const MAX_DEPTH = 32;
+const OVER_CAP = "";
+const TOO_DEEP = "";
+
 function composeSelectors(selector, parents, reset = false) {
   const composed = [];
-  for (const part of splitSelectorList(selector)) {
+  const parts = splitSelectorList(selector);
+  if (parts.length * parents.length > MAX_COMPOSED) return [OVER_CAP];
+  for (const part of parts) {
     for (const parent of parents) {
       if (part.includes("&")) composed.push(part.replaceAll("&", parent));
       else composed.push(parent === "" || reset ? part : `${parent} ${part}`);
@@ -700,6 +724,7 @@ const DECIDED_PSEUDO_ELEMENTS = new Set(["before", "after", "first-line", "first
 const UNEXAMINABLE_REASONS = {
   selectorInterpolation: "an interpolation in the selector may make it a focus rule",
   selectorPlaceholder: "a Sass placeholder selector emits nothing unless it is extended, and an @extend may be in another file",
+  selectorBound: "the rule is nested deeper, or its composed selector list is longer, than the decided bound (32 levels, 256 selectors)",
   selectorEscape: "a CSS escape in the selector may spell a focus pseudo-class",
   selectorFunctional: "a functional or unlisted pseudo-class selector is outside the decided list of selector forms",
   selectorOpaque: "it sits inside an @include / control directive / mixin whose selector semantics are not modelled",
@@ -763,6 +788,8 @@ const FOCUS_SELECTOR = /:focus(-visible|-within)?(?![A-Za-z0-9_-])/i;
  */
 function mayBeFocusRule(selector) {
   return (
+    selector.includes(OVER_CAP) ||
+    selector.includes(TOO_DEEP) ||
     /focus/i.test(selector) ||
     selector.includes("\\") ||
     selector.includes(UNKNOWN) ||
@@ -791,6 +818,7 @@ function splitHeadParts(head) {
 
 /** Why a selector branch is outside the closed list, or null when it is a decided form. */
 function offListSelector(selector) {
+  if (selector.includes(OVER_CAP) || selector.includes(TOO_DEEP)) return UNEXAMINABLE_REASONS.selectorBound;
   if (selector.includes(UNKNOWN)) return UNEXAMINABLE_REASONS.selectorInterpolation;
   if (selector.includes("\\")) return UNEXAMINABLE_REASONS.selectorEscape;
   if (PLACEHOLDER.test(selector)) return UNEXAMINABLE_REASONS.selectorPlaceholder;
@@ -858,9 +886,18 @@ function restoresOutline(value) {
   const split = value.trim().split(/\s+(?![^(]*\))/).filter(Boolean);
   const style = split.find((t) => /^(dotted|dashed|solid|double|groove|ridge|inset|outset|auto)$/i.test(t));
   const width = split.find((t) => /^(\d+\.?\d*|\.\d+)(px|em|rem)$/i.test(t) && parseFloat(t) > 0);
-  if (style === undefined || (width === undefined && !/^auto$/i.test(style))) return false;
-  const rest = split.filter((t) => t !== style && t !== width);
-  return rest.length <= 1;
+  if (style === undefined || width === undefined) return false;
+  const rest = split.filter((t, i) => i !== split.indexOf(style) && i !== split.indexOf(width));
+  if (rest.length > 1) return false;
+  if (rest.length === 0) return true;
+  // the one more token must be a colour: a hex, a function (rgb(), var()), or a colour name - not a
+  // number, a style or width keyword, or a CSS-wide value, which would make the shorthand invalid
+  const c = rest[0];
+  if (/^#[0-9a-f]{3,8}$/i.test(c) || /^(rgb|rgba|hsl|hsla|hwb|lab|lch|oklab|oklch|color|color-mix|light-dark|var|env)\(.*\)$/i.test(c)) return true;
+  return (
+    /^[a-z]+$/i.test(c) &&
+    !/^(none|hidden|auto|medium|thin|thick|initial|inherit|unset|revert|dotted|dashed|solid|double|groove|ridge|inset|outset)$/i.test(c)
+  );
 }
 
 /** Why a block's replacement declarations are outside the closed list, or null. */
@@ -897,7 +934,7 @@ function declaresStyle(declarations) {
 function nestingReason(node) {
   // `@at-root :focus { }` emits its selector at the root: it is itself the boundary, nothing above is inherited
   if (node.atRule === "at-root" && /^\s*@at-root\s*[^(\s]/i.test(node.selector)) return null;
-  for (let ancestor = node.parent; ancestor; ancestor = ancestor.parent) {
+  for (let ancestor = node.parent, k = 0; ancestor && k <= MAX_DEPTH; ancestor = ancestor.parent, k++) {
     // an @at-root that drops style rules emits what is inside at the root: nothing above it is inherited
     if (ancestor.atRule === "at-root" && ancestor.ctx.reset) break;
     if (ancestor.atRule === "layer") return UNEXAMINABLE_REASONS.nested;
@@ -1280,7 +1317,7 @@ export const DETECTORS = [
       const enclosesOpaque = new Set();
       for (const n of nodes) {
         if (n.opaque && !(n.parent && n.parent.opaque)) {
-          for (let a = n.parent; a; a = a.parent) enclosesOpaque.add(a);
+          for (let a = n.parent, k = 0; a && k <= MAX_DEPTH; a = a.parent, k++) enclosesOpaque.add(a);
         }
       }
       for (const node of nodes) {
@@ -1318,7 +1355,7 @@ export const DETECTORS = [
         // enclosing one's makes every branch off the list.
         const headOf = (n) => text.slice(n.selectorStart, n.selectorStart + n.selector.length);
         const interpolatedAbove = (() => {
-          for (let n = node.parent; n; n = n.parent) if (headOf(n).includes("#{")) return true;
+          for (let n = node.parent, k = 0; n && k <= MAX_DEPTH; n = n.parent, k++) if (headOf(n).includes("#{")) return true;
           return false;
         })();
         const headParts = splitHeadParts(headOf(node));

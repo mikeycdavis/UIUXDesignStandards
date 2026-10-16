@@ -10,6 +10,7 @@ import { strict as assert } from "node:assert";
 import { test } from "node:test";
 import { mkdtemp, cp, readFile, writeFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
+import { spawnSync } from "node:child_process";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import {
@@ -1193,6 +1194,83 @@ test("closed list: a rule that encloses a directive is not decided; a non-focus 
   const mixed = await focusAuditFor(".button:focus .icon { outline: var(--o); }\na:focus { outline: none; box-shadow: 0 0 0 2px blue; }\n");
   assert.equal(mixed.examined, true);
   assert.deepEqual(mixed.unexaminable, []);
+});
+
+test("closed list: an outline shorthand is a finding or unexaminable unless it positively restores one", async () => {
+  // every ordered combination of one to three tokens from a pool that includes the zero/none/auto traps
+  const pool = ["0", "0px", "0.0em", ".0rem", "calc(0px)", "thin", "medium", "2px", "none", "auto", "solid", "hidden", "red", "#fff", "var(--c)"];
+  const forms = [];
+  const walk = (prefix) => {
+    if (prefix.length > 0) forms.push(prefix);
+    if (prefix.length === 3) return;
+    for (const token of pool) if (!prefix.includes(token)) walk([...prefix, token]);
+  };
+  walk([]);
+  // an independent oracle: only a non-zero literal width, a drawn style and at most one colour restore it
+  const restores = (tokens) => {
+    const width = tokens.filter((x) => /^(\d+\.?\d*|\.\d+)(px|em|rem)$/.test(x) && parseFloat(x) > 0);
+    const style = tokens.filter((x) => ["solid", "auto"].includes(x));
+    const colour = tokens.filter((x) => ["red", "#fff", "var(--c)"].includes(x));
+    return width.length === 1 && style.length === 1 && colour.length <= 1 && width.length + style.length + colour.length === tokens.length;
+  };
+  const dir = await mkdtemp(path.join(tmpdir(), "uiux-outline-"));
+  try {
+    await writeFile(path.join(dir, "f.css"), forms.map((tokens) => "a:focus { outline: " + tokens.join(" ") + "; }").join("\n") + "\n");
+    const result = await runAudit(dir);
+    const lineOf = (evidence) => Number(evidence[0].split(":").pop());
+    const found = new Set(result.findings.filter((f) => f.rule === FOCUS_RULE).map((f) => lineOf(f.evidence)));
+    const unknown = new Set(result.detectorsUnexaminable.filter((u) => u.rule === FOCUS_RULE).map((u) => lineOf(u.evidence)));
+    let restoring = 0;
+    forms.forEach((tokens, index) => {
+      const line = index + 1;
+      const spelled = tokens.join(" ");
+      if (restores(tokens)) {
+        restoring++;
+        assert.equal(found.has(line) || unknown.has(line), false, "restoring form must be silent: " + spelled);
+      } else {
+        assert.equal(found.has(line) || unknown.has(line), true, "must be a finding or unexaminable, never a pass: " + spelled);
+      }
+    });
+    assert.equal(restoring > 0, true);
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test("closed list: perf guards - work is bounded on small hostile inputs (selector cross product, unclosed blocks, deep nesting)", async () => {
+  const cases = [
+    // 8 nested rules of 8-selector lists: the full cross product is 16M selectors
+    ["cross product", Array.from({ length: 8 }, () => ".a1,.a2,.a3,.a4,.a5,.a6,.a7,.a8 {").join("") + ":focus{outline:none;}" + "}".repeat(8), /decided bound/],
+    // 60,000 unclosed blocks (120 KB, under the read cap), and 20,000 closed ones
+    ["unclosed blocks", "a{".repeat(60000), null],
+    ["deep closed nesting", "a{".repeat(20000) + "}".repeat(20000), null],
+    // nesting past the bound is not composed
+    ["deep nesting", "a{".repeat(40) + ":focus{outline:none;}" + "}".repeat(40), /decided bound/],
+  ];
+  for (const [name, css, reason] of cases) {
+    const dir = await mkdtemp(path.join(tmpdir(), "uiux-perf-"));
+    try {
+      await writeFile(path.join(dir, "f.scss"), css);
+      const started = Date.now();
+      // a small heap: an unbounded implementation aborts out of memory instead of finishing
+      const run = spawnSync(process.execPath, ["--max-old-space-size=256", path.join(ROOT, "scripts/uiux.mjs"), "audit", dir, "--json"], {
+        encoding: "utf8",
+        maxBuffer: 1 << 28,
+      });
+      const elapsed = Date.now() - started;
+      assert.equal(run.status, 0, name + " exit " + run.status + " " + String(run.stderr).slice(0, 120));
+      assert.equal(elapsed < 8000, true, name + " took " + elapsed + " ms");
+      const result = JSON.parse(run.stdout);
+      assert.deepEqual(result.findings.filter((f) => f.rule === FOCUS_RULE), [], name);
+      if (reason !== null) {
+        const u = result.detectorsUnexaminable.filter((x) => x.rule === FOCUS_RULE);
+        assert.equal(u.length >= 1, true, name);
+        assert.match(u[0].reason, reason, name);
+      }
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  }
 });
 
 test("closed list: a decided branch is not hidden by an off-list branch beside it", async () => {
