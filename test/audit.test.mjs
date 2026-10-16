@@ -1528,6 +1528,20 @@ test("ST-07: a negated union that holds :focus-visible is the exemption", async 
   }
 });
 
+test("ST-07: focused unions are focus subjects; a redundant union is bare focus", async () => {
+  const cases = [
+    [":is(:focus.a, :focus.b):not(:focus-visible) { outline: none; }\n", []],
+    [":where(:is(:focus.a), :focus.b):not(:focus-visible) { outline: none; }\n", []],
+    [":is(:focus.a, .b):not(:focus-visible) { outline: none; }\n", [FOCUS_RULE]],
+    [":is(:focus, :focus.x) { box-shadow: 0 0 0 2px blue; :is(&, .special) { outline: none; } }\n", []],
+    [":is(:focus, .x:focus) { box-shadow: 0 0 0 2px blue; :is(&, .special) { outline: none; } }\n", []],
+    [":is(:focus, .x) { box-shadow: 0 0 0 2px blue; :is(&, .special) { outline: none; } }\n", [FOCUS_RULE]],
+  ];
+  for (const [css, expected] of cases) {
+    assert.deepEqual((await focusAuditFor(css)).rules.filter((x) => x === FOCUS_RULE), expected, css);
+  }
+});
+
 test("ST-07: a doubly negated reference to the parent keeps the subject", async () => {
   const cases = [
     [":focus { box-shadow: 0 0 0 2px blue; :not(:not(&)) { outline: none; } }\n", []],

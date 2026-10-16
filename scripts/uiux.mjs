@@ -1125,12 +1125,7 @@ function hidesRingFromMouseOnly(selector) {
   };
   // a qualifier may sit between them (:focus.foo:not(:focus-visible)): the subject must be :focus and
   // carry the negation, both written on it
-  const focus = /:focus(?![\w-])/gi;
-  let focused = false;
-  for (let hit = focus.exec(subject); hit !== null; hit = focus.exec(subject)) {
-    if (depthAt(hit.index) === 0) focused = true;
-  }
-  if (!focused) return false;
+  if (!requiresFocus(subject)) return false;
   const pattern = /:not\(/gi;
   for (let start = pattern.exec(subject); start !== null; start = pattern.exec(subject)) {
     if (depthAt(start.index) !== 0) continue;
@@ -1163,7 +1158,48 @@ function isBareFocus(selector) {
     if (wrapped === null) break;
     current = wrapped[1].trim();
   }
-  return /^\*?\s*:focus$/i.test(current);
+  if (/^\*?\s*:focus$/i.test(current)) return true;
+  // a union is bare focus when one member is and every other member can only match focused elements
+  // (:is(:focus, :focus.x) is :focus)
+  const members = splitSelectorList(current);
+  return (
+    members.length > 1 &&
+    members.some((member) => /^\*?\s*:focus$/i.test(member.trim())) &&
+    members.every((member) => requiresFocus(member))
+  );
+}
+
+/**
+ * True when every element a compound matches is focused: it holds a depth-zero `:focus`, or a
+ * depth-zero :is()/:where() whose every alternative does (:is(:focus.a, :focus.b)).
+ */
+function requiresFocus(compound) {
+  const depthAt = (index) => {
+    let outer = 0;
+    for (let i = 0; i < index; i++) {
+      if (compound[i] === "(") outer++;
+      else if (compound[i] === ")") outer--;
+    }
+    return outer;
+  };
+  const focus = /:focus(?![\w-])/gi;
+  for (let hit = focus.exec(compound); hit !== null; hit = focus.exec(compound)) {
+    if (depthAt(hit.index) === 0) return true;
+  }
+  const wrapper = /:(?:is|where)\(/gi;
+  for (let start = wrapper.exec(compound); start !== null; start = wrapper.exec(compound)) {
+    if (depthAt(start.index) !== 0) continue;
+    let depth = 1;
+    let end = start.index + start[0].length;
+    for (; end < compound.length && depth > 0; end++) {
+      if (compound[end] === "(") depth++;
+      else if (compound[end] === ")") depth--;
+    }
+    if (depth !== 0) continue;
+    const alternatives = splitSelectorList(compound.slice(start.index + start[0].length, end - 1));
+    if (alternatives.length > 0 && alternatives.every((alternative) => requiresFocus(alternative))) return true;
+  }
+  return false;
 }
 
 /** A Sass placeholder selector: %name at the start of a compound (50% is a keyframe selector). */
