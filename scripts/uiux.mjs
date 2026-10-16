@@ -807,7 +807,19 @@ function replacementVerdict(node, compensating) {
       const property = text.slice(0, colon).trim().toLowerCase();
       if (property === "") continue;
       const value = text.slice(colon + 1).trim();
-      decls.push({ at, lo, hi, property, value, important: IMPORTANT.test(value) });
+      const important = IMPORTANT.test(value);
+      const longhand = /^border-(style|width|color)$/.exec(property);
+      const values = value.replace(IMPORTANT, "").trim().split(/\s+(?![^(]*\))/);
+      if (longhand && values.length > 1 && values.length <= 4) {
+        // border-width: 0 0 0 0 - one to four values are top, right, bottom, left (CSS 1-4 value syntax)
+        const [a, b = a, c = a, d = b] = values;
+        const bySide = values.length === 2 ? [a, b, a, b] : values.length === 3 ? [a, b, c, b] : [a, b, c, d];
+        BORDER_SIDES.forEach((side, k) => {
+          decls.push({ at, lo, hi, property: "border-" + side + "-" + longhand[1], value: bySide[k], important });
+        });
+        continue;
+      }
+      decls.push({ at, lo, hi, property, value, important });
     }
   }
   // source order is absolute position (a stable sort keeps the tokens of one @apply in order)

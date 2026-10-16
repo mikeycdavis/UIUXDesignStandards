@@ -1058,6 +1058,13 @@ test("ST-07: a same-element child that disables an inherited replacement removes
     [":focus { border: 2px solid blue !important; &.danger { outline: none; border-style: none; } }\n", []],
     [":focus { border: 2px solid blue !important; &.danger { outline: none; border-style: none !important; } }\n", [FOCUS_RULE]],
     [":focus { border: 2px solid blue; &.danger { outline: none; border-style: none !important; } }\n", [FOCUS_RULE]],
+    // one to four values are top, right, bottom, left
+    [":focus { border: 2px solid blue; &.x { outline: none; border-width: 0 0 0 0; } }\n", [FOCUS_RULE]],
+    [":focus { border: 2px solid blue; &.x { outline: none; border-width: 0 0 2px 0; } }\n", []],
+    [":focus { border: 2px solid blue; &.x { outline: none; border-style: none none; } }\n", [FOCUS_RULE]],
+    [":focus { border: 2px solid blue; &.x { outline: none; border-style: none solid; } }\n", []],
+    [":focus { border-bottom: 2px solid blue; &.x { outline: none; border-width: 0 0 0 0; } }\n", [FOCUS_RULE]],
+    [":focus { border-bottom: 2px solid blue; &.x { outline: none; border-width: 0 0 2px; } }\n", []],
     // an inherited indicator of another family is untouched
     [":focus { border: 2px solid blue; box-shadow: 0 0 0 2px blue; &.x { outline: none; border-style: none; } }\n", []],
   ];
