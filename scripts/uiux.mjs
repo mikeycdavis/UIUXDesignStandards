@@ -1077,15 +1077,18 @@ function namesSameSubject(part, parentIsBareFocus = false) {
       // is a focus selector of its own is a different rule and is not the parent.
       const same = args.filter((arg) => namesSameSubject(arg, parentIsBareFocus));
       const others = args.filter((arg) => !namesSameSubject(arg, parentIsBareFocus));
-      if (same.length === 0) return false;
-      if (others.length > 0) {
+      // a list that never mentions the parent is an ordinary filter (&:is(.foo, .bar)): it narrows a
+      // subject anchored elsewhere and anchors nothing itself
+      const filterOnly = !args.some((arg) => arg.includes("&"));
+      if (!filterOnly && same.length === 0) return false;
+      if (!filterOnly && others.length > 0) {
         // another element may be focused without being the parent: it carries the parent's indicator
         // only when the parent selects EVERY focused element (a bare :focus)
         if (!parentIsBareFocus) return false;
         // :focus-within matches an ancestor of the focused element, which the parent does not style
         if (others.some((arg) => arg.includes("&") || /:focus-within/i.test(arg))) return false;
       }
-      anchored = true;
+      if (!filterOnly) anchored = true;
     }
     rest = rest.slice(0, m.index) + rest.slice(end);
   }
