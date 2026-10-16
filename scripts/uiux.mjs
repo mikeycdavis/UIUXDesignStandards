@@ -868,7 +868,7 @@ function replacementVerdict(node, compensating) {
       if (property === "") continue;
       const value = text.slice(colon + 1).trim();
       // an interpolation may expand to a value ending in !important
-      const important = value.includes(UNKNOWN) ? "unknown" : IMPORTANT.test(value);
+      const important = value.includes(UNKNOWN) || /\$[A-Za-z_-]/.test(value) ? "unknown" : IMPORTANT.test(value);
       const longhand = /^border-(style|width|color)$/.exec(property);
       const logical = /^border-(block|inline)-(style|width|color)$/.exec(property);
       const values = value.replace(IMPORTANT, "").trim().split(/\s+(?![^(]*\))/);
@@ -895,8 +895,8 @@ function replacementVerdict(node, compensating) {
           // a var()/env()/interpolated token may carry any facet it is not already known for: such a
           // facet keeps that token's unresolved value (nothing is defaulted), while the facets that
           // known tokens fix stay known (border: 0 solid var(--c) has a zero width whatever --c is)
-          const unresolved = tokens.find((t) => t.includes(UNKNOWN) || /^(var|env)\(/i.test(t));
-          const known = tokens.filter((t) => t !== unresolved && !(t.includes(UNKNOWN) || /^(var|env)\(/i.test(t)));
+          const unresolved = tokens.find((t) => t.includes(UNKNOWN) || UNRESOLVED.test(t));
+          const known = tokens.filter((t) => t !== unresolved && !(t.includes(UNKNOWN) || UNRESOLVED.test(t)));
           const style = known.find((t) => /^(none|hidden|dotted|dashed|solid|double|groove|ridge|inset|outset)$/i.test(t));
           const widthToken = known.find((t) => /^(thin|medium|thick)$/i.test(t) || /^[+-]?[\d.]/.test(t) || /^calc\(/i.test(t));
           const width = widthToken === undefined ? undefined : readCalc(widthToken);
@@ -920,7 +920,7 @@ function replacementVerdict(node, compensating) {
         // supplies one
         // inherit keeps whatever the parent paints: potentially visible, never asserted absent
         // an unresolved var()/env() can invalidate the whole declaration, so no part of it is known
-        const unresolved = /\b(var|env)\(/i.test(value);
+        const unresolved = UNRESOLVED.test(value);
         const inherited = /^inherit(\s*!important)?$/i.test(value) || value.includes(UNKNOWN) || unresolved;
         const image = inherited || /url\(|gradient\(|image-set\(|paint\(|element\(|cross-fade\(|\bimage\(/i.test(value) ? value : "none";
         decls.push({ at, lo, hi, layer, property: "background-color", value: unresolved ? value : shorthandBackgroundColor(value), important });
@@ -936,7 +936,7 @@ function replacementVerdict(node, compensating) {
         continue;
       }
       // an interpolated value of a relevant property may be an indicator
-      const introduces = (value.includes(UNKNOWN) || /\b(var|env)\(/i.test(value)) && FOCUS_RELEVANT_PROPERTY.test(property) && !/^outline(-(style|width))?$/i.test(property);
+      const introduces = (value.includes(UNKNOWN) || UNRESOLVED.test(value)) && FOCUS_RELEVANT_PROPERTY.test(property) && !/^outline(-(style|width))?$/i.test(property);
       decls.push({ at, lo, hi, layer, property, value, important, introduces });
     }
   }
@@ -951,7 +951,11 @@ function replacementVerdict(node, compensating) {
     // an interpolated value is unknown: it may or may not be an indicator, and the cascade decides
     // whether it can matter at all
     // (var() and env() are as unresolved as an interpolation: the custom property may hold none)
-    d.enabled = d.value.includes(UNKNOWN) || /\b(var|env)\(/i.test(d.value) ? "unknown" : !DISABLED_VALUE.test(d.value);
+    // (all: inherit takes the parent's value, which may be none: an unknown reset)
+    d.enabled =
+      d.value.includes(UNKNOWN) || UNRESOLVED.test(d.value) || (d.property === "all" && /^inherit$/i.test(d.value))
+        ? "unknown"
+        : !DISABLED_VALUE.test(d.value);
     d.covers = declarationCovers(d.property);
   });
   const isSingle = (d) => compareSpecificity(d.lo, d.hi) === 0;
@@ -1023,6 +1027,8 @@ function replacementVerdict(node, compensating) {
       unknown = true;
     }
   }
+  // an unresolved or inherited all may bring an indicator in from elsewhere
+  if (resets.some((reset) => reset.enabled === "unknown")) return "unknown";
   return unknown ? "unknown" : "absent";
 }
 
@@ -1193,6 +1199,20 @@ function requiresFocus(compound) {
   for (let hit = focus.exec(compound); hit !== null; hit = focus.exec(compound)) {
     if (depthAt(hit.index) === 0) return true;
   }
+  // a doubled negation is its argument: :not(:not(:focus)) is :focus
+  const negation = /:not\(/gi;
+  for (let start = negation.exec(compound); start !== null; start = negation.exec(compound)) {
+    if (depthAt(start.index) !== 0) continue;
+    let depth = 1;
+    let end = start.index + start[0].length;
+    for (; end < compound.length && depth > 0; end++) {
+      if (compound[end] === "(") depth++;
+      else if (compound[end] === ")") depth--;
+    }
+    if (depth !== 0) continue;
+    const inner = /^\s*:not\(([\s\S]*)\)\s*$/i.exec(compound.slice(start.index + start[0].length, end - 1));
+    if (inner !== null && splitSelectorList(inner[1]).every((alternative) => requiresFocus(alternative))) return true;
+  }
   const wrapper = /:(?:is|where)\(/gi;
   for (let start = wrapper.exec(compound); start !== null; start = wrapper.exec(compound)) {
     if (depthAt(start.index) !== 0) continue;
@@ -1209,7 +1229,7 @@ function requiresFocus(compound) {
   return false;
 }
 
-const UNRESOLVED = /(^|[^\w-])(var|env)\(/i;
+const UNRESOLVED = /(^|[^\w-])(var|env)\(|\$[A-Za-z_-]/i;
 
 /**
  * A width token with a calc() read statically: a single-term calc is its term (calc(0px) is 0), and a

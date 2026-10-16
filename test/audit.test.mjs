@@ -1658,6 +1658,26 @@ test("ST-07: statically zero calc() widths and all resets take part in the outli
   }
 });
 
+test("ST-07: Sass variables are unresolved; all: inherit is an unknown reset; a doubled negation of focus is focus", async () => {
+  const cases = [
+    ["$style: none;\n:focus { outline: none; outline-style: $style; }\n", "unexaminable"],
+    ["$w: 0;\n:focus { outline: none; outline: $w solid red; }\n", "unexaminable"],
+    [":focus { box-shadow: 0 0 0 2px blue; all: inherit; outline: none; }\n", "unexaminable"],
+    [":focus { box-shadow: 0 0 0 2px blue; box-shadow: none; outline: none; all: inherit; }\n", "unexaminable"],
+    ["$s: 0 0 0 2px blue;\n:focus { outline: none; box-shadow: $s; box-shadow: none !important; }\n", [FOCUS_RULE]],
+    [":not(:not(:focus)):not(:focus-visible) { outline: none; }\n", []],
+    [":not(:not(:focus, .a)):not(:focus-visible) { outline: none; }\n", [FOCUS_RULE]],
+  ];
+  for (const [css, expected] of cases) {
+    const r = await focusAuditFor(css);
+    const found = r.rules.filter((x) => x === FOCUS_RULE);
+    if (expected === "unexaminable") {
+      assert.deepEqual(found, [], css);
+      assert.equal(r.unexaminable.length >= 1, true, css);
+    } else assert.deepEqual(found, expected, css);
+  }
+});
+
 test("ST-07: a doubly negated reference to the parent keeps the subject", async () => {
   const cases = [
     [":focus { box-shadow: 0 0 0 2px blue; :not(:not(&)) { outline: none; } }\n", []],
