@@ -1051,6 +1051,16 @@ const OFF_LIST_FORMS = [
   [":focus { outline: none; border: 0; }\n", REASON.replacement],
   [":focus { outline: none; border: calc(1px + 1px) solid red; }\n", REASON.replacement],
   [":focus { outline: none; border: 0 solid red; }\n", REASON.replacement],
+  [":focus { outline: none; box-shadow: red; }\n", REASON.replacement],
+  [":focus { outline: none; box-shadow: 2px; }\n", REASON.replacement],
+  [":focus { outline: none; box-shadow: 0 0 0 0 0 red; }\n", REASON.replacement],
+  [":focus { outline: none; box-shadow: 0 red 0 2px; }\n", REASON.replacement],
+  [":focus { outline: none; box-shadow: inset inset 0 0 red; }\n", REASON.replacement],
+  [":focus { outline: none; box-shadow: 0 0 red blue; }\n", REASON.replacement],
+  [":focus { outline: none; text-decoration-line: underline underline; }\n", REASON.replacement],
+  [":focus { outline: none; text-decoration: underline underline; }\n", REASON.replacement],
+  [":focus { outline: none; text-decoration: underline solid dotted; }\n", REASON.replacement],
+  [":focus { outline: none; text-decoration: underline red blue; }\n", REASON.replacement],
   [":focus { outline: none; text-decoration-line: solid; }\n", REASON.replacement],
   [":focus { outline: none; text-decoration: solid; }\n", REASON.replacement],
   [":focus { outline: none; text-decoration-line: underline solid; }\n", REASON.replacement],
@@ -1263,6 +1273,58 @@ test("closed list: an outline shorthand is a finding or unexaminable unless it p
       }
     });
     assert.equal(restoring > 0, true);
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test("closed list: a generated box-shadow or text-decoration is a finding unless it positively paints", async () => {
+  const dir = await mkdtemp(path.join(tmpdir(), "uiux-shadow-"));
+  try {
+    const rules = [];
+    const walk = (pool, prefix, depth, out) => {
+      if (prefix.length > 0) out.push(prefix);
+      if (prefix.length === depth) return;
+      for (const token of pool) walk(pool, [...prefix, token], depth, out);
+    };
+    const shadows = [];
+    walk(["0", "2px", "inset", "red", "#fff", "transparent", "foo"], [], 4, shadows);
+    const decorations = [];
+    walk(["underline", "overline", "solid", "wavy", "2px", "red", "none", "foo"], [], 3, decorations);
+    const isLength = (x) => /^[0-9]+(px)?$/.test(x);
+    const isColour = (x) => ["red", "#fff"].includes(x);
+    const shadowPaints = (tokens) => {
+      const at = tokens.map((x, i) => (isLength(x) ? i : -1)).filter((i) => i >= 0);
+      const inset = tokens.filter((x) => x === "inset").length;
+      const colour = tokens.filter(isColour).length;
+      return at.length >= 2 && at.length <= 4 && at[at.length - 1] - at[0] === at.length - 1 && inset <= 1 && colour <= 1 &&
+        at.length + inset + colour === tokens.length;
+    };
+    const decorationPaints = (tokens) => {
+      const lines = tokens.filter((x) => ["underline", "overline"].includes(x));
+      const styles = tokens.filter((x) => ["solid", "wavy"].includes(x)).length;
+      const lengths = tokens.filter((x) => x === "2px").length;
+      const colours = tokens.filter(isColour).length;
+      return lines.length > 0 && new Set(lines).size === lines.length && styles <= 1 && lengths <= 1 && colours <= 1 &&
+        lines.length + styles + lengths + colours === tokens.length;
+    };
+    const forms = [];
+    for (const tokens of shadows) forms.push([tokens, "box-shadow", shadowPaints(tokens)]);
+    for (const tokens of decorations) forms.push([tokens, "text-decoration", decorationPaints(tokens)]);
+    await writeFile(path.join(dir, "f.css"), forms.map(([tokens, property]) => "a:focus { outline: none; " + property + ": " + tokens.join(" ") + "; }").join("\n") + "\n");
+    const result = await runAudit(dir);
+    const lineOf = (evidence) => Number(evidence[0].split(":").pop());
+    const loud = new Set([
+      ...result.findings.filter((f) => f.rule === FOCUS_RULE).map((f) => lineOf(f.evidence)),
+      ...result.detectorsUnexaminable.filter((u) => u.rule === FOCUS_RULE).map((u) => lineOf(u.evidence)),
+    ]);
+    let painting = 0;
+    forms.forEach(([tokens, property, paints], index) => {
+      const spelled = property + ": " + tokens.join(" ");
+      if (paints) painting++;
+      assert.equal(loud.has(index + 1), !paints, spelled);
+    });
+    assert.equal(painting > 0, true);
   } finally {
     await rm(dir, { recursive: true, force: true });
   }

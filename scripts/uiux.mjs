@@ -953,9 +953,15 @@ function positiveIndicatorValue(property, value) {
   const tokensOf = (text) => text.trim().split(/\s+(?![^(]*\))/).filter(Boolean);
   const line = /^(underline|overline|line-through)$/i;
   if (p === "box-shadow") {
+    // a layer is two to four contiguous lengths (offsets, blur, spread), at most one inset and one colour
     return splitSelectorList(value).every((layer) => {
       const tokens = tokensOf(layer);
-      return tokens.length > 0 && tokens.every((t) => length(t) || /^inset$/i.test(t) || opaqueColour(t));
+      const lengths = tokens.map((t, i) => (length(t) ? i : -1)).filter((i) => i >= 0);
+      const insets = tokens.filter((t) => /^inset$/i.test(t)).length;
+      const colours = tokens.filter((t) => opaqueColour(t)).length;
+      const contiguous = lengths.length > 0 && lengths[lengths.length - 1] - lengths[0] === lengths.length - 1;
+      return contiguous && lengths.length >= 2 && lengths.length <= 4 && insets <= 1 && colours <= 1 &&
+        lengths.length + insets + colours === tokens.length;
     });
   }
   const tokens = tokensOf(value);
@@ -963,12 +969,16 @@ function positiveIndicatorValue(property, value) {
     return tokens.length === 1 && opaqueColour(tokens[0]) && splitSelectorList(value).length === 1;
   }
   if (p === "outline-offset") return tokens.length === 1 && length(tokens[0]);
-  if (p === "text-decoration-line") return tokens.length > 0 && tokens.every((t) => line.test(t));
+  // each line keyword at most once; a decoration has at most one style, one thickness and one colour
+  const lines = tokens.filter((t) => line.test(t)).map((t) => t.toLowerCase());
+  const uniqueLines = new Set(lines).size === lines.length;
+  if (p === "text-decoration-line") return tokens.length > 0 && lines.length === tokens.length && uniqueLines;
   if (p === "text-decoration") {
-    return (
-      tokens.some((t) => line.test(t)) &&
-      tokens.every((t) => line.test(t) || /^(solid|double|dotted|dashed|wavy)$/i.test(t) || length(t) || opaqueColour(t))
-    );
+    const styles = tokens.filter((t) => /^(solid|double|dotted|dashed|wavy)$/i.test(t)).length;
+    const lengths = tokens.filter((t) => length(t)).length;
+    const colours = tokens.filter((t) => opaqueColour(t)).length;
+    return lines.length > 0 && uniqueLines && styles <= 1 && lengths <= 1 && colours <= 1 &&
+      lines.length + styles + lengths + colours === tokens.length;
   }
   return false;
 }
