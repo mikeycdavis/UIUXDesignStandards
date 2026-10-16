@@ -787,7 +787,7 @@ const UNEXAMINABLE_REASONS = {
   selectorOpaque: "it sits inside an @include / control directive / mixin whose selector semantics are not modelled",
   outlineForm: "the outline is not removed by exactly one plain 'outline: none|0' declaration (several declarations, a longhand, all:, an important or unresolved value are not decided)",
   replacementForm: "a replacement indicator is not a plain literal in this block (an unresolved, calculated, disabled, important or repeated value is not decided)",
-  propertyName: "an interpolation in a property name may be outline or a ring property",
+  propertyName: "an interpolation or a CSS escape in a property name may be outline or an indicator property",
   declarationForm: "an interpolation outside a property: value declaration",
   opaqueChild: "a control directive or @include inside the rule may change its declarations, which are not modelled",
   nested: "a nested rule inherits declarations of an enclosing rule or layer, and the cascade between them is not decided",
@@ -879,7 +879,8 @@ function offListSelector(selector) {
   if (/[()&]/.test(rest)) return UNEXAMINABLE_REASONS.selectorFunctional;
   for (const m of rest.matchAll(/(::?)([A-Za-z-]+)/g)) {
     const name = m[2].toLowerCase();
-    if (m[1] === "::" ? !DECIDED_PSEUDO_ELEMENTS.has(name) : !DECIDED_PSEUDO_CLASSES.has(name) && !DECIDED_PSEUDO_ELEMENTS.has(name)) {
+    const legacy = ["before", "after", "first-line", "first-letter"].includes(name);
+    if (m[1] === "::" ? !DECIDED_PSEUDO_ELEMENTS.has(name) : !DECIDED_PSEUDO_CLASSES.has(name) && !legacy) {
       return UNEXAMINABLE_REASONS.selectorFunctional;
     }
   }
@@ -982,8 +983,9 @@ function positiveIndicatorValue(property, value) {
   const line = /^(underline|overline|line-through)$/i;
   if (p === "box-shadow") {
     // a layer is two to four contiguous lengths (offsets, blur, spread), at most one inset and one colour
-    return splitSelectorList(value).every((layer) => {
+    return splitLayers(value).every((layer) => {
       const tokens = tokensOf(layer);
+      if (tokens.length === 0) return false; // an empty layer
       const lengths = tokens.map((t, i) => (length(t) ? i : -1)).filter((i) => i >= 0);
       const insets = tokens.filter((t) => /^inset$/i.test(t)).length;
       const colours = tokens.filter((t) => opaqueColour(t)).length;
@@ -996,7 +998,7 @@ function positiveIndicatorValue(property, value) {
   }
   const tokens = tokensOf(value);
   if (p === "background" || p === "background-color" || p === "outline-color") {
-    return tokens.length === 1 && opaqueColour(tokens[0]) && splitSelectorList(value).length === 1;
+    return tokens.length === 1 && opaqueColour(tokens[0]) && splitLayers(value).length === 1;
   }
   if (p === "outline-offset") return tokens.length === 1 && length(tokens[0]);
   // each line keyword at most once; a decoration has at most one style, one thickness and one colour
@@ -1006,12 +1008,29 @@ function positiveIndicatorValue(property, value) {
   if (p === "text-decoration-line") return false;
   if (p === "text-decoration") {
     const styles = tokens.filter((t) => /^(solid|double|dotted|dashed|wavy)$/i.test(t)).length;
-    const lengths = tokens.filter((t) => length(t)).length;
+    const lengths = tokens.filter((t) => length(t) && !t.startsWith("-")).length;
     const colours = tokens.filter((t) => opaqueColour(t)).length;
     return lines.length > 0 && uniqueLines && styles <= 1 && lengths <= 1 && colours === 1 &&
       lines.length + styles + lengths + colours === tokens.length;
   }
   return false;
+}
+
+/** A value split on top-level commas, EMPTY members kept (a trailing comma makes the declaration invalid). */
+function splitLayers(value) {
+  const layers = [];
+  let depth = 0;
+  let current = "";
+  for (const ch of value) {
+    if (ch === "(") depth++;
+    else if (ch === ")") depth = Math.max(0, depth - 1);
+    if (ch === "," && depth === 0) {
+      layers.push(current);
+      current = "";
+    } else current += ch;
+  }
+  layers.push(current);
+  return layers;
 }
 
 /**
@@ -1025,7 +1044,8 @@ function restoresOutline(value, allowAuto = true) {
   if (style === undefined || width === undefined) return false;
   const rest = split.filter((t, i) => i !== split.indexOf(style) && i !== split.indexOf(width));
   if (rest.length > 1) return false;
-  if (rest.length === 0) return true;
+  // the colour is mandatory: an omitted one is currentcolor, which cannot be shown to paint
+  if (rest.length === 0) return false;
   // the one more token must be a colour: a hex, a function (rgb(), var()), or a colour name - not a
   // number, a style or width keyword, or a CSS-wide value, which would make the shorthand invalid
   const c = rest[0];
@@ -1047,7 +1067,7 @@ function replacementReason(declarations) {
     }
     // a comma list is read layer by layer for box-shadow (every layer must be a literal, non-disabled
     // shadow) and is off the list for every other indicator property (background layers, ...)
-    const layers = splitSelectorList(d.value);
+    const layers = splitLayers(d.value);
     if (layers.length > 1) {
       if (family !== "box-shadow" || layers.some((layer) => DISABLED_LITERAL.test(layer.trim()))) {
         return UNEXAMINABLE_REASONS.replacementForm;
@@ -1489,8 +1509,13 @@ export const DETECTORS = [
         }
         if (focusish.length === 0) continue; // cannot be a focus rule
         // an interpolation in a property name, or outside a property: value declaration, may be an outline
-        const shapes = node.body.split(";").filter((raw) => raw.includes(UNKNOWN) && !/^\s*@apply\b/i.test(raw));
-        const badShape = shapes.find((raw) => raw.indexOf(":") === -1 || raw.slice(0, raw.indexOf(":")).includes(UNKNOWN));
+        // (a CSS escape can spell a property name too: out\6c ine is outline)
+        const shapes = node.body
+          .split(";")
+          .filter((raw) => !/^\s*@apply\b/i.test(raw) && (raw.includes(UNKNOWN) || raw.slice(0, Math.max(0, raw.indexOf(":"))).includes("\\")));
+        const badShape = shapes.find(
+          (raw) => raw.indexOf(":") === -1 || /[\\]/.test(raw.slice(0, raw.indexOf(":"))),
+        );
         if (badShape !== undefined) {
           note(badShape.indexOf(":") === -1 ? UNEXAMINABLE_REASONS.declarationForm : UNEXAMINABLE_REASONS.propertyName);
           continue;

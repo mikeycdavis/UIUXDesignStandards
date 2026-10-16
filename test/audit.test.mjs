@@ -521,7 +521,7 @@ test("ST-07: an unexaminable block makes the rule unevaluated even when another 
 test("ST-07: interpolations that cannot change the answer stay examined", async () => {
   const cases = [
     [":focus { outline: none; margin: #{$gap}; }\n", [FOCUS_RULE]],
-    [":focus { outline: 2px solid; width: calc(#{$a} + 1px); }\n", []],
+    [":focus { outline: 2px solid red; width: calc(#{$a} + 1px); }\n", []],
     [':focus { content: "#{$x}"; outline: none; }\n', [FOCUS_RULE]],
     ["// :focus { outline: #{$o}; }\n:focus { outline: none; }\n", [FOCUS_RULE]],
     ["/* :focus { outline: #{$o}; } */\n:focus { outline: none; }\n", [FOCUS_RULE]],
@@ -948,7 +948,7 @@ const REASON = {
   outline: /outline is not removed by exactly one plain/,
   replacement: /replacement indicator is not a plain literal/,
   nested: /nested rule inherits declarations/,
-  propertyName: /interpolation in a property name/,
+  propertyName: /in a property name/,
 };
 
 const DECIDED_FORMS = [
@@ -1269,7 +1269,7 @@ test("closed list: an outline shorthand is a finding or unexaminable unless it p
     const width = tokens.filter((x) => /^(\d+\.?\d*|\.\d+)(px|em|rem)$/.test(x) && parseFloat(x) > 0);
     const style = tokens.filter((x) => ["solid", "auto"].includes(x));
     const colour = tokens.filter((x) => ["red", "#fff", "var(--c)"].includes(x));
-    return width.length === 1 && style.length === 1 && colour.length <= 1 && width.length + style.length + colour.length === tokens.length;
+    return width.length === 1 && style.length === 1 && colour.length === 1 && width.length + style.length + colour.length === tokens.length;
   };
   const dir = await mkdtemp(path.join(tmpdir(), "uiux-outline-"));
   try {
@@ -1418,6 +1418,15 @@ test("closed list: rgb() and hsl() are decided only in their real grammars", asy
     const r = await focusAuditFor(":focus { outline: none; border-top: 2px solid " + value + "; }\n");
     assert.deepEqual(r.rules.filter((x) => x === FOCUS_RULE), [], value);
     assert.deepEqual(r.unexaminable, [], value);
+  }
+});
+
+test("closed list: escapes in a property name, empty or negative layers, an omitted colour and legacy-only pseudo-elements", async () => {
+  for (const css of [":focus { out\\6c ine: none; }\n", ":focus { outline: none; box-shadow: 0 0 2px red,; }\n", ":focus { outline: none; text-decoration: underline -2px red; }\n", ":focus { color: transparent; outline: none; border: 2px solid; }\n", ":focus { outline: 2px solid; }\n", ":focus:marker { outline: none; }\n", ":focus:selection { outline: none; }\n"]) {
+    const r = await focusAuditFor(css);
+    assert.deepEqual(r.rules.filter((x) => x === FOCUS_RULE), [], css);
+    assert.equal(r.examined, false, css);
+    assert.equal(r.unexaminable.length >= 1 || css.includes(":focus:"), true, css);
   }
 });
 
