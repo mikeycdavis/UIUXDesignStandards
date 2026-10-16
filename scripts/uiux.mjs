@@ -810,7 +810,8 @@ const UNEXAMINABLE_REASONS = {
 };
 
 /** A value that is not a plain literal: a custom property, Sass variable, calculation or interpolation. */
-const UNRESOLVED_VALUE = /(^|[^\w-])(var|env|calc|min|max|clamp)\(|\$[A-Za-z_-]/i;
+// (a backslash makes the value an escape sequence that could spell any keyword: not decided either)
+const UNRESOLVED_VALUE = /(^|[^\w-])(var|env|calc|min|max|clamp)\(|\$[A-Za-z_-]|\\/i;
 const IMPORTANT = /!\s*important\s*$/i;
 const DISABLED_LITERAL = /^(none|hidden|0+(\.0*)?[a-z%]*|initial|unset|revert|revert-layer|transparent|inherit)$/i;
 
@@ -919,6 +920,13 @@ function offListSelector(selector) {
   const compounds = selectorCompounds(selector);
   for (const compound of compounds.slice(0, -1)) {
     if (/::|:(before|after|first-line|first-letter)(?![A-Za-z-])/i.test(compound)) return UNEXAMINABLE_REASONS.selectorSyntax;
+  }
+  // within a compound only pseudo-classes may follow a pseudo-element (.x::before.foo and ::before::after are errors)
+  for (const compound of compounds) {
+    const element = /(?:::[A-Za-z-]+|:(?:before|after|first-line|first-letter)(?![A-Za-z-]))/i.exec(compound);
+    if (element !== null && !/^(?::(?!:)[A-Za-z-]+)*$/.test(compound.slice(element.index + element[0].length))) {
+      return UNEXAMINABLE_REASONS.selectorSyntax;
+    }
   }
   // the remaining syntax must be positively recognised, attribute selectors included
   for (const m of selector.matchAll(/\[([^\]]*)\]/g)) if (!ATTRIBUTE.test(m[1])) return UNEXAMINABLE_REASONS.selectorSyntax;
