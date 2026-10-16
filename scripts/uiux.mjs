@@ -789,7 +789,10 @@ function offListSelector(selector) {
  * pseudo-classes it names.
  */
 function isFocusSelector(selector) {
-  return FOCUS_SELECTOR.test(selector.replace(/:not\(\s*:focus-visible\s*\)/gi, ""));
+  // the focus pseudo-class must be on the SUBJECT (the last compound): `.btn:focus .icon` styles the icon
+  const compounds = selectorCompounds(selector);
+  const subject = compounds.length > 0 ? compounds[compounds.length - 1] : selector;
+  return FOCUS_SELECTOR.test(subject.replace(/:not\(\s*:focus-visible\s*\)/gi, ""));
 }
 
 /** Compound selectors of a selector: split on combinators and commas outside parentheses. */

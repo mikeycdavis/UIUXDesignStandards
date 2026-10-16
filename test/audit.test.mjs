@@ -522,11 +522,11 @@ test("ST-07: a nested rule is examined under its COMPOSED selector", async () =>
     // [css, expected rules, expected examined]
     [".a { &:focus { outline: none; } }\n", [FOCUS_RULE]],
     [":focus { &.danger { outline: none; } }\n", [FOCUS_RULE]],
-    [":focus { .danger { outline: none; } }\n", [FOCUS_RULE]],
-    [":focus { & > .x { outline: none; } }\n", [FOCUS_RULE]],
+    [":focus { .danger { outline: none; } }\n", []],
+    [":focus { & > .x { outline: none; } }\n", []],
     [":focus { .a &, .b { outline: none; } }\n", [FOCUS_RULE]],
     [".a, :focus { outline: none; }\n", [FOCUS_RULE]],
-    [".a, .b:focus { .c { outline: none; } }\n", [FOCUS_RULE]],
+    [".a, .b:focus { .c { outline: none; } }\n", []],
     [".a, .b { &:focus-visible { outline: none; } }\n", [FOCUS_RULE]],
     [".a { .b { &:focus { outline: none; } } }\n", [FOCUS_RULE]],
     [":focus-within { &.x { outline: none; } }\n", [FOCUS_RULE]],
@@ -630,7 +630,7 @@ test("ST-07: an at-rule prelude is not a selector", async () => {
 test("ST-07: @at-root replaces the ancestor selector, and at-rule names are case-insensitive", async () => {
   // @at-root children are not descendants of the enclosing rule
   assert.deepEqual((await focusAuditFor(":focus { @at-root { .not-focus { outline: none; } } }\n")).rules, []);
-  assert.deepEqual((await focusAuditFor(":focus { @at-root (without: media) { .not-focus { outline: none; } } }\n")).rules.filter((x) => x === FOCUS_RULE), [FOCUS_RULE]); // without: media keeps the rule
+  assert.deepEqual((await focusAuditFor(":focus { @at-root (without: media) { .not-focus { outline: none; } } }\n")).rules.filter((x) => x === FOCUS_RULE), []); // without: media keeps the rule, but .not-focus is its descendant
   assert.deepEqual((await focusAuditFor(":focus { @at-root .not-focus { outline: none; } }\n")).rules, []);
   // ...but a literal & still names the enclosing rule, and @at-root .x:focus is a focus rule itself
   assert.deepEqual((await focusAuditFor(".a { @at-root { &:focus { outline: none; } } }\n")).rules.filter((x) => x === FOCUS_RULE), [FOCUS_RULE]);
@@ -670,7 +670,7 @@ test("ST-07: @at-root queries x nesting depth (Sass query semantics, reset carri
       // a rule inside: under :focus when the rule is preserved, a plain .not-focus when it is reset
       const rule = `:focus { @at-root ${query} { ${open} .not-focus { outline: none; } ${close} } }\n`;
       const r = await focusAuditFor(rule);
-      assert.deepEqual(r.rules, resets ? [] : [FOCUS_RULE], rule);
+      assert.deepEqual(r.rules, [], rule); // a descendant of :focus is not the focused element
       assert.deepEqual(r.unexaminable, [], rule);
       // a declaration directly inside belongs to the enclosing rule when it is preserved
       const direct = `:focus { @at-root ${query} { ${open} outline: none; ${close} } }\n`;
@@ -743,10 +743,11 @@ test("ST-07: generic CSS at-rules keep the enclosing rule around their declarati
     ":focus { @CUSTOM state { outline: none; } }\n",
     ":focus { @custom a { @custom b { outline: none; } } }\n",
     ":focus { @custom state { &.x { outline: none; } } }\n",
-    ":focus { @custom state { .x { outline: none; } } }\n",
   ]) {
     assert.deepEqual((await focusAuditFor(css)).rules.filter((x) => x === FOCUS_RULE), [FOCUS_RULE], css);
   }
+  // a descendant of the focused element is not the focused element
+  assert.deepEqual((await focusAuditFor(":focus { @custom state { .x { outline: none; } } }\n")).rules.filter((x) => x === FOCUS_RULE), []);
   // not under a focus rule: nothing to report
   assert.deepEqual((await focusAuditFor(".a { @custom state { outline: none; } }\n")).rules.filter((x) => x === FOCUS_RULE), []);
   // a keyframes/font-face between the rule and the generic at-rule still breaks the context
@@ -971,6 +972,14 @@ const DECIDED_FORMS = [
   [".a { margin: 0; &:focus { outline: none; } }\n", true],
 ];
 
+test("closed list: a focus pseudo-class on an ancestor compound is not a focus rule", async () => {
+  for (const css of [".button:focus .icon { outline: none; }\n", ".button:focus { .icon { outline: none; } }\n", ":focus-within > .x { outline: none; }\n"]) {
+    const r = await focusAuditFor(css);
+    assert.deepEqual(r.rules.filter((x) => x === FOCUS_RULE), [], css);
+    assert.deepEqual(r.unexaminable, [], css);
+  }
+});
+
 test("closed list: every decided form is decided correctly", async () => {
   for (const [css, finding] of DECIDED_FORMS) {
     const r = await focusAuditFor(css);
@@ -1045,7 +1054,6 @@ const OFF_LIST_FORMS = [
   [":focus { outline: none; border-bottom: 2px solid env(x); }\n", REASON.replacement],
   // [css, reason] - nesting and layers
   [":focus { box-shadow: 0 0 0 2px blue; &.x { outline: none; } }\n", REASON.nested],
-  [":focus { box-shadow: 0 0 0 2px blue; .x { outline: none; } }\n", REASON.nested],
   [".a { outline: none; &:focus { outline: none; } }\n", REASON.nested],
   [":focus { @media (min-width: 1px) { box-shadow: 0 0 0 2px blue; &.x { outline: none; } } }\n", REASON.nested],
   ["@layer base { :focus { outline: none; } }\n", REASON.nested],
