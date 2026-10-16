@@ -1205,6 +1205,25 @@ function requiresFocus(compound) {
   return false;
 }
 
+/**
+ * Does the block's WINNING outline declaration remove the outline? The last `outline` declaration decides
+ * (`outline: none; outline: 2px solid blue` restores it), except that an important one is not displaced by
+ * a later one that is not.
+ */
+function removesOutlineIn(body) {
+  let removes = false;
+  let important = false;
+  for (const raw of body.split(";")) {
+    const m = /^\s*outline\s*:\s*([\s\S]*)$/i.exec(raw);
+    if (m === null) continue;
+    const isImportant = IMPORTANT.test(m[1]);
+    if (important && !isImportant) continue;
+    important = isImportant;
+    removes = /^(none|0)\b/i.test(m[1].trim());
+  }
+  return removes;
+}
+
 /** A Sass placeholder selector: %name at the start of a compound (50% is a keyframe selector). */
 const PLACEHOLDER = /(?<![\d.])%[A-Za-z_-]/;
 
@@ -1676,7 +1695,7 @@ export const DETECTORS = [
         // concrete branches are still emitted, and a violation they establish stands.
         const placeholders = node.composed.filter((composed) => PLACEHOLDER.test(composed));
         const concrete = node.composed.filter((composed) => !PLACEHOLDER.test(composed));
-        if (placeholders.length > 0 && /\boutline\s*:\s*(none|0)\b/i.test(node.body)) {
+        if (placeholders.length > 0 && removesOutlineIn(node.body)) {
           // An extension can sit in any file of the corpus, which a per-file detector cannot see: a
           // placeholder that removes the outline is unexaminable, never a finding and never a pass.
           unexaminable.push({
@@ -1703,7 +1722,7 @@ export const DETECTORS = [
         const focusSelectors = concrete.filter(
           (selector) => isFocusSelector(selector) && !unexaminableSelectorBranch(selector),
         );
-        const removesOutline = /\boutline\s*:\s*(none|0)\b/i.test(node.body);
+        const removesOutline = removesOutlineIn(node.body);
         if (node.opaque && (node.atRule !== null ? removesOutline : focusSelectors.length > 0 || removesOutline)) {
           unexaminable.push({
             index: where,

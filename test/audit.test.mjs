@@ -1560,6 +1560,21 @@ test("ST-07: an unresolved part leaves a background shorthand undecided; no-op q
   }
 });
 
+test("ST-07: the winning outline declaration decides whether the outline is removed", async () => {
+  const cases = [
+    [":focus { &.special { outline: none; outline: 2px solid blue; } }\n", []],
+    [":focus { outline: none; outline: 2px solid blue; }\n", []],
+    [":focus { outline: 2px solid blue; outline: none; }\n", [FOCUS_RULE]],
+    [":focus { outline: none !important; outline: 2px solid blue; }\n", [FOCUS_RULE]],
+    [":focus { outline: none; outline: 2px solid blue !important; }\n", []],
+    [":focus { outline: 0; }\n", [FOCUS_RULE]],
+    [":focus { outline-offset: 2px; outline: none; }\n", [FOCUS_RULE]],
+  ];
+  for (const [css, expected] of cases) {
+    assert.deepEqual((await focusAuditFor(css)).rules.filter((x) => x === FOCUS_RULE), expected, css);
+  }
+});
+
 test("ST-07: a doubly negated reference to the parent keeps the subject", async () => {
   const cases = [
     [":focus { box-shadow: 0 0 0 2px blue; :not(:not(&)) { outline: none; } }\n", []],
