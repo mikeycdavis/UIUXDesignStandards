@@ -884,17 +884,23 @@ function replacementVerdict(node, compensating) {
         const sides = shorthand[1] === undefined ? BORDER_SIDES : [shorthand[1]];
         const bare = value.replace(IMPORTANT, "").trim();
         let facets;
-        // a var()/env() part may carry any facet: nothing is defaulted, the value is kept for all three
-        if (bare.includes(UNKNOWN) || /^(inherit)$/i.test(bare) || /\b(var|env)\(/i.test(bare)) {
+        if (/^(inherit|initial|unset|revert|revert-layer)$/i.test(bare)) {
           facets = { width: bare, style: bare, color: bare };
-        }
-        else if (/^(initial|unset|revert|revert-layer)$/i.test(bare)) facets = { width: bare, style: bare, color: bare };
-        else {
+        } else {
           const tokens = bare.split(/\s+(?![^(]*\))/).filter(Boolean);
-          const style = tokens.find((t) => /^(none|hidden|dotted|dashed|solid|double|groove|ridge|inset|outset)$/i.test(t));
-          const width = tokens.find((t) => /^(thin|medium|thick)$/i.test(t) || /^[+-]?[\d.]/.test(t) || /^calc\(/i.test(t));
-          const color = tokens.find((t) => t !== style && t !== width);
-          facets = { width: width ?? "medium", style: style ?? "none", color: color ?? "currentcolor" };
+          // a var()/env()/interpolated token may carry any facet it is not already known for: such a
+          // facet keeps that token's unresolved value (nothing is defaulted), while the facets that
+          // known tokens fix stay known (border: 0 solid var(--c) has a zero width whatever --c is)
+          const unresolved = tokens.find((t) => t.includes(UNKNOWN) || /^(var|env)\(/i.test(t));
+          const known = tokens.filter((t) => t !== unresolved && !(t.includes(UNKNOWN) || /^(var|env)\(/i.test(t)));
+          const style = known.find((t) => /^(none|hidden|dotted|dashed|solid|double|groove|ridge|inset|outset)$/i.test(t));
+          const width = known.find((t) => /^(thin|medium|thick)$/i.test(t) || /^[+-]?[\d.]/.test(t) || /^calc\(/i.test(t));
+          const color = known.find((t) => t !== style && t !== width);
+          facets = {
+            width: width ?? unresolved ?? "medium",
+            style: style ?? unresolved ?? "none",
+            color: color ?? unresolved ?? "currentcolor",
+          };
         }
         const introduces = compensating.test(property + ":");
         for (const side of sides) {

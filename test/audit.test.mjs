@@ -1375,6 +1375,11 @@ test("ST-07: variable border shorthands are not defaulted; paint() is a backgrou
     [":focus { outline: none; border: 2px var(--s) blue; }\n", []],
     [":focus { outline: none; background: paint(focus-ring); }\n", []],
     [":focus { outline: none; background: element(#ring); }\n", []],
+    [":focus { outline: none; border: 0 solid var(--color); }\n", [FOCUS_RULE]],
+    [":focus { outline: none; border: 2px solid var(--color); }\n", []],
+    [":focus { outline: none; border: 2px var(--style) red; }\n", []],
+    [":focus { outline: none; border: none var(--w); }\n", [FOCUS_RULE]],
+    [":focus { outline: none; border: 0 solid #{$c}; }\n", [FOCUS_RULE]],
     [":focus { outline: none; background: paint(focus-ring); background-image: none; }\n", [FOCUS_RULE]],
   ];
   for (const [css, expected] of cases) {
