@@ -382,7 +382,7 @@ functional selectors, cross-rule interaction). A form is added to this list only
 | a nested property block spells its declarations indirectly | `outline: { style: none }` under a focus rule |
 
 **The `var()` assumption, stated once.** A custom property is decided in exactly one place: the colour token of a
-restoring outline whose width and style are literal (`outline: 2px solid var(--color-focus)`, the form the compliant fixture
+restoring outline whose width and style are literal (a literal width and style with a `var()` colour, the form the compliant fixture
 uses), where it is assumed to resolve to a colour. Everywhere else `var()`, `env()`, a Sass variable or an interpolation is
 unresolved: in the outline's width, style or whole value, and in any replacement indicator's value, it makes the rule
 unexaminable (a `box-shadow` declared through `var()` is not decided as an indicator).
