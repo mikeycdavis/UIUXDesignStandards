@@ -714,6 +714,12 @@ function specificity(selector) {
           const specs = splitSelectorList(inner).map(specificity);
           specs.sort(compareSpecificity);
           if (specs.length > 0) add(specs[specs.length - 1]);
+        } else if (name === "host" || name === "host-context") {
+          // the pseudo-class and its argument both count
+          out[1]++;
+          const specs = splitSelectorList(inner).map(specificity);
+          specs.sort(compareSpecificity);
+          if (specs.length > 0) add(specs[specs.length - 1]);
         } else if (name !== "where") {
           out[1]++;
           // :nth-child(2 of .bar) and :nth-last-child(...): the selector after "of" counts as well
@@ -1008,8 +1014,9 @@ function namesSameSubject(part, parentIsBareFocus = false) {
           const inner = /^:not\(([\s\S]*)\)$/i.exec(arg);
           return inner !== null && splitSelectorList(inner[1]).every((part) => namesSameSubject(part, parentIsBareFocus));
         });
-        if (!doubled) return false;
-        anchored = true;
+        // a negation of the parent that is not doubled only narrows a subject anchored elsewhere
+        // (&:not(&.disabled)); on its own it leaves no anchor and the part is rejected below
+        if (doubled) anchored = true;
       }
       // an ordinary negation filter (&:not(.disabled)) narrows the subject and is otherwise ignored
     } else {

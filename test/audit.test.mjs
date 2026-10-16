@@ -1239,7 +1239,7 @@ test("ST-07: a negation filter keeps the subject; a placeholder inside a compoun
     [":focus { box-shadow: 0 0 0 2px blue; &:not(.disabled) { outline: none; } }\n", []],
     [":focus { box-shadow: 0 0 0 2px blue; .a &:not(.disabled):hover { outline: none; } }\n", []],
     [":focus { box-shadow: 0 0 0 2px blue; :not(.x) { outline: none; } }\n", [FOCUS_RULE]],
-    [":focus { box-shadow: 0 0 0 2px blue; &:not(&.x) { outline: none; } }\n", [FOCUS_RULE]],
+    [":focus { box-shadow: 0 0 0 2px blue; &:not(&.x) { outline: none; } }\n", []],
     ["button%silent:focus { outline: none; }\n", []],
     [".a%x:focus, .b:focus { outline: none; }\n", [FOCUS_RULE]],
     ["@keyframes k { 50% { outline: none; } }\n:focus { outline: none; }\n", [FOCUS_RULE]],
@@ -1330,6 +1330,20 @@ test("ST-07: a constrained parent does not carry its indicator to other elements
   const important = await focusAuditFor(":focus { outline: none; background: red !important; background: #{$maybe}; }\n");
   assert.deepEqual(important.rules.filter((x) => x === FOCUS_RULE), []);
   assert.equal(important.unexaminable.length >= 1, true);
+});
+
+test("ST-07: a negated parent reference may narrow an anchored subject; :host() arguments count in specificity", async () => {
+  const cases = [
+    [":focus { box-shadow: 0 0 0 2px blue; &:not(&.disabled) { outline: none; } }\n", []],
+    [":focus { box-shadow: 0 0 0 2px blue; :not(&.disabled) { outline: none; } }\n", []],
+    [":host(.x):focus { box-shadow: 0 0 0 2px blue; :where(&).a.a { outline: none; box-shadow: none; } }\n", []],
+    [":host-context(.t):focus { box-shadow: 0 0 0 2px blue; :where(&).a.a { outline: none; box-shadow: none; } }\n", []],
+    [".x:focus { box-shadow: 0 0 0 2px blue; :where(&).a.a { outline: none; box-shadow: none; } }\n", [FOCUS_RULE]],
+    [":host:focus { box-shadow: 0 0 0 2px blue; :where(&).a.a.a { outline: none; box-shadow: none; } }\n", [FOCUS_RULE]],
+  ];
+  for (const [css, expected] of cases) {
+    assert.deepEqual((await focusAuditFor(css)).rules.filter((x) => x === FOCUS_RULE), expected, css);
+  }
 });
 
 test("ST-07: a doubly negated reference to the parent keeps the subject", async () => {
