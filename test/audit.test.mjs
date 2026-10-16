@@ -1634,6 +1634,30 @@ test("ST-07: the outline shorthand and its longhands are resolved per part", asy
   assert.deepEqual((await focusAuditFor(":focus { outline: none; outline: 2px solid var(--c); }\n")).rules, []);
 });
 
+test("ST-07: statically zero calc() widths and all resets take part in the outline state", async () => {
+  const cases = [
+    [":focus { outline: none; outline: calc(0px) solid red; }\n", [FOCUS_RULE]],
+    [":focus { outline: none; outline: calc(2px) solid red; }\n", []],
+    [":focus { outline: none; outline: 2px solid red; outline-width: calc(0px); }\n", [FOCUS_RULE]],
+    [":focus { border: calc(0px) solid red; outline: none; }\n", [FOCUS_RULE]],
+    [":focus { border: calc(2px) solid red; outline: none; }\n", []],
+    [":focus { outline: none; outline: 2px solid blue; all: initial; }\n", [FOCUS_RULE]],
+    [":focus { outline: none; outline: 2px solid blue; all: unset; }\n", [FOCUS_RULE]],
+    [":focus { outline: none; all: initial; outline: 2px solid blue; }\n", []],
+    [":focus { outline: none; outline: 2px solid blue; all: inherit; }\n", "unexaminable"],
+    [":focus { outline: none; outline: 2px solid blue; all: var(--r); }\n", "unexaminable"],
+    [":focus { outline: none; outline: calc(1px + 1px) solid red; }\n", "unexaminable"],
+  ];
+  for (const [css, expected] of cases) {
+    const r = await focusAuditFor(css);
+    const found = r.rules.filter((x) => x === FOCUS_RULE);
+    if (expected === "unexaminable") {
+      assert.deepEqual(found, [], css);
+      assert.equal(r.unexaminable.length >= 1, true, css);
+    } else assert.deepEqual(found, expected, css);
+  }
+});
+
 test("ST-07: a doubly negated reference to the parent keeps the subject", async () => {
   const cases = [
     [":focus { box-shadow: 0 0 0 2px blue; :not(:not(&)) { outline: none; } }\n", []],

@@ -898,8 +898,9 @@ function replacementVerdict(node, compensating) {
           const unresolved = tokens.find((t) => t.includes(UNKNOWN) || /^(var|env)\(/i.test(t));
           const known = tokens.filter((t) => t !== unresolved && !(t.includes(UNKNOWN) || /^(var|env)\(/i.test(t)));
           const style = known.find((t) => /^(none|hidden|dotted|dashed|solid|double|groove|ridge|inset|outset)$/i.test(t));
-          const width = known.find((t) => /^(thin|medium|thick)$/i.test(t) || /^[+-]?[\d.]/.test(t) || /^calc\(/i.test(t));
-          const color = known.find((t) => t !== style && t !== width);
+          const widthToken = known.find((t) => /^(thin|medium|thick)$/i.test(t) || /^[+-]?[\d.]/.test(t) || /^calc\(/i.test(t));
+          const width = widthToken === undefined ? undefined : readCalc(widthToken);
+          const color = known.find((t) => t !== style && t !== widthToken);
           facets = {
             width: width ?? unresolved ?? "medium",
             style: style ?? unresolved ?? "none",
@@ -1211,6 +1212,16 @@ function requiresFocus(compound) {
 const UNRESOLVED = /(^|[^\w-])(var|env)\(/i;
 
 /**
+ * A width token with a calc() read statically: a single-term calc is its term (calc(0px) is 0), and a
+ * calc with several terms is not decided here (it becomes an unresolved token).
+ */
+function readCalc(token) {
+  const m = /^calc\(\s*([\s\S]*)\)$/i.exec(token);
+  if (m === null) return token;
+  return /^[+-]?[\d.]+[a-z%]*$/i.test(m[1].trim()) ? m[1].trim() : UNKNOWN;
+}
+
+/**
  * What an `outline` shorthand value sets: a style ("none" | "styled" | "unknown") and a width
  * ("zero" | "drawn" | "unknown"). Only a style other than none/hidden draws an outline, an omitted style
  * is none, an omitted width is medium, and an unresolved var()/env()/interpolation may carry whichever
@@ -1220,7 +1231,7 @@ function outlineShorthandParts(value) {
   const bare = value.replace(IMPORTANT, "").trim();
   if (/^inherit$/i.test(bare)) return { style: "unknown", width: "unknown" };
   if (/^(initial|unset|revert|revert-layer)$/i.test(bare)) return { style: "none", width: "drawn" };
-  const tokens = bare.split(/\s+(?![^(]*\))/).filter(Boolean);
+  const tokens = bare.split(/\s+(?![^(]*\))/).filter(Boolean).map(readCalc);
   const isUnresolved = (t) => t.includes(UNKNOWN) || UNRESOLVED.test(t);
   const unresolved = tokens.some(isUnresolved);
   const known = tokens.filter((t) => !isUnresolved(t));
@@ -1246,12 +1257,21 @@ function outlineStateIn(body) {
     part[name] = { value, important };
   };
   for (const raw of body.split(";")) {
-    const m = /^\s*(outline|outline-style|outline-width)\s*:\s*([\s\S]*)$/i.exec(raw);
+    const m = /^\s*(outline|outline-style|outline-width|all)\s*:\s*([\s\S]*)$/i.exec(raw);
     if (m === null) continue;
     const property = m[1].toLowerCase();
     const important = IMPORTANT.test(m[2]);
     const bare = m[2].replace(IMPORTANT, "").trim();
-    if (property === "outline") {
+    if (property === "all") {
+      // all resets the outline to its initial value (style none); an unresolved or inherited one is open
+      if (/^(initial|unset|revert|revert-layer)$/i.test(bare)) {
+        set("style", "none", important);
+        set("width", "drawn", important);
+      } else if (bare.includes(UNKNOWN) || UNRESOLVED.test(bare) || /^inherit$/i.test(bare)) {
+        set("style", "unknown", important);
+        set("width", "unknown", important);
+      }
+    } else if (property === "outline") {
       const parts = outlineShorthandParts(m[2]);
       set("style", parts.style, important);
       set("width", parts.width, important);
@@ -1259,8 +1279,9 @@ function outlineStateIn(body) {
       const unresolved = bare.includes(UNKNOWN) || UNRESOLVED.test(bare) || /^inherit$/i.test(bare);
       set("style", unresolved ? "unknown" : /^(none|hidden|initial|unset|revert|revert-layer)$/i.test(bare) ? "none" : "styled", important);
     } else {
-      const unresolved = bare.includes(UNKNOWN) || UNRESOLVED.test(bare) || /^inherit$/i.test(bare);
-      set("width", unresolved ? "unknown" : /^[+-]?[\d.]/.test(bare) && DISABLED_VALUE.test(bare) ? "zero" : "drawn", important);
+      const width = readCalc(bare);
+      const open = width.includes(UNKNOWN) || UNRESOLVED.test(width) || /^inherit$/i.test(width);
+      set("width", open ? "unknown" : /^[+-]?[\d.]/.test(width) && DISABLED_VALUE.test(width) ? "zero" : "drawn", important);
     }
   }
   if (!declared) return false; // no outline declaration at all: nothing is removed
