@@ -492,7 +492,7 @@ test("ST-07: every position an unknowable interpolation can take is unexaminable
     "property name": ":focus { #{$prop}: none; }\n",
     "partial property name": ":focus { out#{$part}: none; }\n",
     "box-shadow value": ":focus { outline: none; box-shadow: #{$s}; }\n",
-    "compensating property value": ":focus { outline: none; outline-color: #{$c}; }\n",
+    "compensating property value": ":focus { outline: none; box-shadow: #{$c}; }\n",
     "@apply list": ":focus { outline: none; @apply #{$ring}; }\n",
     "@apply variant token with colon": ":focus { outline: none; @apply focus:#{$r} sm:ring-0; }\n",
     "@apply mixed with static": ":focus { outline: none; @apply ring-0 #{$x}; }\n",
@@ -964,7 +964,7 @@ const DECIDED_FORMS = [
   [":focus { outline: none; background-color: yellow; }\n", false],
   [":focus { outline: none; text-decoration: underline red; }\n", false],
   [":focus { outline: none; box-shadow: -2px -2px 2px red; }\n", false],
-  [":focus { outline: none; outline-offset: 2px; }\n", false],
+  [":focus { outline: none; outline-offset: 2px; outline-color: red; }\n", true],
   [":focus { outline: none; @apply ring-2; }\n", false],
   [":focus { outline: none; @apply ring-0 !important; @apply ring-2; }\n", true],
   [":focus { outline: none; @apply ring-0; }\n", true],
@@ -1063,8 +1063,6 @@ const OFF_LIST_FORMS = [
   [":focus { outline: none; box-shadow: 10% 10% red; }\n", REASON.replacement],
   [":focus { outline: none; box-shadow: 0 0 2px; }\n", REASON.replacement],
   [":focus { outline: none; box-shadow: 2px 2px 2px 2px 2px red; }\n", REASON.replacement],
-  [":focus { outline: none; outline-offset: 5; }\n", REASON.replacement],
-  [":focus { outline: none; outline-offset: 50%; }\n", REASON.replacement],
   [":focus { outline: none; border-top: 2px solid rgb(1, 2 3); }\n", REASON.replacement],
   [":focus { outline: none; border-top: 2px solid rgb(1 2, 3); }\n", REASON.replacement],
   [":focus { outline: none; border-top: 2px solid rgb(1, 2%, 3); }\n", REASON.replacement],
@@ -1086,8 +1084,6 @@ const OFF_LIST_FORMS = [
   [":focus { outline: none; background-color: notacolor; }\n", REASON.replacement],
   [":focus { outline: none; background: red no-repeat; }\n", REASON.replacement],
   [":focus { outline: none; box-shadow: 0 0 0 2px notacolor; }\n", REASON.replacement],
-  [":focus { outline: none; outline-offset: red; }\n", REASON.replacement],
-  [":focus { outline: none; outline-color: 2px; }\n", REASON.replacement],
   [":focus { outline: none; box-shadow: solid; }\n", REASON.replacement],
   [":focus { outline: none; border-top: 2px solid #0000; }\n", REASON.replacement],
   [":focus { outline: none; border-top: 2px solid #00000000; }\n", REASON.replacement],
@@ -1103,14 +1099,12 @@ const OFF_LIST_FORMS = [
   [":focus { outline: none; box-shadow: 0 0 0 2px #0000; }\n", REASON.replacement],
   [":focus { outline: none; box-shadow: 0 0 0 2px color-mix(in srgb, red, blue); }\n", REASON.replacement],
   [":focus { outline: none; text-decoration: underline transparent; }\n", REASON.replacement],
-  [":focus { outline: none; outline-color: #00000000; }\n", REASON.replacement],
   [":focus { outline: none; border-top: 2px red; }\n", REASON.replacement],
   [":focus { outline: none; border: 2px; }\n", REASON.replacement],
   [":focus { outline: none; border-block-end: solid; }\n", REASON.replacement],
   [":focus { outline: none; border: 2px solid auto; }\n", REASON.replacement],
   [":focus { outline: none; border: 2px solid transparent; }\n", REASON.replacement],
   [":focus { outline: none; text-decoration: none; }\n", REASON.replacement],
-  [":focus { outline: none; outline-offset: 0; }\n", REASON.replacement],
   [":focus { outline: none; border: 2px solid red; border-style: none; }\n", REASON.replacement],
   [":focus { outline: none; background: red var(--missing); }\n", REASON.replacement],
   [":focus { outline: none; background: inherit; }\n", REASON.replacement],
@@ -1156,7 +1150,7 @@ test("closed list: deny by default - a generated off-list selector or body is ne
     assert.equal(r.unexaminable.length >= 1, true, css);
   }
   const bodies = [];
-  for (const prop of ["box-shadow", "border", "border-color", "background", "background-color", "text-decoration", "outline-offset", "outline-color"]) {
+  for (const prop of ["box-shadow", "border", "border-color", "background", "background-color", "text-decoration"]) {
     for (const value of ["var(--x)", "env(x)", "$x", "#{$x}", "calc(1px + 1px)", "min(1px, 2px)", "max(1px, 2px)", "clamp(1px, 2px, 3px)", "none", "0", "initial", "unset", "revert", "inherit", "red !important", "none, none"]) {
       bodies.push("outline: none; " + prop + ": " + value + ";");
     }

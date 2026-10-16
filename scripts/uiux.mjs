@@ -761,7 +761,7 @@ function appliesRingWidth(body) {
  *     DECIDED_PSEUDO_ELEMENTS, and `:not(:focus-visible)`;
  *   - the rule removes the outline with exactly one `outline` declaration whose value is `none` or `0`;
  *   - a replacement indicator is a declaration of box-shadow / border / border-color / border-bottom /
- *     background / background-color / text-decoration / outline-offset / outline-color with a
+ *     background / background-color / text-decoration with a
  *     literal non-disabled value, or an `@apply` of a ring-width utility, in the SAME block;
  *   - `:focus:not(:focus-visible)` is the mouse-only exemption;
  *   - SCSS interpolation whose value is statically readable (`#{none}`, quoted literals), and nesting
@@ -809,12 +809,11 @@ const REPLACEMENT_FAMILY = (property) => {
   if (/^border(-(top|right|bottom|left|block|inline)(-(start|end))?)?(-(style|width|color))?$/.test(p)) return "border";
   if (/^background(-(color|image))?$/.test(p)) return "background";
   if (/^text-decoration(-(line|color|style|thickness))?$/.test(p)) return "text-decoration";
-  if (p === "outline-offset" || p === "outline-color") return p;
   return null;
 };
 /** The properties that ARE a replacement indicator when their literal value is not disabled (facet longhands only modify one). */
 const INDICATOR_PROPERTY =
-  /^(box-shadow|border(-(top|right|bottom|left|block|inline)(-(start|end))?)?|background(-color)?|text-decoration(-line)?|outline-offset|outline-color)$/i;
+  /^(box-shadow|border(-(top|right|bottom|left|block|inline)(-(start|end))?)?|background(-color)?|text-decoration(-line)?)$/i;
 
 /** The declarations of a block as {property, value}; the value keeps its `!important`. */
 function declarationsOf(body) {
@@ -971,8 +970,6 @@ function opaqueColour(token) {
  *   text-decoration   at least one line keyword (underline, overline, line-through), plus style keywords,
  *                     a length and an opaque colour
  *   text-decoration-line  one or more line keywords
- *   outline-offset    a length
- *   outline-color     one opaque colour
  * Anything else - a gradient, url(), rgba(), a 4/8-digit hex, transparent, an unknown identifier, a keyword the
  * property does not accept - is not decided.
  */
@@ -997,10 +994,9 @@ function positiveIndicatorValue(property, value) {
     });
   }
   const tokens = tokensOf(value);
-  if (p === "background" || p === "background-color" || p === "outline-color") {
+  if (p === "background" || p === "background-color") {
     return tokens.length === 1 && opaqueColour(tokens[0]) && splitLayers(value).length === 1;
   }
-  if (p === "outline-offset") return tokens.length === 1 && length(tokens[0]);
   // each line keyword at most once; a decoration has at most one style, one thickness and one colour
   const lines = tokens.filter((t) => line.test(t)).map((t) => t.toLowerCase());
   const uniqueLines = new Set(lines).size === lines.length;
