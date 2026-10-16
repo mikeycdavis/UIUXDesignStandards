@@ -831,10 +831,27 @@ const REPLACEMENT_FAMILY = (property) => {
 const INDICATOR_PROPERTY =
   /^(box-shadow|border(-(top|right|bottom|left|block|inline)(-(start|end))?)?|background(-color)?|text-decoration(-line)?)$/i;
 
+/** A block's own text split at top-level semicolons (one inside parentheses, as in a data: URL, ends nothing). */
+function splitDeclarations(body) {
+  const parts = [];
+  let depth = 0;
+  let current = "";
+  for (const ch of body) {
+    if (ch === "(") depth++;
+    else if (ch === ")") depth = Math.max(0, depth - 1);
+    if (ch === ";" && depth === 0) {
+      parts.push(current);
+      current = "";
+    } else current += ch;
+  }
+  parts.push(current);
+  return parts;
+}
+
 /** The declarations of a block as {property, value}; the value keeps its `!important`. */
 function declarationsOf(body) {
   const out = [];
-  for (const raw of body.split(";")) {
+  for (const raw of splitDeclarations(body)) {
     const text = raw.trim();
     if (text === "") continue;
     if (/^@apply\b/i.test(text)) {
@@ -899,6 +916,30 @@ const WELL_FORMED_SELECTOR = (() => {
 // the structure view blanks a quoted value (quotes included) to two or more spaces, so a value is an identifier
 // or a blanked string; `[foo=]` has neither
 const ATTRIBUTE = /^\s*[A-Za-z_-][\w-]*\s*(?:[~|^$*]?=\s*(?: {2,}|[A-Za-z_-][\w-]*)\s*(?:[iIsS])?)?$/;
+
+const KNOWN_FUNCTIONAL_PSEUDO = new Set([
+  "is", "where", "not", "has", "matches", "host", "host-context", "nth-child", "nth-last-child", "nth-of-type",
+  "nth-last-of-type", "lang", "dir", "-webkit-any", "-moz-any",
+]);
+
+/**
+ * True when a selector names a pseudo-class or pseudo-element that is not known to be valid: the browser discards
+ * a selector list that holds an invalid member, so uncertainty in ONE member leaves the whole list undecided.
+ */
+function hasUnknownPseudoName(selector) {
+  const stripped = selector.replace(/\[[^\]]*\]/g, "");
+  for (const m of stripped.matchAll(/(::?)([A-Za-z-]+)(\()?/g)) {
+    const name = m[2].toLowerCase();
+    if (m[1] === "::") {
+      if (!DECIDED_PSEUDO_ELEMENTS.has(name)) return true;
+    } else if (m[3] === "(") {
+      if (!KNOWN_FUNCTIONAL_PSEUDO.has(name)) return true;
+    } else if (!DECIDED_PSEUDO_CLASSES.has(name) && !["before", "after", "first-line", "first-letter"].includes(name)) {
+      return true;
+    }
+  }
+  return false;
+}
 
 function offListSelector(selector) {
   if (selector.includes(OVER_CAP) || selector.includes(TOO_DEEP)) return UNEXAMINABLE_REASONS.selectorBound;
@@ -1170,7 +1211,7 @@ function replacementReason(declarations) {
  * property: value shape counts (a declaration always has a colon).
  */
 function hasBlocklessCall(body) {
-  for (const raw of body.split(";")) {
+  for (const raw of splitDeclarations(body)) {
     const text = raw.trim();
     if (text === "" || /^@apply\b/i.test(text)) continue;
     if (/^@(include|extend)\b/i.test(text)) return true;
@@ -1601,8 +1642,7 @@ export const DETECTORS = [
         if (focusish.length === 0) continue; // cannot be a focus rule
         // an interpolation in a property name, or outside a property: value declaration, may be an outline
         // (a CSS escape can spell a property name too: out\6c ine is outline)
-        const shapes = node.body
-          .split(";")
+        const shapes = splitDeclarations(node.body)
           .filter((raw) => !/^\s*@apply\b/i.test(raw) && (raw.includes(UNKNOWN) || raw.slice(0, Math.max(0, raw.indexOf(":"))).includes("\\")));
         const badShape = shapes.find(
           (raw) => raw.indexOf(":") === -1 || /[\\]/.test(raw.slice(0, raw.indexOf(":"))),
@@ -1617,15 +1657,16 @@ export const DETECTORS = [
         // a decided branch still decides beside an off-list one.
         // (a malformed member invalidates the WHOLE list: the browser discards the rule)
         // (a branch whose head holds an interpolation or comment is padding-damaged and already off the list on its own)
-        const listInvalid = node.composed.some(
+        const listInvalid = node.composed.some((selector) => hasUnknownPseudoName(selector)) || node.composed.some(
           (selector, k) =>
             node.reasons[k] === "syntax" || (!node.reasons[k] && offListSelector(selector) === UNEXAMINABLE_REASONS.selectorSyntax),
         );
         const reasonOf = (b, k) => {
           if (node.reasons[k] === "comment") return UNEXAMINABLE_REASONS.selectorComment;
           if (node.reasons[k] === "interpolation") return UNEXAMINABLE_REASONS.selectorInterpolation;
-          if (listInvalid || node.reasons[k] === "syntax") return UNEXAMINABLE_REASONS.selectorSyntax;
-          return offListSelector(b);
+          if (node.reasons[k] === "syntax") return UNEXAMINABLE_REASONS.selectorSyntax;
+          // a branch keeps its own reason; one that is itself decided is still undecided beside an invalid member
+          return offListSelector(b) ?? (listInvalid ? UNEXAMINABLE_REASONS.selectorSyntax : null);
         };
         const focusBranches = node.composed
           .map((selector, k) => ({ selector, reason: reasonOf(selector, k) }))

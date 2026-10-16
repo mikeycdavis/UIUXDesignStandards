@@ -1537,6 +1537,24 @@ test("closed list: dialects and the parent selector - interpolation only in scss
   assert.deepEqual((await focusAuditFor(".x { &-y:focus, &.z:focus { outline: none; } }\n", "f.scss")).rules.filter((x) => x === FOCUS_RULE).length, 1);
 });
 
+test("closed list: a data: URL holds a semicolon; an unknown pseudo-class leaves its whole list undecided", async () => {
+  const r = await focusAuditFor(":focus { outline: none; cursor: url(data:image/gif;base64,R0lGODlhAQABAIAAAAAA), auto; }\n");
+  assert.deepEqual(r.rules.filter((x) => x === FOCUS_RULE), [FOCUS_RULE]);
+  assert.deepEqual(r.unexaminable, []);
+  for (const css of [
+    ":focus, :definitely-not-a-pseudo { outline: none; }\n",
+    ":focus, :user-invalid { outline: none; }\n",
+    ":focus, .a::unknown-element { outline: none; }\n",
+    ":focus, :unknown-fn(x) { outline: none; }\n",
+  ]) {
+    const x = await focusAuditFor(css);
+    assert.deepEqual(x.rules.filter((y) => y === FOCUS_RULE), [], css);
+    assert.equal(x.unexaminable.length >= 1, true, css);
+  }
+  // known functional members do not make the list uncertain
+  assert.deepEqual((await focusAuditFor(":focus, :is(:focus) { outline: none; }\n")).rules.filter((y) => y === FOCUS_RULE), [FOCUS_RULE]);
+});
+
 test("closed list: a decided branch is not hidden by an off-list branch beside it", async () => {
   for (const css of [
     ":focus, :is(:focus) { outline: none; }\n",
