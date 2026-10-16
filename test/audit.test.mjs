@@ -1387,6 +1387,27 @@ test("ST-07: variable border shorthands are not defaulted; paint() is a backgrou
   }
 });
 
+test("ST-07: var()/env() are unresolved; every zero length is zero; unknown importance varies per declaration", async () => {
+  const cases = [
+    [":focus { --focus-border: none; outline: none; border: var(--focus-border); }\n", "unexaminable"],
+    [":focus { outline: none; box-shadow: var(--ring); }\n", "unexaminable"],
+    [":focus { outline: none; box-shadow: var(--ring); box-shadow: none; }\n", [FOCUS_RULE]],
+    [":focus { outline: none; border: 0.00px solid red; }\n", [FOCUS_RULE]],
+    [":focus { outline: none; border: 0em solid red; }\n", [FOCUS_RULE]],
+    [":focus { outline: none; border: .0rem solid red; }\n", [FOCUS_RULE]],
+    [":focus { outline: none; border: 0.5px solid red; }\n", []],
+    [":focus { outline: none; border: 2px solid red #{$a}; border: 0 solid red #{$b}; }\n", "unexaminable"],
+  ];
+  for (const [css, expected] of cases) {
+    const r = await focusAuditFor(css);
+    const found = r.rules.filter((x) => x === FOCUS_RULE);
+    if (expected === "unexaminable") {
+      assert.deepEqual(found, [], css);
+      assert.equal(r.unexaminable.length >= 1, true, css);
+    } else assert.deepEqual(found, expected, css);
+  }
+});
+
 test("ST-07: a doubly negated reference to the parent keeps the subject", async () => {
   const cases = [
     [":focus { box-shadow: 0 0 0 2px blue; :not(:not(&)) { outline: none; } }\n", []],

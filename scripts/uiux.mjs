@@ -667,7 +667,8 @@ function composeSelectors(selector, parents, reset = false) {
 }
 
 const IMPORTANT = /!\s*important\s*$/i;
-const DISABLED_VALUE = /^(none|hidden|0|0(px|em|rem)|initial|unset|revert|revert-layer|transparent)(\s*!important)?$/i;
+const DISABLED_VALUE =
+  /^(none|hidden|[+-]?(?:0+(?:\.0*)?|\.0+)[a-z%]*|initial|unset|revert|revert-layer|transparent)(\s*!important)?$/i;
 
 /** Specificity of a selector as [ids, classes/attributes/pseudo-classes, types/pseudo-elements]. */
 function specificity(selector) {
@@ -929,7 +930,7 @@ function replacementVerdict(node, compensating) {
         continue;
       }
       // an interpolated value of a relevant property may be an indicator
-      const introduces = value.includes(UNKNOWN) && FOCUS_RELEVANT_PROPERTY.test(property);
+      const introduces = (value.includes(UNKNOWN) || /\b(var|env)\(/i.test(value)) && FOCUS_RELEVANT_PROPERTY.test(property);
       decls.push({ at, lo, hi, layer, property, value, important, introduces });
     }
   }
@@ -943,7 +944,8 @@ function replacementVerdict(node, compensating) {
     d.order = order;
     // an interpolated value is unknown: it may or may not be an indicator, and the cascade decides
     // whether it can matter at all
-    d.enabled = d.value.includes(UNKNOWN) ? "unknown" : !DISABLED_VALUE.test(d.value);
+    // (var() and env() are as unresolved as an interpolation: the custom property may hold none)
+    d.enabled = d.value.includes(UNKNOWN) || /\b(var|env)\(/i.test(d.value) ? "unknown" : !DISABLED_VALUE.test(d.value);
     d.covers = declarationCovers(d.property);
   });
   const isSingle = (d) => compareSpecificity(d.lo, d.hi) === 0;
@@ -953,13 +955,13 @@ function replacementVerdict(node, compensating) {
     if (a.layer !== b.layer) return "unknown";
     if (a.important === "unknown" || b.important === "unknown") {
       // the outcome under both readings of the unknown importance: decided only if they agree
-      const readings = [true, false].map((value) =>
-        beats(
-          a.important === "unknown" ? { ...a, important: value } : a,
-          b.important === "unknown" ? { ...b, important: value } : b,
-        ),
-      );
-      return readings[0] === readings[1] ? readings[0] : "unknown";
+      const readings = [];
+      for (const av of a.important === "unknown" ? [true, false] : [a.important]) {
+        for (const bv of b.important === "unknown" ? [true, false] : [b.important]) {
+          readings.push(beats({ ...a, important: av }, { ...b, important: bv }));
+        }
+      }
+      return readings.every((reading) => reading === readings[0]) ? readings[0] : "unknown";
     }
     if (a.important !== b.important) return a.important ? "wins" : "loses";
     if (compareSpecificity(a.lo, b.hi) > 0) return "wins";
