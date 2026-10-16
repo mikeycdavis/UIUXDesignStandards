@@ -757,7 +757,7 @@ const REPLACEMENT_FAMILY = (property) => {
 };
 /** The properties that ARE a replacement indicator when their literal value is not disabled (facet longhands only modify one). */
 const INDICATOR_PROPERTY =
-  /^(box-shadow|border(-(top|right|bottom|left|block|inline)(-(start|end))?)?(-color)?|background(-(color|image))?|text-decoration(-line)?|outline-offset|outline-color)$/i;
+  /^(box-shadow|border(-(top|right|bottom|left|block|inline)(-(start|end))?)?|background(-(color|image))?|text-decoration(-line)?|outline-offset|outline-color)$/i;
 
 /** The declarations of a block as {property, value}; the value keeps its `!important`. */
 function declarationsOf(body) {
@@ -844,6 +844,8 @@ function isFocusSelector(selector) {
   // the focus pseudo-class must be on the SUBJECT (the last compound): `.btn:focus .icon` styles the icon
   const compounds = selectorCompounds(selector);
   const subject = compounds.length > 0 ? compounds[compounds.length - 1] : selector;
+  // a pseudo-element subject (`:focus::before`) is not the focused element: its outline starts as none
+  if (/::|:(before|after|first-line|first-letter)(?![A-Za-z-])/i.test(subject)) return false;
   return FOCUS_SELECTOR.test(subject.replace(/:not\(\s*:focus-visible\s*\)/gi, ""));
 }
 
@@ -882,9 +884,9 @@ function outlineForm(declarations) {
  * The decided restoring form: a non-zero literal width, a style other than none/hidden and at most one
  * more token (the colour, which may be a var() custom property: the style and the width decide).
  */
-function restoresOutline(value) {
+function restoresOutline(value, allowAuto = true) {
   const split = value.trim().split(/\s+(?![^(]*\))/).filter(Boolean);
-  const style = split.find((t) => /^(dotted|dashed|solid|double|groove|ridge|inset|outset|auto)$/i.test(t));
+  const style = split.find((t) => (allowAuto ? /^(dotted|dashed|solid|double|groove|ridge|inset|outset|auto)$/i : /^(dotted|dashed|solid|double|groove|ridge|inset|outset)$/i).test(t));
   const width = split.find((t) => /^(\d+\.?\d*|\.\d+)(px|em|rem)$/i.test(t) && parseFloat(t) > 0);
   if (style === undefined || width === undefined) return false;
   const rest = split.filter((t, i) => i !== split.indexOf(style) && i !== split.indexOf(width));
@@ -922,6 +924,10 @@ function replacementReason(declarations) {
       }
     }
     const bare = d.value.trim();
+    // a border shorthand draws only with a drawn style and a non-zero literal width; an omitted style is none
+    if (/^border(-(top|right|bottom|left|block|inline)(-(start|end))?)?$/i.test(d.property) && !restoresOutline(bare, false)) {
+      return UNEXAMINABLE_REASONS.replacementForm;
+    }
     // a border or text-decoration shorthand is disabled by ANY disabled token (0 solid red, 2px solid transparent)
     const anyToken = family === "border" || family === "text-decoration";
     if (anyToken ? bare.split(/\s+/).some((t) => DISABLED_LITERAL.test(t)) : DISABLED_LITERAL.test(bare)) {

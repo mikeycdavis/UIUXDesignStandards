@@ -957,7 +957,6 @@ const DECIDED_FORMS = [
   [":focus { outline: 0; }\n", true],
   ["a:focus-visible, button:focus { outline: none; }\n", true],
   [".card:focus-within > .x:hover:focus { outline: none; }\n", true],
-  [".a:focus::before { outline: none; }\n", true],
   [".btn[data-x=\"a:b\"]:focus { outline: none; }\n", true],
   [":focus { outline: none; box-shadow: 0 0 0 2px blue; }\n", false],
   [":focus { outline: none; box-shadow: 0 0 2px red, 0 0 4px blue; }\n", false],
@@ -979,7 +978,7 @@ const DECIDED_FORMS = [
 ];
 
 test("closed list: a focus pseudo-class on an ancestor compound is not a focus rule", async () => {
-  for (const css of [".button:focus .icon { outline: none; }\n", ".button:focus { .icon { outline: none; } }\n", ":focus-within > .x { outline: none; }\n"]) {
+  for (const css of [".a:focus::before { outline: none; }\n", ":focus { &::after { outline: none; } }\n", ":focus:before { outline: none; }\n", ".button:focus .icon { outline: none; }\n", ".button:focus { .icon { outline: none; } }\n", ":focus-within > .x { outline: none; }\n"]) {
     const r = await focusAuditFor(css);
     assert.deepEqual(r.rules.filter((x) => x === FOCUS_RULE), [], css);
     assert.deepEqual(r.unexaminable, [], css);
@@ -1052,6 +1051,10 @@ const OFF_LIST_FORMS = [
   [":focus { outline: none; border: 0; }\n", REASON.replacement],
   [":focus { outline: none; border: calc(1px + 1px) solid red; }\n", REASON.replacement],
   [":focus { outline: none; border: 0 solid red; }\n", REASON.replacement],
+  [":focus { outline: none; border-top: 2px red; }\n", REASON.replacement],
+  [":focus { outline: none; border: 2px; }\n", REASON.replacement],
+  [":focus { outline: none; border-block-end: solid; }\n", REASON.replacement],
+  [":focus { outline: none; border: 2px solid auto; }\n", REASON.replacement],
   [":focus { outline: none; border: 2px solid transparent; }\n", REASON.replacement],
   [":focus { outline: none; text-decoration: none; }\n", REASON.replacement],
   [":focus { outline: none; outline-offset: 0; }\n", REASON.replacement],
@@ -1140,7 +1143,6 @@ test("closed list: every accepted indicator property compensates; a resetting @a
   for (const css of [
     ":focus { outline: none; border-top: 2px solid red; }\n",
     ":focus { outline: none; border-block-end: 2px solid red; }\n",
-    ":focus { outline: none; border-left-color: red; }\n",
     ":focus { outline: none; background-image: url(x.png); }\n",
     ":focus { outline: none; text-decoration-line: underline; }\n",
   ]) {
