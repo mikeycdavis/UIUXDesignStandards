@@ -1142,9 +1142,17 @@ function hidesRingFromMouseOnly(selector) {
     }
     if (depth !== 0) continue;
     const members = splitSelectorList(subject.slice(start.index + start[0].length, end - 1));
-    if (members.some((member) => /^:focus-visible$/i.test(member.trim()))) return true;
+    if (members.some((member) => coversFocusVisible(member))) return true;
   }
   return false;
+}
+
+/** True when a negated member matches every focus-visible element: `:focus-visible` itself or a union holding it. */
+function coversFocusVisible(member) {
+  const trimmed = member.trim();
+  if (/^:focus-visible$/i.test(trimmed)) return true;
+  const union = /^:(?:is|where|matches|-webkit-any|-moz-any)\(([\s\S]*)\)$/i.exec(trimmed);
+  return union !== null && splitSelectorList(union[1]).some((alternative) => coversFocusVisible(alternative));
 }
 
 /** A selector that matches every focused element and nothing else: :focus, *:focus, :where(:focus), :is(:focus). */

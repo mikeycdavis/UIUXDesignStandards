@@ -1516,6 +1516,18 @@ test("ST-07: a wrapped focus subject is the exemption; a repeated parent referen
   }
 });
 
+test("ST-07: a negated union that holds :focus-visible is the exemption", async () => {
+  const cases = [
+    [":focus:not(:is(:focus-visible, .disabled)) { outline: none; }\n", []],
+    [":focus:not(:where(.a, :is(.b, :focus-visible))) { outline: none; }\n", []],
+    [":focus:not(:is(.a:focus-visible, .disabled)) { outline: none; }\n", [FOCUS_RULE]],
+    [":focus:not(:is(.a, .disabled)) { outline: none; }\n", [FOCUS_RULE]],
+  ];
+  for (const [css, expected] of cases) {
+    assert.deepEqual((await focusAuditFor(css)).rules.filter((x) => x === FOCUS_RULE), expected, css);
+  }
+});
+
 test("ST-07: a doubly negated reference to the parent keeps the subject", async () => {
   const cases = [
     [":focus { box-shadow: 0 0 0 2px blue; :not(:not(&)) { outline: none; } }\n", []],
