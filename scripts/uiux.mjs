@@ -685,6 +685,10 @@ function headPartReason(rawPart) {
  * flagged if any part is.
  */
 function branchReasons(composed, resolvedHead, rawHead, parentCount, parentReasons) {
+  // an empty member (a leading, trailing or repeated comma) makes the whole selector list invalid
+  if (resolvedHead.trim().length > 0 && resolvedHead.split(",").some((part, i, all) => part.trim() === "" && all.length > 1)) {
+    return composed.map(() => "syntax");
+  }
   const ranges = headPartRanges(resolvedHead);
   const partReasons = ranges.map(([a, b]) => headPartReason(rawHead.slice(a, b)));
   if (composed.length === ranges.length * parentCount) {
@@ -881,7 +885,9 @@ const WELL_FORMED_SELECTOR = (() => {
   const combinator = "(?:\\s*[>+~]\\s*|\\s+)";
   return new RegExp("^\\s*(?:[>+~]\\s*)?" + compound + "(?:" + combinator + compound + ")*\\s*$");
 })();
-const ATTRIBUTE = /^\s*[A-Za-z_-][\w-]*\s*(?:[~|^$*]?=[^\]]*)?$/;
+// the structure view blanks a quoted value (quotes included) to two or more spaces, so a value is an identifier
+// or a blanked string; `[foo=]` has neither
+const ATTRIBUTE = /^\s*[A-Za-z_-][\w-]*\s*(?:[~|^$*]?=\s*(?: {2,}|[A-Za-z_-][\w-]*)\s*(?:[iIsS])?)?$/;
 
 function offListSelector(selector) {
   if (selector.includes(OVER_CAP) || selector.includes(TOO_DEEP)) return UNEXAMINABLE_REASONS.selectorBound;
@@ -1008,6 +1014,9 @@ function positiveIndicatorValue(property, value) {
       const contiguous = lengths.length > 0 && lengths[lengths.length - 1] - lengths[0] === lengths.length - 1;
       // the third length is the blur radius, which must not be negative
       const blur = lengths.length >= 3 ? tokens[lengths[2]] : "0";
+      // an outer shadow with every length zero (or a non-positive spread and no offset or blur) has no area
+      const [x, y, radius, spread] = [0, 1, 2, 3].map((k) => (k < lengths.length ? parseFloat(tokens[lengths[k]]) : 0));
+      if (!(x !== 0 || y !== 0 || radius > 0 || spread > 0)) return false;
       return contiguous && lengths.length >= 2 && lengths.length <= 4 && !blur.startsWith("-") && insets <= 1 && colours === 1 &&
         lengths.length + insets + colours === tokens.length;
     });
@@ -1540,6 +1549,7 @@ export const DETECTORS = [
         // one (the structure view pads that too). The reason is tracked per composed branch (node.reasons), so
         // a decided branch still decides beside an off-list one.
         const reasonOf = (b, k) => {
+          if (node.reasons[k] === "syntax") return UNEXAMINABLE_REASONS.selectorSyntax;
           if (node.reasons[k] === "comment") return UNEXAMINABLE_REASONS.selectorComment;
           if (node.reasons[k] === "interpolation") return UNEXAMINABLE_REASONS.selectorInterpolation;
           return offListSelector(b);

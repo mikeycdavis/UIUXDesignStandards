@@ -1054,6 +1054,10 @@ const OFF_LIST_FORMS = [
   [":focus { outline: none; border: 0; }\n", REASON.replacement],
   [":focus { outline: none; border: calc(1px + 1px) solid red; }\n", REASON.replacement],
   [":focus { outline: none; border: 0 solid red; }\n", REASON.replacement],
+  [":focus { outline: none; box-shadow: 0 0 0 red; }\n", REASON.replacement],
+  [":focus { outline: none; box-shadow: 0 0 0 0 red; }\n", REASON.replacement],
+  [":focus { outline: none; box-shadow: 0 0 0 -2px red; }\n", REASON.replacement],
+  [":focus { outline: none; box-shadow: inset 0 0 0 red; }\n", REASON.replacement],
   [":focus { outline: none; box-shadow: 0 0 -2px red; }\n", REASON.replacement],
   [":focus { outline: none; box-shadow: 0 0 -0.1em 2px red; }\n", REASON.replacement],
   [":focus { outline: none; text-decoration-line: underline; }\n", REASON.replacement],
@@ -1308,7 +1312,9 @@ test("closed list: a generated box-shadow or text-decoration is a finding unless
       const at = tokens.map((x, i) => (isLength(x) ? i : -1)).filter((i) => i >= 0);
       const inset = tokens.filter((x) => x === "inset").length;
       const colour = tokens.filter(isColour).length;
-      return at.length >= 2 && at.length <= 4 && at[at.length - 1] - at[0] === at.length - 1 && inset <= 1 && colour === 1 &&
+      const n = at.map((i) => parseFloat(tokens[i]));
+      const area = n[0] !== 0 || n[1] !== 0 || (n[2] ?? 0) > 0 || (n[3] ?? 0) > 0;
+      return at.length >= 2 && at.length <= 4 && at[at.length - 1] - at[0] === at.length - 1 && inset <= 1 && colour === 1 && area &&
         at.length + inset + colour === tokens.length;
     };
     const decorationPaints = (tokens) => {
@@ -1436,6 +1442,12 @@ test("closed list: malformed selector syntax is not decided as a focus rule", as
     ".1a:focus { outline: none; }\n",
     "a:focus: { outline: none; }\n",
     ":focus:::before { outline: none; }\n",
+    ":focus, { outline: none; }\n",
+    ", :focus { outline: none; }\n",
+    ":focus,, .a { outline: none; }\n",
+    ":focus[foo=] { outline: none; }\n",
+    ":focus[foo=1] { outline: none; }\n",
+    ":focus[=x] { outline: none; }\n",
   ]) {
     const r = await focusAuditFor(css);
     assert.deepEqual(r.rules.filter((x) => x === FOCUS_RULE), [], css);
