@@ -968,6 +968,8 @@ const DECIDED_FORMS = [
   [":focus { outline: none; @apply ring-0 !important; @apply ring-2; }\n", true],
   [":focus { outline: none; @apply ring-0; }\n", true],
   [":focus:not(:focus-visible) { outline: none; }\n", false],
+  [":focus:hover:not(:focus-visible) { outline: none; }\n", false],
+  [".a:not(:focus-visible):focus.b { outline: none; }\n", false],
   [":focus { outline: 2px solid var(--c); }\n", false],
   [":focus { outline: 3px dashed red; margin: 0; }\n", false],
   [":focus { margin: 0; }\n", false],
@@ -1051,6 +1053,12 @@ const OFF_LIST_FORMS = [
   [":focus { outline: none; border: 0; }\n", REASON.replacement],
   [":focus { outline: none; border: calc(1px + 1px) solid red; }\n", REASON.replacement],
   [":focus { outline: none; border: 0 solid red; }\n", REASON.replacement],
+  [":focus { outline: none; box-shadow: 2 2 red; }\n", REASON.replacement],
+  [":focus { outline: none; box-shadow: 10% 10% red; }\n", REASON.replacement],
+  [":focus { outline: none; box-shadow: 0 0 2px; }\n", REASON.replacement],
+  [":focus { outline: none; box-shadow: 2px 2px 2px 2px 2px red; }\n", REASON.replacement],
+  [":focus { outline: none; outline-offset: 5; }\n", REASON.replacement],
+  [":focus { outline: none; outline-offset: 50%; }\n", REASON.replacement],
   [":focus { outline: none; border-top: 2px solid rgb(1, 2 3); }\n", REASON.replacement],
   [":focus { outline: none; border-top: 2px solid rgb(1 2, 3); }\n", REASON.replacement],
   [":focus { outline: none; border-top: 2px solid rgb(1, 2%, 3); }\n", REASON.replacement],
@@ -1295,13 +1303,13 @@ test("closed list: a generated box-shadow or text-decoration is a finding unless
     walk(["0", "2px", "inset", "red", "#fff", "transparent", "foo"], [], 4, shadows);
     const decorations = [];
     walk(["underline", "overline", "solid", "wavy", "2px", "red", "none", "foo"], [], 3, decorations);
-    const isLength = (x) => /^[0-9]+(px)?$/.test(x);
+    const isLength = (x) => x === "0" || x === "2px";
     const isColour = (x) => ["red", "#fff"].includes(x);
     const shadowPaints = (tokens) => {
       const at = tokens.map((x, i) => (isLength(x) ? i : -1)).filter((i) => i >= 0);
       const inset = tokens.filter((x) => x === "inset").length;
       const colour = tokens.filter(isColour).length;
-      return at.length >= 2 && at.length <= 4 && at[at.length - 1] - at[0] === at.length - 1 && inset <= 1 && colour <= 1 &&
+      return at.length >= 2 && at.length <= 4 && at[at.length - 1] - at[0] === at.length - 1 && inset <= 1 && colour === 1 &&
         at.length + inset + colour === tokens.length;
     };
     const decorationPaints = (tokens) => {

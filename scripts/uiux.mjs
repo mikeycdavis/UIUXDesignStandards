@@ -833,6 +833,17 @@ function declarationsOf(body) {
   return out;
 }
 
+/**
+ * The mouse-only idiom: the SUBJECT compound holds both the focus pseudo-class and its exclusion
+ * `:not(:focus-visible)`, in either order and with other simple selectors between them
+ * (`:focus:hover:not(:focus-visible)`). Only plain, listed selectors reach here, so the one parenthesis is that exclusion.
+ */
+function hidesRingFromMouseOnly(selector) {
+  const compounds = selectorCompounds(selector);
+  const subject = compounds.length > 0 ? compounds[compounds.length - 1] : selector;
+  return /:not\(\s*:focus-visible\s*\)/i.test(subject) && /:focus(?![A-Za-z0-9_-])/i.test(subject.replace(/:not\(\s*:focus-visible\s*\)/gi, ""));
+}
+
 /** A Sass placeholder selector: %name inside a compound (50% is a keyframe selector). */
 const PLACEHOLDER = /(?<![\d.])%[A-Za-z_-]/;
 
@@ -966,7 +977,7 @@ function opaqueColour(token) {
  */
 function positiveIndicatorValue(property, value) {
   const p = property.toLowerCase();
-  const length = (t) => /^[+-]?(?:\d+\.?\d*|\.\d+)(?:px|em|rem|%)?$/i.test(t);
+  const length = (t) => /^[+-]?(?:0+\.?0*|\.0+|(?:\d+\.?\d*|\.\d+)(?:px|em|rem|ex|ch|vw|vh|pt|pc|cm|mm|in))$/i.test(t);
   const tokensOf = (text) => text.trim().split(/\s+(?![^(]*\))/).filter(Boolean);
   const line = /^(underline|overline|line-through)$/i;
   if (p === "box-shadow") {
@@ -977,7 +988,7 @@ function positiveIndicatorValue(property, value) {
       const insets = tokens.filter((t) => /^inset$/i.test(t)).length;
       const colours = tokens.filter((t) => opaqueColour(t)).length;
       const contiguous = lengths.length > 0 && lengths[lengths.length - 1] - lengths[0] === lengths.length - 1;
-      return contiguous && lengths.length >= 2 && lengths.length <= 4 && insets <= 1 && colours <= 1 &&
+      return contiguous && lengths.length >= 2 && lengths.length <= 4 && insets <= 1 && colours === 1 &&
         lengths.length + insets + colours === tokens.length;
     });
   }
@@ -1528,7 +1539,7 @@ export const DETECTORS = [
           continue;
         }
         examined = true;
-        if (plainFocus.every((selector) => /:focus\s*:not\(\s*:focus-visible\s*\)/i.test(selector))) continue;
+        if (plainFocus.every((selector) => hidesRingFromMouseOnly(selector))) continue;
         if (declarations.some((d) => INDICATOR_PROPERTY.test(d.property))) continue;
         if (appliesRingWidth(node.body)) continue;
         const own = text.slice(node.selectorStart, node.selectorStart + node.selector.length).trim();
