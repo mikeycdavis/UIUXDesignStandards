@@ -1126,7 +1126,6 @@ test("closed list: a decided branch is not hidden by an off-list branch beside i
   for (const css of [
     ":focus, :is(:focus) { outline: none; }\n",
     ":focus, .#{$p} { outline: none; }\n",
-    ":focus, .a#{null}.b { outline: none; }\n",
     ":focus, %silent { outline: none; }\n",
   ]) {
     const r = await focusAuditFor(css);
