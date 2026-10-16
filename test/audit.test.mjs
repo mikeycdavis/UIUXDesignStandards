@@ -917,7 +917,7 @@ test("ST-07: a same-element nested rule inherits the replacement indicators of t
     // a parent shadow that is present unfocused is not a focus indicator
     [".btn { box-shadow: 0 0 0 2px blue; &:focus { outline: none; } } ", [FOCUS_RULE]],
     [".btn { box-shadow: 0 0 0 2px blue; &:focus { &.x { outline: none; } } } ", [FOCUS_RULE]],
-    [":focus, .b { box-shadow: 0 0 0 2px blue; &.x { outline: none; } } ", [FOCUS_RULE]],
+    [":focus, .b { box-shadow: 0 0 0 2px blue; &.x { outline: none; } } ", []],
     // a parent without a replacement gives the child nothing
     [":focus { color: red; &.danger { outline: none; } }\n", [FOCUS_RULE]],
     // @at-root with a query that drops rules detaches the subject
@@ -1103,8 +1103,7 @@ test("ST-07: a cascade the detector cannot decide is unexaminable, never a guess
   }
 });
 
-test("ST-07: a Sass placeholder emits nothing unless it is extended", async () => {
-  // not extended: the rule does not exist in the output
+test("ST-07: a Sass placeholder is neither a finding nor a pass: an extension may be in another file", async () => {
   for (const css of [
     ":focus { %silent { outline: none; } }\n",
     "%silent:focus { outline: none; }\n",
@@ -1112,14 +1111,29 @@ test("ST-07: a Sass placeholder emits nothing unless it is extended", async () =
   ]) {
     const r = await focusAuditFor(css);
     assert.deepEqual(r.rules.filter((x) => x === FOCUS_RULE), [], css);
-    assert.deepEqual(r.unexaminable, [], css);
+    assert.equal(r.unexaminable.length >= 1, true, css);
   }
-  // extended: what it becomes is not modelled, so it is unexaminable, never a guess
+  // a placeholder that removes nothing is silent
+  assert.deepEqual((await focusAuditFor("%x:focus { color: red; }\n")).unexaminable, []);
+  // extended in the same file: what it becomes is not modelled either
   const extended = await focusAuditFor("%ring:focus { outline: none; }\n.btn { @extend %ring; }\n");
   assert.deepEqual(extended.rules.filter((x) => x === FOCUS_RULE), []);
   assert.equal(extended.unexaminable.length >= 1, true);
   // a percentage is not a placeholder
   assert.deepEqual((await focusAuditFor("@keyframes k { 50% { outline: none; } }\n:focus { outline: none; }\n")).rules.filter((x) => x === FOCUS_RULE), [FOCUS_RULE]);
+});
+
+test("ST-07: a selector list is carried branch by branch", async () => {
+  const cases = [
+    [":focus, .other { box-shadow: 0 0 0 2px blue; &.danger { outline: none; } }\n", []],
+    [".other, :focus { box-shadow: 0 0 0 2px blue; &.danger { outline: none; } }\n", []],
+    // the branch that comes from the unfocused parent selector has only an always-present shadow
+    [":focus, .other { box-shadow: 0 0 0 2px blue; &:focus { outline: none; } }\n", [FOCUS_RULE]],
+    [".other { box-shadow: 0 0 0 2px blue; &:focus { outline: none; } }\n", [FOCUS_RULE]],
+  ];
+  for (const [css, expected] of cases) {
+    assert.deepEqual((await focusAuditFor(css)).rules.filter((x) => x === FOCUS_RULE), expected, css);
+  }
 });
 
 test("ST-07: a doubly negated reference to the parent keeps the subject", async () => {

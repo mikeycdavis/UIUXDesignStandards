@@ -566,11 +566,15 @@ function parseBlocks(text) {
     // enclosing rule through, but its own (conditional) body is not counted as unconditional.
     let elementNodes = [];
     if (parent) {
-      // Only a parent that is itself a focus rule: `.btn { box-shadow: ...; &:focus { outline: none } }`
-      // carries a shadow that is present unfocused, which is no focus indicator.
+      // The parent's declarations are a FOCUS indicator only where the parent branch is itself a
+      // focus selector: `.btn { box-shadow: ...; &:focus { outline: none } }` carries a shadow that
+      // is present unfocused. A selector list is read branch by branch (the composed list is the cross
+      // product, part-major): every focus branch of this rule must come from a focus branch of the parent.
+      const branches = parent.composed.length;
       const carried =
-        !parent.rootEmitted && parent.propNest === null && !parent.dataBlock && parent.composed.length > 0 &&
-        parent.composed.every((selector) => isFocusSelector(selector))
+        !parent.rootEmitted && parent.propNest === null && !parent.dataBlock && branches > 0 &&
+        parent.composed.some((selector) => isFocusSelector(selector)) &&
+        composed.every((selector, k) => !isFocusSelector(selector) || isFocusSelector(parent.composed[k % branches]))
           ? [parent]
           : [];
       if (atRule !== null) {
@@ -1371,13 +1375,14 @@ export const DETECTORS = [
         // examined under the inherited selector; any other at-rule owns no style declarations.
         if (node.rootEmitted || node.inside || node.dataBlock) continue;
         // A Sass placeholder (%name) emits nothing unless it is @extend-ed, and what an extension
-        // would emit is not modelled: with no @extend in the file the rule does not exist in the
-        // output; with one, a placeholder that removes the outline is unexaminable.
+        // would emit is not modelled.
         if (node.composed.some((composed) => PLACEHOLDER.test(composed))) {
-          if (/@extend\b/i.test(text) && /\boutline\s*:\s*(none|0)\b/i.test(node.body)) {
+          // An extension can sit in any file of the corpus, which a per-file detector cannot see: a
+          // placeholder that removes the outline is unexaminable, never a finding and never a pass.
+          if (/\boutline\s*:\s*(none|0)\b/i.test(node.body)) {
             unexaminable.push({
               index: node.selectorStart + Math.max(0, node.selector.search(/\S/)),
-              reason: "a Sass placeholder selector may be extended into a focus rule",
+              reason: "a Sass placeholder selector emits nothing unless it is extended, and an @extend may be in another file",
             });
           }
           continue;
