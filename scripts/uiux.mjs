@@ -800,7 +800,7 @@ const UNEXAMINABLE_REASONS = {
   replacementForm: "a replacement indicator is not a plain literal in this block (an unresolved, calculated, disabled, important or repeated value is not decided)",
   propertyName: "an interpolation or a CSS escape in a property name may be outline or an indicator property",
   declarationForm: "an interpolation outside a property: value declaration",
-  opaqueChild: "a control directive or @include inside the rule may change its declarations, which are not modelled",
+  opaqueChild: "a control directive, @include, @extend or mixin call in the rule may change its declarations, which are not modelled",
   nested: "a nested rule inherits declarations of an enclosing rule or layer, and the cascade between them is not decided",
   nestedProperty: "a nested property block spells its declarations indirectly",
 };
@@ -910,6 +910,11 @@ function offListSelector(selector) {
     if (m[1] === "::" ? !DECIDED_PSEUDO_ELEMENTS.has(name) : !DECIDED_PSEUDO_CLASSES.has(name) && !legacy) {
       return UNEXAMINABLE_REASONS.selectorFunctional;
     }
+  }
+  // a pseudo-element cannot be the left side of a combinator: only the last compound may hold one
+  const compounds = selectorCompounds(selector);
+  for (const compound of compounds.slice(0, -1)) {
+    if (/::|:(before|after|first-line|first-letter)(?![A-Za-z-])/i.test(compound)) return UNEXAMINABLE_REASONS.selectorSyntax;
   }
   // the remaining syntax must be positively recognised, attribute selectors included
   for (const m of selector.matchAll(/\[([^\]]*)\]/g)) if (!ATTRIBUTE.test(m[1])) return UNEXAMINABLE_REASONS.selectorSyntax;
@@ -1023,6 +1028,8 @@ function positiveIndicatorValue(property, value) {
       // an outer shadow with every length zero (or a non-positive spread and no offset or blur) has no area
       const [x, y, radius, spread] = [0, 1, 2, 3].map((k) => (k < lengths.length ? parseFloat(tokens[lengths[k]]) : 0));
       if (!(x !== 0 || y !== 0 || radius > 0 || spread > 0)) return false;
+      // a negative spread contracts the shadow by an amount that depends on the (unknown) box: not decided
+      if (spread < 0) return false;
       return contiguous && lengths.length >= 2 && lengths.length <= 4 && !blur.startsWith("-") && insets <= 1 && colours === 1 &&
         lengths.length + insets + colours === tokens.length;
     });
@@ -1118,6 +1125,22 @@ function replacementReason(declarations) {
     }
   }
   return null;
+}
+
+/**
+ * A blockless call in a block's own text - Sass @include or @extend, a Less mixin call (`.ring();`, `.m(@a: 1);`) -
+ * may emit or inherit declarations that are not modelled, so the block is not decided. Anything without a
+ * property: value shape counts (a declaration always has a colon).
+ */
+function hasBlocklessCall(body) {
+  for (const raw of body.split(";")) {
+    const text = raw.trim();
+    if (text === "" || /^@apply\b/i.test(text)) continue;
+    if (/^@(include|extend)\b/i.test(text)) return true;
+    if (/^[.#][\w-]+\s*(\(|$)/.test(text)) return true;
+    if (!text.includes(":")) return true;
+  }
+  return false;
 }
 
 /** Does a block declare anything a nested rule could inherit or be overridden by? */
@@ -1570,6 +1593,11 @@ export const DETECTORS = [
         // a selector whose subject is not focused and that has no off-list branch is not a focus rule at all:
         // nothing about its declarations can matter
         if (plainFocus.length === 0 && offList.length === 0) continue;
+        // a blockless @include/@extend/Less mixin call may supply or remove anything: the block is not decided
+        if (hasBlocklessCall(node.body)) {
+          note(UNEXAMINABLE_REASONS.opaqueChild);
+          continue;
+        }
         if (outline.reason !== undefined) {
           note(outline.reason);
           continue;
@@ -1582,8 +1610,7 @@ export const DETECTORS = [
         // do not discard what the decided branches establish.
         if (offList.length > 0) note(offList[0]);
         if (plainFocus.length === 0) continue;
-        // (a block-less @include may emit declarations too)
-        if (enclosesOpaque.has(node) || /(^|;)\s*@include\b/i.test(node.body)) {
+        if (enclosesOpaque.has(node)) {
           note(UNEXAMINABLE_REASONS.opaqueChild);
           continue;
         }

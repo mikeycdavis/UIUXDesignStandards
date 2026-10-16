@@ -1054,6 +1054,8 @@ const OFF_LIST_FORMS = [
   [":focus { outline: none; border: 0; }\n", REASON.replacement],
   [":focus { outline: none; border: calc(1px + 1px) solid red; }\n", REASON.replacement],
   [":focus { outline: none; border: 0 solid red; }\n", REASON.replacement],
+  [":focus { outline: none; box-shadow: 1px 0 0 -9999px red; }\n", REASON.replacement],
+  [":focus { outline: none; box-shadow: 0 0 2px -1px red; }\n", REASON.replacement],
   [":focus { outline: none; text-decoration: underline +0px red; }\n", REASON.replacement],
   [":focus { outline: none; text-decoration: underline 0px red; }\n", REASON.replacement],
   [":focus { outline: none; box-shadow: 0 0 0 red; }\n", REASON.replacement],
@@ -1236,7 +1238,7 @@ test("closed list: a rule that encloses a directive is not decided; a non-focus 
     assert.deepEqual(r.rules.filter((x) => x === FOCUS_RULE), [], css);
     assert.equal(r.examined, false, css);
     assert.equal(r.unexaminable.length >= 1, true, css);
-    assert.match(r.unexaminable[0].reason, /control directive or @include inside the rule/, css);
+    assert.match(r.unexaminable[0].reason, /control directive, @include, @extend or mixin call in the rule/, css);
   }
   // a rule whose subject is not focused leaves no record, however its declarations look
   for (const css of [
@@ -1444,6 +1446,8 @@ test("closed list: malformed selector syntax is not decided as a focus rule", as
     ".1a:focus { outline: none; }\n",
     "a:focus: { outline: none; }\n",
     ":focus:::before { outline: none; }\n",
+    ".x::before .y:focus { outline: none; }\n",
+    ".x:before > .y:focus { outline: none; }\n",
     ":focus[foo=  ] { outline: none; }\n",
     "> :focus { outline: none; }\n",
     "+ :focus { outline: none; }\n",
@@ -1474,6 +1478,22 @@ test("closed list: Less @{...} interpolation is never read", async () => {
   }
   // a nested rule's leading combinator is fine once composed
   assert.deepEqual((await focusAuditFor(".a { > :focus { outline: none; } }\n")).rules.filter((x) => x === FOCUS_RULE), [FOCUS_RULE]);
+});
+
+test("closed list: blockless @extend, @include and Less mixin calls make the block undecided", async () => {
+  for (const [css, file] of [
+    [".no-ring { outline: none; }\nbutton:focus { @extend .no-ring; }\n", "f.scss"],
+    ["button:focus { @extend %silent; margin: 0; }\n", "f.scss"],
+    [".ring() { box-shadow: 0 0 2px red; }\nbutton:focus { outline: none; .ring(); }\n", "f.less"],
+    ["button:focus { outline: none; .ring; }\n", "f.less"],
+    ["button:focus { outline: none; .m(@a: 1); }\n", "f.less"],
+    ["button:focus { outline: none; @include ring; }\n", "f.scss"],
+  ]) {
+    const r = await focusAuditFor(css, file);
+    assert.deepEqual(r.rules.filter((x) => x === FOCUS_RULE), [], css);
+    assert.equal(r.examined, false, css);
+    assert.equal(r.unexaminable.length >= 1, true, css);
+  }
 });
 
 test("closed list: a decided branch is not hidden by an off-list branch beside it", async () => {
