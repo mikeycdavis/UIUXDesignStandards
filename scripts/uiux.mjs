@@ -925,11 +925,28 @@ function outlineForm(declarations) {
  * colour name other than transparent/currentcolor/the keywords, or a var()/env() in the colour place. A
  * 4- or 8-digit hex, rgba()/hsla(), color-mix(), a gradient or a url() can paint nothing and is not decided.
  */
+/** rgb() and hsl() in their actual grammars: every separator a comma (legacy) or every one a space (modern). */
+const COLOUR_FUNCTION = (() => {
+  const num = "(?:\\d+(?:\\.\\d+)?|\\.\\d+)";
+  const pct = num + "%";
+  const channel = "(?:" + num + "|" + pct + ")";
+  const hue = num + "(?:deg)?";
+  const forms = [
+    "rgb\\(\\s*" + num + "\\s*,\\s*" + num + "\\s*,\\s*" + num + "\\s*\\)",
+    "rgb\\(\\s*" + pct + "\\s*,\\s*" + pct + "\\s*,\\s*" + pct + "\\s*\\)",
+    "rgb\\(\\s*" + channel + "\\s+" + channel + "\\s+" + channel + "\\s*\\)",
+    "hsl\\(\\s*" + hue + "\\s*,\\s*" + pct + "\\s*,\\s*" + pct + "\\s*\\)",
+    "hsl\\(\\s*" + hue + "\\s+" + pct + "\\s+" + pct + "\\s*\\)",
+  ];
+  return new RegExp("^(?:" + forms.join("|") + ")$", "i");
+})();
+
 const NAMED_COLOURS = new Set("aliceblue antiquewhite aqua aquamarine azure beige bisque black blanchedalmond blue blueviolet brown burlywood cadetblue chartreuse chocolate coral cornflowerblue cornsilk crimson cyan darkblue darkcyan darkgoldenrod darkgray darkgreen darkgrey darkkhaki darkmagenta darkolivegreen darkorange darkorchid darkred darksalmon darkseagreen darkslateblue darkslategray darkslategrey darkturquoise darkviolet deeppink deepskyblue dimgray dimgrey dodgerblue firebrick floralwhite forestgreen fuchsia gainsboro ghostwhite gold goldenrod gray green greenyellow grey honeydew hotpink indianred indigo ivory khaki lavender lavenderblush lawngreen lemonchiffon lightblue lightcoral lightcyan lightgoldenrodyellow lightgray lightgreen lightgrey lightpink lightsalmon lightseagreen lightskyblue lightslategray lightslategrey lightsteelblue lightyellow lime limegreen linen magenta maroon mediumaquamarine mediumblue mediumorchid mediumpurple mediumseagreen mediumslateblue mediumspringgreen mediumturquoise mediumvioletred midnightblue mintcream mistyrose moccasin navajowhite navy oldlace olive olivedrab orange orangered orchid palegoldenrod palegreen paleturquoise palevioletred papayawhip peachpuff peru pink plum powderblue purple rebeccapurple red rosybrown royalblue saddlebrown salmon sandybrown seagreen seashell sienna silver skyblue slateblue slategray slategrey snow springgreen steelblue tan teal thistle tomato turquoise violet wheat white whitesmoke yellow yellowgreen".split(" "));
 
 function opaqueColour(token) {
   if (/^#(?:[0-9a-f]{3}|[0-9a-f]{6})$/i.test(token)) return true;
-  if (/^(?:rgb|hsl)\(\s*[\d.]+(?:deg)?%?\s*[, ]\s*[\d.]+%?\s*[, ]\s*[\d.]+%?\s*\)$/i.test(token)) return true;
+  // rgb()/hsl() in their actual grammars: all commas (legacy) or all spaces (modern), never mixed
+  if (COLOUR_FUNCTION.test(token)) return true;
   if (/^(?:var|env)\(.*\)$/i.test(token)) return true;
   // the finite CSS named-colour set: an unknown identifier makes the declaration invalid, so it paints nothing
   return NAMED_COLOURS.has(token.toLowerCase());

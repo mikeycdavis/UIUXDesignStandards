@@ -1051,6 +1051,10 @@ const OFF_LIST_FORMS = [
   [":focus { outline: none; border: 0; }\n", REASON.replacement],
   [":focus { outline: none; border: calc(1px + 1px) solid red; }\n", REASON.replacement],
   [":focus { outline: none; border: 0 solid red; }\n", REASON.replacement],
+  [":focus { outline: none; border-top: 2px solid rgb(1, 2 3); }\n", REASON.replacement],
+  [":focus { outline: none; border-top: 2px solid rgb(1 2, 3); }\n", REASON.replacement],
+  [":focus { outline: none; border-top: 2px solid rgb(1, 2%, 3); }\n", REASON.replacement],
+  [":focus { outline: none; border-top: 2px solid hsl(1, 2, 3); }\n", REASON.replacement],
   [":focus { outline: none; box-shadow: red; }\n", REASON.replacement],
   [":focus { outline: none; box-shadow: 2px; }\n", REASON.replacement],
   [":focus { outline: none; box-shadow: 0 0 0 0 0 red; }\n", REASON.replacement],
@@ -1393,6 +1397,14 @@ test("closed list: a comment inside a selector head is off the list; one before 
     const r = await focusAuditFor(css, "f.scss");
     assert.deepEqual(r.rules.filter((x) => x === FOCUS_RULE), [FOCUS_RULE], css);
     assert.deepEqual(r.unexaminable, [], css);
+  }
+});
+
+test("closed list: rgb() and hsl() are decided only in their real grammars", async () => {
+  for (const value of ["rgb(1, 2, 3)", "rgb(1 2 3)", "rgb(10% 20% 30%)", "rgb(1 20% 3)", "hsl(120, 50%, 50%)", "hsl(120deg 50% 50%)", "rgb(1,2,3)"]) {
+    const r = await focusAuditFor(":focus { outline: none; border-top: 2px solid " + value + "; }\n");
+    assert.deepEqual(r.rules.filter((x) => x === FOCUS_RULE), [], value);
+    assert.deepEqual(r.unexaminable, [], value);
   }
 });
 
