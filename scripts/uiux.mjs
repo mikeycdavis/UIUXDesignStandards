@@ -767,6 +767,24 @@ function declarationCovers(property) {
   return null;
 }
 
+const BACKGROUND_KEYWORDS = new Set([
+  "none", "inherit", "initial", "unset", "revert", "revert-layer", "repeat", "no-repeat", "repeat-x", "repeat-y",
+  "space", "round", "scroll", "fixed", "local", "border-box", "padding-box", "content-box", "text", "center", "top",
+  "left", "right", "bottom", "auto", "cover", "contain",
+]);
+
+/** The colour a background shorthand sets: its colour token, else transparent (the initial value). */
+function shorthandBackgroundColor(value) {
+  // image functions and sizes are not colours; var()/env() may be anything and are read as a colour
+  const stripped = value.replace(/(url|image-set|-?[a-z-]*gradient)\((?:[^()]|\([^()]*\))*\)/gi, " ");
+  for (const token of stripped.split(/[\s/]+/).filter(Boolean)) {
+    const t = token.toLowerCase();
+    if (BACKGROUND_KEYWORDS.has(t) || /^[+-]?[\d.]/.test(t) || t === "!important") continue;
+    if (/^#[0-9a-f]{3,8}$/.test(t) || /^[a-z-]+\(/.test(t) || /^[a-z]+$/.test(t)) return token;
+  }
+  return "transparent";
+}
+
 /**
  * Do the declarations that style the focused element leave a replacement indicator? The rule's own
  * declarations and those of the enclosing same-element rules are put in one cascade. For every
@@ -827,20 +845,28 @@ function replacementVerdict(node, compensating) {
         // the shorthand sets the colour and resets the image: only url(), a gradient or image-set()
         // supplies one
         const image = /url\(|gradient\(|image-set\(/i.test(value) ? value : "none";
-        decls.push({ at, lo, hi, property: "background-color", value, important });
-        decls.push({ at, lo, hi, property: "background-image", value: image, important });
+        decls.push({ at, lo, hi, property: "background-color", value: shorthandBackgroundColor(value), important });
+        decls.push({ at, lo, hi, property: "background-image", value: image, important, introduces: true });
         continue;
       }
       if (logical && values.length === 2) {
         // border-block-width: 0 0 - start and end (horizontal writing mode: top/bottom, left/right)
         const sides = logical[1] === "block" ? ["top", "bottom"] : ["left", "right"];
         sides.forEach((side, k) => {
-          decls.push({ at, lo, hi, property: "border-" + side + "-" + logical[2], value: values[k], important });
+          decls.push({ at, lo, hi, logical: true, property: "border-" + side + "-" + logical[2], value: values[k], important });
         });
         continue;
       }
       decls.push({ at, lo, hi, property, value, important });
     }
+  }
+  // Logical border sides map to physical ones through writing-mode and direction, which may be set
+  // anywhere: where the chain itself changes either, the mapping is not decided here.
+  if (
+    decls.some((d) => /^(writing-mode|direction)$/.test(d.property)) &&
+    decls.some((d) => /^border-(block|inline)(-|$)/.test(d.property) || d.logical)
+  ) {
+    return "unknown";
   }
   // source order is absolute position (a stable sort keeps the tokens of one @apply in order)
   decls.sort((x, y) => x.at - y.at);
@@ -886,7 +912,7 @@ function replacementVerdict(node, compensating) {
         d.enabled &&
         Array.isArray(d.covers) &&
         d.covers.some(([c]) => c === component) &&
-        compensating.test(d.property + ":"),
+        (d.introduces === true || compensating.test(d.property + ":")),
     );
     if (!introduced) continue;
     const states = [];
@@ -1452,8 +1478,8 @@ export const DETECTORS = [
         const unknownBranch =
           removesOutline && node.composed.some((selector) => !isFocusSelector(selector) && selector.includes(UNKNOWN));
         if (unknownBranch) {
+          // recorded, but a violation the readable branches establish is not discarded
           unexaminable.push({ index: where, reason: "an interpolation in the selector may make it a focus rule" });
-          continue;
         }
         if (focusSelectors.length === 0) continue;
         const reason = unexaminableReason(node);

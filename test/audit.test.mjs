@@ -1073,6 +1073,10 @@ test("ST-07: a same-element child that disables an inherited replacement removes
     [":focus { outline: none; background: red; background-color: transparent; background-image: none; }\n", [FOCUS_RULE]],
     [":focus { outline: none; background-image: none; background: red; }\n", []],
     [":focus { outline: none; background: none; }\n", [FOCUS_RULE]],
+    [":focus { outline: none; background: url(bg.png); background-image: none; }\n", [FOCUS_RULE]],
+    [":focus { outline: none; background: url(bg.png); }\n", []],
+    [":focus { outline: none; background: url(bg.png) no-repeat center / cover red; background-image: none; }\n", []],
+    [":focus { outline: none; background: no-repeat center; }\n", [FOCUS_RULE]],
     // an inherited indicator of another family is untouched
     [":focus { border: 2px solid blue; box-shadow: 0 0 0 2px blue; &.x { outline: none; border-style: none; } }\n", []],
   ];
@@ -1160,6 +1164,15 @@ test("ST-07: an unknown branch beside a readable focus branch is unexaminable", 
     assert.deepEqual(r.rules.filter((x) => x === FOCUS_RULE), [], css);
     assert.equal(r.unexaminable.length >= 1, true, css);
   }
+});
+
+test("ST-07: an established violation survives an unknown branch; a changed writing mode leaves logical borders undecided", async () => {
+  const r = await focusAuditFor(":focus, #{$sel} { outline: none; }\n");
+  assert.deepEqual(r.rules.filter((x) => x === FOCUS_RULE), [FOCUS_RULE]);
+  assert.equal(r.unexaminable.length >= 1, true);
+  const w = await focusAuditFor(":focus { writing-mode: vertical-rl; border-bottom: 2px solid blue; &.x { outline: none; border-block-width: 0 0; } }\n");
+  assert.deepEqual(w.rules.filter((x) => x === FOCUS_RULE), []);
+  assert.equal(w.unexaminable.length >= 1, true);
 });
 
 test("ST-07: a doubly negated reference to the parent keeps the subject", async () => {
