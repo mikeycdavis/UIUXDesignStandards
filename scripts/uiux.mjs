@@ -711,7 +711,16 @@ function specificity(selector) {
           const specs = splitSelectorList(inner).map(specificity);
           specs.sort(compareSpecificity);
           if (specs.length > 0) add(specs[specs.length - 1]);
-        } else if (name !== "where") out[1]++;
+        } else if (name !== "where") {
+          out[1]++;
+          // :nth-child(2 of .bar) and :nth-last-child(...): the selector after "of" counts as well
+          const of = /(?:^|\s)of\s+([\s\S]*)$/i.exec(inner);
+          if (of && (name === "nth-child" || name === "nth-last-child")) {
+            const specs = splitSelectorList(of[1]).map(specificity);
+            specs.sort(compareSpecificity);
+            if (specs.length > 0) add(specs[specs.length - 1]);
+          }
+        }
         i = end;
         continue;
       } else out[1]++;
@@ -780,7 +789,13 @@ function shorthandBackgroundColor(value) {
   for (const token of stripped.split(/[\s/]+/).filter(Boolean)) {
     const t = token.toLowerCase();
     if (BACKGROUND_KEYWORDS.has(t) || /^[+-]?[\d.]/.test(t) || t === "!important") continue;
-    if (/^#[0-9a-f]{3,8}$/.test(t) || /^[a-z-]+\(/.test(t) || /^[a-z]+$/.test(t)) return token;
+    if (
+      /^#[0-9a-f]{3,8}$/.test(t) ||
+      /^(rgb|rgba|hsl|hsla|hwb|lab|lch|oklab|oklch|color|color-mix|light-dark|var|env)\(/.test(t) ||
+      /^[a-z]+$/.test(t)
+    ) {
+      return token;
+    }
   }
   return "transparent";
 }
@@ -861,13 +876,9 @@ function replacementVerdict(node, compensating) {
     }
   }
   // Logical border sides map to physical ones through writing-mode and direction, which may be set
-  // anywhere: where the chain itself changes either, the mapping is not decided here.
-  if (
-    decls.some((d) => /^(writing-mode|direction)$/.test(d.property)) &&
-    decls.some((d) => /^border-(block|inline)(-|$)/.test(d.property) || d.logical)
-  ) {
-    return "unknown";
-  }
+  // by any rule (an ancestor's, another file's): a logical border declaration is never mapped on an
+  // assumption, so the cascade it takes part in is undecided.
+  if (decls.some((d) => /^border-(block|inline)(-|$)/.test(d.property) || d.logical)) return "unknown";
   // source order is absolute position (a stable sort keeps the tokens of one @apply in order)
   decls.sort((x, y) => x.at - y.at);
   decls.forEach((d, order) => {

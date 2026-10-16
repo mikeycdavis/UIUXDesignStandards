@@ -1065,9 +1065,6 @@ test("ST-07: a same-element child that disables an inherited replacement removes
     [":focus { border: 2px solid blue; &.x { outline: none; border-style: none solid; } }\n", []],
     [":focus { border-bottom: 2px solid blue; &.x { outline: none; border-width: 0 0 0 0; } }\n", [FOCUS_RULE]],
     [":focus { border-bottom: 2px solid blue; &.x { outline: none; border-width: 0 0 2px; } }\n", []],
-    [":focus { border-bottom: 2px solid blue; &.x { outline: none; border-block-width: 0 0; } }\n", [FOCUS_RULE]],
-    [":focus { border-bottom: 2px solid blue; &.x { outline: none; border-block-width: 0 2px; } }\n", []],
-    [":focus { border-bottom: 2px solid blue; &.x { outline: none; border-inline-width: 0 0; } }\n", []],
     [":focus { outline: none; background: red; background-image: none; }\n", []],
     [":focus { outline: none; background: red; background-color: transparent; }\n", [FOCUS_RULE]],
     [":focus { outline: none; background: red; background-color: transparent; background-image: none; }\n", [FOCUS_RULE]],
@@ -1173,6 +1170,30 @@ test("ST-07: an established violation survives an unknown branch; a changed writ
   const w = await focusAuditFor(":focus { writing-mode: vertical-rl; border-bottom: 2px solid blue; &.x { outline: none; border-block-width: 0 0; } }\n");
   assert.deepEqual(w.rules.filter((x) => x === FOCUS_RULE), []);
   assert.equal(w.unexaminable.length >= 1, true);
+});
+
+test("ST-07: a logical border declaration is never mapped on an assumed writing mode", async () => {
+  for (const css of [
+    ":focus { border-bottom: 2px solid blue; &.x { outline: none; border-block-width: 0 0; } }\n",
+    ":focus { border-bottom: 2px solid blue; &.x { outline: none; border-inline-width: 0; } }\n",
+    ":focus { outline: none; border-block-start: 2px solid blue; }\n",
+  ]) {
+    const r = await focusAuditFor(css);
+    assert.deepEqual(r.rules.filter((x) => x === FOCUS_RULE), [], css);
+    assert.equal(r.unexaminable.length >= 1, true, css);
+  }
+});
+
+test("ST-07: only colour functions enable a background shorthand's colour; nth-child 'of' counts in specificity", async () => {
+  const cases = [
+    [":focus { outline: none; background: url(bg.png) center / calc(100% - 10px) auto; background-image: none; }\n", [FOCUS_RULE]],
+    [":focus { outline: none; background: rgb(0 0 0 / 50%) url(bg.png); background-image: none; }\n", []],
+    [".p:focus { border: 2px solid blue; :where(&):nth-child(2 of .bar) { outline: none; border-style: none; } }\n", [FOCUS_RULE]],
+    [".p:focus { border: 2px solid blue; :where(&):nth-child(2) { outline: none; border-style: none; } }\n", []],
+  ];
+  for (const [css, expected] of cases) {
+    assert.deepEqual((await focusAuditFor(css)).rules.filter((x) => x === FOCUS_RULE), expected, css);
+  }
 });
 
 test("ST-07: a doubly negated reference to the parent keeps the subject", async () => {
