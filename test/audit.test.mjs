@@ -1167,6 +1167,34 @@ test("closed list: a selector-form @at-root is an inheritance boundary", async (
   assert.equal(q.unexaminable.length >= 1, true);
 });
 
+test("closed list: a rule that encloses a directive is not decided; a non-focus subject is not noise", async () => {
+  for (const css of [
+    ":focus { outline: none; box-shadow: 0 0 0 2px blue; @if true { box-shadow: none; } }\n",
+    ":focus { outline: none; box-shadow: 0 0 0 2px blue; @include reset; }\n",
+    ".a { :focus { outline: none; @each $c in x { box-shadow: none; } } }\n",
+  ]) {
+    const r = await focusAuditFor(css);
+    assert.deepEqual(r.rules.filter((x) => x === FOCUS_RULE), [], css);
+    assert.equal(r.examined, false, css);
+    assert.equal(r.unexaminable.length >= 1, true, css);
+    assert.match(r.unexaminable[0].reason, /control directive or @include inside the rule/, css);
+  }
+  // a rule whose subject is not focused leaves no record, however its declarations look
+  for (const css of [
+    ".button:focus .icon { outline: var(--o); }\n",
+    ".button:focus .icon { outline: none; outline: 2px solid red; }\n",
+    ".button:focus .icon { all: initial; outline-style: none; }\n",
+  ]) {
+    const r = await focusAuditFor(css);
+    assert.deepEqual(r.rules.filter((x) => x === FOCUS_RULE), [], css);
+    assert.deepEqual(r.unexaminable, [], css);
+  }
+  // so another, clean focus rule in the same file is still examined
+  const mixed = await focusAuditFor(".button:focus .icon { outline: var(--o); }\na:focus { outline: none; box-shadow: 0 0 0 2px blue; }\n");
+  assert.equal(mixed.examined, true);
+  assert.deepEqual(mixed.unexaminable, []);
+});
+
 test("closed list: a decided branch is not hidden by an off-list branch beside it", async () => {
   for (const css of [
     ":focus, :is(:focus) { outline: none; }\n",

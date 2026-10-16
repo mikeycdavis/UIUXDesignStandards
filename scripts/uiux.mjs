@@ -707,6 +707,7 @@ const UNEXAMINABLE_REASONS = {
   replacementForm: "a replacement indicator is not a plain literal in this block (an unresolved, calculated, disabled, important or repeated value is not decided)",
   propertyName: "an interpolation in a property name may be outline or a ring property",
   declarationForm: "an interpolation outside a property: value declaration",
+  opaqueChild: "a control directive or @include inside the rule may change its declarations, which are not modelled",
   nested: "a nested rule inherits declarations of an enclosing rule or layer, and the cascade between them is not decided",
   nestedProperty: "a nested property block spells its declarations indirectly",
 };
@@ -1273,7 +1274,16 @@ export const DETECTORS = [
       // ones become UNKNOWN. Every style rule is then read under its COMPOSED selector against the
       // closed list of decided forms above; whatever is off the list is recorded, never decided.
       const resolved = resolveInterpolation(text, file.views.sourceOf, file.text);
-      for (const node of parseBlocks(resolved)) {
+      const nodes = parseBlocks(resolved);
+      // A control directive or @include inside a rule may change its declarations, and parseBlocks has
+      // blanked it from the rule's own body: every rule that encloses one is not decided as a whole.
+      const enclosesOpaque = new Set();
+      for (const n of nodes) {
+        if (n.opaque && !(n.parent && n.parent.opaque)) {
+          for (let a = n.parent; a; a = a.parent) enclosesOpaque.add(a);
+        }
+      }
+      for (const node of nodes) {
         if (node.rootEmitted || node.inside || node.dataBlock) continue;
         // the line anchor (ST-05): the first non-whitespace character of the rule head
         const where = node.selectorStart + Math.max(0, node.selector.search(/\S/));
@@ -1324,6 +1334,9 @@ export const DETECTORS = [
         const plainFocus = focusBranches
           .filter((b) => !b.interpolated && offListSelector(b.selector) === null && isFocusSelector(b.selector))
           .map((b) => b.selector);
+        // a selector whose subject is not focused and that has no off-list branch is not a focus rule at all:
+        // nothing about its declarations can matter
+        if (plainFocus.length === 0 && offList.length === 0) continue;
         if (outline.reason !== undefined) {
           note(outline.reason);
           continue;
@@ -1336,6 +1349,11 @@ export const DETECTORS = [
         // do not discard what the decided branches establish.
         if (offList.length > 0) note(offList[0]);
         if (plainFocus.length === 0) continue;
+        // (a block-less @include may emit declarations too)
+        if (enclosesOpaque.has(node) || /(^|;)\s*@include\b/i.test(node.body)) {
+          note(UNEXAMINABLE_REASONS.opaqueChild);
+          continue;
+        }
         const nested = nestingReason(node);
         if (nested !== null) {
           note(nested);
