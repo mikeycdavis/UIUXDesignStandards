@@ -960,6 +960,7 @@ const DECIDED_FORMS = [
   [".a:focus::before { outline: none; }\n", true],
   [".btn[data-x=\"a:b\"]:focus { outline: none; }\n", true],
   [":focus { outline: none; box-shadow: 0 0 0 2px blue; }\n", false],
+  [":focus { outline: none; box-shadow: 0 0 2px red, 0 0 4px blue; }\n", false],
   [":focus { outline: none; border: 2px solid blue; }\n", false],
   [":focus { outline: none; background-color: yellow; }\n", false],
   [":focus { outline: none; text-decoration: underline; }\n", false],
@@ -1042,6 +1043,10 @@ const OFF_LIST_FORMS = [
   [":focus { outline: none; box-shadow: $ring; }\n", REASON.replacement],
   [":focus { outline: none; box-shadow: #{$ring}; }\n", REASON.replacement],
   [":focus { outline: none; box-shadow: none; }\n", REASON.replacement],
+  [":focus { outline: none; background-image: none, none; }\n", REASON.replacement],
+  [":focus { outline: none; background: red, blue; }\n", REASON.replacement],
+  [":focus { outline: none; box-shadow: none, none; }\n", REASON.replacement],
+  [":focus { outline: none; box-shadow: 0 0 2px red, none; }\n", REASON.replacement],
   [":focus { outline: none; box-shadow: 0 0 0 2px blue !important; }\n", REASON.replacement],
   [":focus { outline: none; box-shadow: 0 0 0 2px blue; box-shadow: none; }\n", REASON.replacement],
   [":focus { outline: none; border: 0; }\n", REASON.replacement],
@@ -1096,7 +1101,7 @@ test("closed list: deny by default - a generated off-list selector or body is ne
   }
   const bodies = [];
   for (const prop of ["box-shadow", "border", "border-color", "background", "background-color", "text-decoration", "outline-offset", "outline-color"]) {
-    for (const value of ["var(--x)", "env(x)", "$x", "#{$x}", "calc(1px + 1px)", "min(1px, 2px)", "max(1px, 2px)", "clamp(1px, 2px, 3px)", "none", "0", "initial", "unset", "revert", "inherit", "red !important"]) {
+    for (const value of ["var(--x)", "env(x)", "$x", "#{$x}", "calc(1px + 1px)", "min(1px, 2px)", "max(1px, 2px)", "clamp(1px, 2px, 3px)", "none", "0", "initial", "unset", "revert", "inherit", "red !important", "none, none"]) {
       bodies.push("outline: none; " + prop + ": " + value + ";");
     }
   }

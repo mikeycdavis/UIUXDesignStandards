@@ -913,6 +913,14 @@ function replacementReason(declarations) {
     if (UNRESOLVED_VALUE.test(d.value) || d.value.includes(UNKNOWN) || IMPORTANT.test(d.value)) {
       return UNEXAMINABLE_REASONS.replacementForm;
     }
+    // a comma list is read layer by layer for box-shadow (every layer must be a literal, non-disabled
+    // shadow) and is off the list for every other indicator property (background layers, ...)
+    const layers = splitSelectorList(d.value);
+    if (layers.length > 1) {
+      if (family !== "box-shadow" || layers.some((layer) => DISABLED_LITERAL.test(layer.trim()))) {
+        return UNEXAMINABLE_REASONS.replacementForm;
+      }
+    }
     const bare = d.value.trim();
     // a border or text-decoration shorthand is disabled by ANY disabled token (0 solid red, 2px solid transparent)
     const anyToken = family === "border" || family === "text-decoration";
