@@ -352,6 +352,36 @@ running.
 
 **Line anchor.** In `findings[].evidence` and `detectorsUnexaminable[].evidence` an entry `path:line` names the line containing the first non-whitespace character of the construct's head: for a style rule, the first character of its selector (the rule head), not the line of any declaration inside it and not the end of the preceding rule. A declaration line is not reported; a multi-line rule reports the line it starts on. For a one-line rule the two coincide. (Owner decision on ST-05, option A.)
 
+**Decided forms of `accessibility.no-removed-focus-indicators` (a closed list).** The detector decides the
+forms below and routes everything else to `detectorsUnexaminable` with a named reason. An unexaminable form is never an
+exemption and never a pass: a rule with one and no established finding is not in `detectorsExamined`. The detector does
+not model the CSS cascade (importance, specificity, source order, layers, `all`, custom properties, Sass variables,
+functional selectors, cross-rule interaction). A form is added to this list only with a decision and a test, never in passing.
+
+| Decided (one block, plain literal values) | Rule |
+| --- | --- |
+| Selector | a style rule whose branches are simple selectors (type, class, id, attribute, universal, combinators) with pseudo-classes from `:focus :focus-visible :focus-within :hover :active :visited :link :disabled :enabled :checked :required :optional :invalid :valid :read-only :read-write :placeholder-shown :first-child :last-child :only-child :first-of-type :last-of-type :only-of-type :empty :target`, pseudo-elements from `::before ::after ::first-line ::first-letter ::placeholder ::selection ::marker`, and `:not(:focus-visible)`; nesting whose enclosing rules declare nothing the nested rule could inherit |
+| Removal | exactly one `outline` declaration in the block, whose value is `none` or `0` |
+| Not a removal | exactly one `outline` declaration of a non-zero literal width, a style other than `none`/`hidden`, and at most one more token (a colour, which may be `var()`) |
+| Replacement indicator | a declaration of `box-shadow`, `border`, `border-bottom`, `border-color`, `background`, `background-color`, `text-decoration`, `outline-offset` or `outline-color` with a literal, non-disabled value, or an `@apply` of `ring`/`ring-1`/`ring-2`/`ring-4`/`ring-8` (`ring-0` and `!important` as in the ring model), in the same block |
+| Exemption | `:focus:not(:focus-visible)` |
+| Interpolation | SCSS interpolation whose value is statically readable (`#{none}`, a quoted literal); an unknown span is off the list |
+
+| Off the list: `detectorsUnexaminable[].reason` | Forms |
+| --- | --- |
+| a functional or unlisted pseudo-class selector is outside the decided list of selector forms | `:is() :where() :not()` other than `:not(:focus-visible)`, `:has() :host() :nth-*()`, any other pseudo-class or functional selector, an unresolved `&` |
+| an interpolation in the selector may make it a focus rule | an unknown interpolation anywhere in a selector |
+| a Sass placeholder selector emits nothing unless it is extended, and an @extend may be in another file | `%name` anywhere in a selector |
+| the outline is not removed by exactly one plain 'outline: none\|0' declaration (several declarations, a longhand, all:, an important or unresolved value are not decided) | several `outline` declarations, `outline-style`, `outline-width`, `all`, `!important`, `var()`, `env()`, a Sass variable, an interpolation or a calculation in the outline, or an outline that is neither the removal nor the not-a-removal form |
+| a replacement indicator is not a plain literal in this block (an unresolved, calculated, disabled, important or repeated value is not decided) | an unresolved, calculated (`calc() min() max() clamp()`), disabled (`none`, `0`, `transparent`, `initial`, `unset`, `revert`, `inherit`) or `!important` value of an indicator property, an unknown `@apply` token |
+| a nested rule inherits declarations of an enclosing rule or layer, and the cascade between them is not decided | a rule nested under a rule or group at-rule that declares an indicator, outline or `@apply`; any rule inside `@layer` |
+| an interpolation in a property name may be outline or a ring property; an interpolation outside a property: value declaration | an unknown property name or declaration shape |
+| it sits inside an @include / control directive / mixin whose selector semantics are not modelled | `@include`, `@each`, `@if`, `@else`, `@for`, `@while`, `@mixin`, `@function` |
+| a nested property block spells its declarations indirectly | `outline: { style: none }` under a focus rule |
+
+A selector list is read branch by branch: a decided focus branch still establishes a finding beside an off-list branch, which is
+recorded as unexaminable. Cross-rule interaction (an indicator declared by another rule) is not part of the decided model, as on main.
+
 `evidenceSurface` is present on both commands, always, with not-attempted defaults:
 
 ```json

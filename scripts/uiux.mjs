@@ -526,14 +526,12 @@ function parseBlocks(text) {
     let composed;
     let childCtx;
     let rootEmitted = false;
-    let keepsSubject = false; // an at-rule whose contents still style the enclosing rule's element
     if (atRule === "at-root") {
       const prelude = trimmed.replace(/^@at-root/i, "").trim();
       if (prelude === "" || prelude.startsWith("(")) {
         const resets = prelude === "" ? true : atRootResets(prelude);
         if (resets === null) opaque = true; // a query that cannot be read is not guessed at
         const drops = resets !== false;
-        keepsSubject = !drops && !ctx.reset;
         childCtx = { parents: ctx.parents, reset: ctx.reset || drops };
         composed = drops ? [""] : ctx.reset ? [""] : ctx.parents;
       } else {
@@ -550,7 +548,6 @@ function parseBlocks(text) {
       // Every other at-rule - the conditional group rules and generic CSS at-rules alike - keeps the
       // enclosing rule around its declarations. A name that is itself interpolated is not knowable.
       if (atRule === "") opaque = true;
-      keepsSubject = !ctx.reset;
       composed = ctx.reset ? [""] : ctx.parents;
       childCtx = ctx;
     } else if (declaration) {
@@ -562,40 +559,7 @@ function parseBlocks(text) {
       composed = composeSelectors(selector, ctx.parents, ctx.reset);
       childCtx = { parents: composed, reset: false };
     }
-    // Bodies of ENCLOSING rules that style the SAME element as this block. A child written `&.x`,
-    // `&:hover` or `&[x]` compiles to a compound on the parent's own subject, so the parent's
-    // declarations (a box-shadow ring) still apply to it. A descendant, a pseudo-element, a name
-    // suffix (`&-x`) or any other combinator names a different subject. A group at-rule passes the
-    // enclosing rule through, but its own (conditional) body is not counted as unconditional.
-    let elementNodes = [];
-    if (parent) {
-      // The parent's declarations are a FOCUS indicator only where the parent branch is itself a
-      // focus selector: `.btn { box-shadow: ...; &:focus { outline: none } }` carries a shadow that
-      // is present unfocused. A selector list is read branch by branch (the composed list is the cross
-      // product, part-major): every focus branch of this rule must come from a focus branch of the parent.
-      const branches = parent.composed.length;
-      const carried =
-        !parent.rootEmitted && parent.propNest === null && !parent.dataBlock && branches > 0 &&
-        parent.composed.some((selector) => isFocusSelector(selector)) &&
-        composed.every((selector, k) => !isFocusSelector(selector) || isFocusSelector(parent.composed[k % branches]))
-          ? [parent]
-          : [];
-      if (atRule !== null) {
-        if (keepsSubject) elementNodes = [...parent.elementNodes, ...carried];
-      } else if (declaration === null && !ctx.reset) {
-        const parts = splitSelectorList(selector);
-        // a parent that is nothing but a focus pseudo-class matches every focused element
-        const bareFocus = parent.composed.length > 0 &&
-          parent.composed.every((sel) => isBareFocus(sel));
-        if (parts.length > 0 && parts.every((part) => namesSameSubject(part, bareFocus))) {
-          elementNodes = [...parent.elementNodes, ...carried];
-        }
-      }
-    }
     const node = {
-      elementNodes,
-      elementBodies: elementNodes.map((n) => n.body),
-      bodyStart: frame.open + 1,
       selector,
       selectorStart: frame.selStart,
       atRule,
@@ -669,689 +633,163 @@ function composeSelectors(selector, parents, reset = false) {
   return composed;
 }
 
-const IMPORTANT = /!\s*important\s*$/i;
-const DISABLED_VALUE =
-  /^(none|hidden|[+-]?(?:0+(?:\.0*)?|\.0+)[a-z%]*|initial|unset|revert|revert-layer|transparent)(\s*!important)?$/i;
-
-/** Specificity of a selector as [ids, classes/attributes/pseudo-classes, types/pseudo-elements]. */
-function specificity(selector) {
-  const out = [0, 0, 0];
-  const add = (spec) => {
-    for (let k = 0; k < 3; k++) out[k] += spec[k];
-  };
-  const identEnd = (from) => {
-    let j = from;
-    while (j < selector.length && /[\w -￿-]/.test(selector[j])) j++;
-    return j;
-  };
-  const parenEnd = (open) => {
-    let depth = 1;
-    let j = open + 1;
-    for (; j < selector.length && depth > 0; j++) {
-      if (selector[j] === "(") depth++;
-      else if (selector[j] === ")") depth--;
+/**
+ * True when the ring width a declaration block `@apply`s ends up non-zero.
+ *
+ * Model, from the Tailwind v3 documentation (https://v3.tailwindcss.com/docs/functions-and-directives):
+ * "If you'd like to @apply an existing class and make it !important, simply add !important to the
+ * end of the declaration" - so a trailing standalone `!important` makes every utility in that one
+ * @apply declaration important, and a per-token `!ring-N` / `ring-N!` makes that token important.
+ * An important declaration beats a non-important one regardless of order; among declarations of the
+ * same importance the later one wins, as utilities are applied in source order. Tokens are read
+ * across every @apply in the block. Only exact width tokens (`ring`, `ring-0|1|2|4|8`) count; a
+ * variant-prefixed token (`dark:ring-2`) is ignored, which fails toward reporting.
+ */
+function appliesRingWidth(body) {
+  let important = false;
+  let ring = false;
+  for (const applied of body.matchAll(/@apply\s+([^;]*)/gi)) {
+    const tokens = applied[1].trim().split(/\s+/);
+    const declarationImportant = tokens.length > 0 && /^!important$/i.test(tokens[tokens.length - 1]);
+    for (const raw of tokens) {
+      const tokenImportant = declarationImportant || raw.startsWith("!") || raw.endsWith("!");
+      const token = raw.replace(/^!|!$/g, "");
+      let nonZero;
+      if (token === "ring-0") nonZero = false;
+      else if (/^ring(-(1|2|4|8))?$/.test(token)) nonZero = true;
+      else continue;
+      if (important && !tokenImportant) continue;
+      important = tokenImportant;
+      ring = nonZero;
     }
-    return j;
-  };
-  for (let i = 0; i < selector.length; ) {
-    const ch = selector[i];
-    if (ch === "#") {
-      out[0]++;
-      i = identEnd(i + 1);
-    } else if (ch === ".") {
-      out[1]++;
-      i = identEnd(i + 1);
-    } else if (ch === "[") {
-      out[1]++;
-      const close = selector.indexOf("]", i);
-      i = close === -1 ? selector.length : close + 1;
-    } else if (ch === ":") {
-      const element = selector[i + 1] === ":";
-      const nameEnd = identEnd(i + (element ? 2 : 1));
-      const name = selector.slice(i + (element ? 2 : 1), nameEnd).toLowerCase();
-      i = nameEnd;
-      if (element || ["before", "after", "first-line", "first-letter"].includes(name)) out[2]++;
-      else if (selector[i] === "(") {
-        const end = parenEnd(i);
-        const inner = selector.slice(i + 1, end - 1);
-        if (["is", "not", "has", "matches", "-webkit-any", "-moz-any"].includes(name)) {
-          const specs = splitSelectorList(inner).map(specificity);
-          specs.sort(compareSpecificity);
-          if (specs.length > 0) add(specs[specs.length - 1]);
-        } else if (name === "host" || name === "host-context") {
-          // the pseudo-class and its argument both count
-          out[1]++;
-          const specs = splitSelectorList(inner).map(specificity);
-          specs.sort(compareSpecificity);
-          if (specs.length > 0) add(specs[specs.length - 1]);
-        } else if (name !== "where") {
-          out[1]++;
-          // :nth-child(2 of .bar) and :nth-last-child(...): the selector after "of" counts as well
-          const of = /(?:^|\s)of\s+([\s\S]*)$/i.exec(inner);
-          if (of && (name === "nth-child" || name === "nth-last-child")) {
-            const specs = splitSelectorList(of[1]).map(specificity);
-            specs.sort(compareSpecificity);
-            if (specs.length > 0) add(specs[specs.length - 1]);
-          }
-        }
-        i = end;
-        continue;
-      } else out[1]++;
-      if (selector[i] === "(") i = parenEnd(i);
-    } else if (/[A-Za-z_ -￿]/.test(ch)) {
-      out[2]++;
-      i = identEnd(i);
-    } else i++;
+  }
+  return ring;
+}
+
+/* ------------------------------------------------------------------------------------------------
+ * focus-visible-removal: the CLOSED LIST of forms the detector decides.
+ *
+ * The detector decides a small, closed set of forms and routes EVERYTHING else to
+ * `detectorsUnexaminable` with a named reason: an unknown is never an exemption and never a pass. It
+ * does not model the CSS cascade (importance, specificity, source order, layers, `all`, custom
+ * properties, Sass variables, functional selectors). A new form is added to the list only with a
+ * decision and a test; it is never modelled in passing. docs/integration-contract.md states the list.
+ *
+ * DECIDED (one block, plain literal values):
+ *   - a style rule whose selector branches are simple selectors (type, class, id, attribute, universal,
+ *     combinators) with pseudo-classes from DECIDED_PSEUDO_CLASSES, pseudo-elements from
+ *     DECIDED_PSEUDO_ELEMENTS, and `:not(:focus-visible)`;
+ *   - the rule removes the outline with exactly one `outline` declaration whose value is `none` or `0`;
+ *   - a replacement indicator is a declaration of box-shadow / border / border-color / border-bottom /
+ *     background / background-color / text-decoration / outline-offset / outline-color with a
+ *     literal non-disabled value, or an `@apply` of a ring-width utility, in the SAME block;
+ *   - `:focus:not(:focus-visible)` is the mouse-only exemption;
+ *   - SCSS interpolation whose value is statically readable (`#{none}`, quoted literals), and nesting
+ *     whose enclosing rules declare nothing the nested rule could inherit.
+ * ---------------------------------------------------------------------------------------------- */
+
+/** Pseudo-classes and pseudo-elements the selector reading decides; any other is off the list. */
+const DECIDED_PSEUDO_CLASSES = new Set([
+  "focus", "focus-visible", "focus-within", "hover", "active", "visited", "link", "disabled", "enabled",
+  "checked", "required", "optional", "invalid", "valid", "read-only", "read-write", "placeholder-shown",
+  "first-child", "last-child", "only-child", "first-of-type", "last-of-type", "only-of-type", "empty", "target",
+]);
+const DECIDED_PSEUDO_ELEMENTS = new Set(["before", "after", "first-line", "first-letter", "placeholder", "selection", "marker"]);
+
+/** Each reason a form is routed to detectorsUnexaminable. The text is part of the contract. */
+const UNEXAMINABLE_REASONS = {
+  selectorInterpolation: "an interpolation in the selector may make it a focus rule",
+  selectorPlaceholder: "a Sass placeholder selector emits nothing unless it is extended, and an @extend may be in another file",
+  selectorFunctional: "a functional or unlisted pseudo-class selector is outside the decided list of selector forms",
+  selectorOpaque: "it sits inside an @include / control directive / mixin whose selector semantics are not modelled",
+  outlineForm: "the outline is not removed by exactly one plain 'outline: none|0' declaration (several declarations, a longhand, all:, an important or unresolved value are not decided)",
+  replacementForm: "a replacement indicator is not a plain literal in this block (an unresolved, calculated, disabled, important or repeated value is not decided)",
+  propertyName: "an interpolation in a property name may be outline or a ring property",
+  declarationForm: "an interpolation outside a property: value declaration",
+  nested: "a nested rule inherits declarations of an enclosing rule or layer, and the cascade between them is not decided",
+  nestedProperty: "a nested property block spells its declarations indirectly",
+};
+
+/** A value that is not a plain literal: a custom property, Sass variable, calculation or interpolation. */
+const UNRESOLVED_VALUE = /(^|[^\w-])(var|env|calc|min|max|clamp)\(|\$[A-Za-z_-]/i;
+const IMPORTANT = /!\s*important\s*$/i;
+const DISABLED_LITERAL = /^(none|hidden|0+(\.0*)?[a-z%]*|initial|unset|revert|revert-layer|transparent|inherit)$/i;
+
+/** Declaration properties whose value decides whether a focus indicator exists. */
+const FOCUS_RELEVANT_PROPERTY = /^(outline(-[a-z]+)?|box-shadow|border(-[a-z]+)*|background(-[a-z]+)?|text-decoration(-[a-z]+)?|--tw-ring[a-z-]*|ring[a-z-]*|filter|all)$/i;
+const REPLACEMENT_FAMILY = (property) => {
+  const p = property.toLowerCase();
+  if (p === "box-shadow") return "box-shadow";
+  if (p.startsWith("border")) return "border";
+  if (p.startsWith("background")) return "background";
+  if (p.startsWith("text-decoration")) return "text-decoration";
+  if (p === "outline-offset" || p === "outline-color") return p;
+  if (p === "filter" || p.startsWith("--tw-ring") || p.startsWith("ring")) return "ring";
+  return null;
+};
+const COMPENSATING = /\b(box-shadow|border|border-bottom|border-color|background|background-color|text-decoration|outline-offset|outline-color)\s*:/i;
+
+/** The declarations of a block as {property, value}; the value keeps its `!important`. */
+function declarationsOf(body) {
+  const out = [];
+  for (const raw of body.split(";")) {
+    const text = raw.trim();
+    if (text === "") continue;
+    if (/^@apply\b/i.test(text)) {
+      out.push({ property: "@apply", value: text.slice(6).trim(), raw: text });
+      continue;
+    }
+    const colon = text.indexOf(":");
+    if (colon === -1) continue;
+    out.push({ property: text.slice(0, colon).trim(), value: text.slice(colon + 1).trim(), raw: text });
   }
   return out;
 }
 
-function compareSpecificity(a, b) {
-  for (let k = 0; k < 3; k++) if (a[k] !== b[k]) return a[k] - b[k];
-  return 0;
-}
-
-/** Lowest and highest specificity with which a node's declarations reach the focused element. */
-function specificityRange(node) {
-  const focus = node.composed.filter((selector) => isFocusSelector(selector));
-  const specs = (focus.length > 0 ? focus : node.composed).map(specificity).sort(compareSpecificity);
-  if (specs.length === 0) return [[0, 0, 0], [0, 0, 0]];
-  return [specs[0], specs[specs.length - 1]];
-}
-
-const BORDER_SIDES = ["top", "right", "bottom", "left"];
-const LOGICAL_SIDES = { "block-start": ["top"], "block-end": ["bottom"], "inline-start": ["left"], "inline-end": ["right"], block: ["top", "bottom"], inline: ["left", "right"] };
-const BORDER_FACETS = ["style", "width", "color"];
-
-/**
- * The (component, facet) pairs a declaration sets, or null when it is neither an indicator nor
- * something that can disable one. Each border side is its own component with a style, a width and a
- * colour facet: `border-top-style: none` leaves the bottom border alone, `border-style: none` clears
- * the style of every side, and a shorthand sets every facet of the sides it names.
- */
-function declarationCovers(property) {
-  const p = property.toLowerCase();
-  if (p === "all") return "all";
-  if (p === "box-shadow") return [["box-shadow", "*"]];
-  if (p === "outline-offset" || p === "outline-color") return [[p, "*"]];
-  // a background is on when EITHER its colour or its image is (see replacementVerdict)
-  if (p === "background") return [["background", "color"], ["background", "image"]];
-  if (p === "background-color") return [["background", "color"]];
-  if (p === "background-image") return [["background", "image"]];
-  if (/^text-decoration(-(line|color|style|thickness))?$/.test(p)) return [["text-decoration", "*"]];
-  if (/^(outline(-[a-z]+)?|--tw-ring[a-z-]*|ring[a-z-]*|filter)$/.test(p)) return [[p, "*"]];
-  const border = /^border(?:-(top|right|bottom|left|block-start|block-end|inline-start|inline-end|block|inline))?(?:-(style|width|color))?$/.exec(p);
-  if (border) {
-    const where = border[1];
-    const sides = where === undefined ? BORDER_SIDES : (LOGICAL_SIDES[where] ?? [where]);
-    const facets = border[2] === undefined ? BORDER_FACETS : [border[2]];
-    return sides.flatMap((side) => facets.map((facet) => ["border-" + side, facet]));
-  }
-  return null;
-}
-
-const BACKGROUND_KEYWORDS = new Set([
-  "none", "inherit", "initial", "unset", "revert", "revert-layer", "repeat", "no-repeat", "repeat-x", "repeat-y",
-  "space", "round", "scroll", "fixed", "local", "border-box", "padding-box", "content-box", "text", "center", "top",
-  "left", "right", "bottom", "auto", "cover", "contain",
-]);
-
-/** The colour a background shorthand sets: its colour token, else transparent (the initial value). */
-function shorthandBackgroundColor(value) {
-  if (value.includes(UNKNOWN)) return value; // an interpolated shorthand may be any colour
-  if (/^inherit(\s*!important)?$/i.test(value.trim())) return value;
-  // image functions and sizes are not colours; var()/env() may be anything and are read as a colour
-  const stripped = value.replace(
-    /(url|image-set|paint|element|cross-fade|image|-?[a-z-]*gradient)\((?:[^()]|\([^()]*\))*\)/gi,
-    " ",
-  );
-  for (const token of stripped.split(/[\s/]+/).filter(Boolean)) {
-    const t = token.toLowerCase();
-    if (BACKGROUND_KEYWORDS.has(t) || /^[+-]?[\d.]/.test(t) || t === "!important") continue;
-    if (
-      /^#[0-9a-f]{3,8}$/.test(t) ||
-      /^(rgb|rgba|hsl|hsla|hwb|lab|lch|oklab|oklch|color|color-mix|light-dark|var|env)\(/.test(t) ||
-      /^[a-z]+$/.test(t)
-    ) {
-      return token;
-    }
-  }
-  return "transparent";
-}
-
-/**
- * Do the declarations that style the focused element leave a replacement indicator? The rule's own
- * declarations and those of the enclosing same-element rules are put in one cascade. For every
- * component (box-shadow, each border side, background, ...) and facet the WINNING declaration decides
- * whether it is on or off - important beats not, then higher computed specificity, then later
- * absolute source position (a parent's declaration written after a nested rule is later than it) -
- * so a disabling declaration can be re-enabled by a later one, and a longhand disables only what it
- * names. Returns "present", "absent" or, when a selector list gives declarations a range of
- * specificities that cannot decide the cascade, "unknown".
- */
-function replacementVerdict(node, compensating) {
-  const chain = [...node.elementNodes, node];
-  const decls = [];
-  let layer = -1; // the chain position of the nearest @layer block at or above the owner
-  for (const [chainIndex, owner] of chain.entries()) {
-    if (owner.atRule === "layer") layer = chainIndex;
-    const [lo, hi] = specificityRange(owner);
-    let position = 0;
-    for (const raw of owner.body.split(";")) {
-      // the declaration starts after the whitespace (and blanked nested rules) that precede it
-      const at = owner.bodyStart + position + (raw.length - raw.trimStart().length);
-      position += raw.length + 1;
-      const text = raw.trim();
-      if (text === "") continue;
-      const apply = /^@apply\s+([\s\S]*)$/i.exec(text);
-      if (apply) {
-        // Only exact, unprefixed ring-width tokens are interpreted; each is a box-shadow declaration
-        // in source order, important when the token or the whole declaration is.
-        const tokens = apply[1].trim().split(/\s+/);
-        const wholeImportant = tokens.length > 0 && /^!important$/i.test(tokens[tokens.length - 1]);
-        for (const rawToken of tokens) {
-          const token = rawToken.replace(/^!|!$/g, "");
-          const important = wholeImportant || rawToken.startsWith("!") || rawToken.endsWith("!");
-          if (token.includes(UNKNOWN)) {
-            // an interpolated utility may be a ring width: an unknown declaration in the cascade
-            decls.push({ at, lo, hi, layer, property: "box-shadow", value: token, important: "unknown" });
-          } else if (token === "ring-0") decls.push({ at, lo, hi, layer, property: "box-shadow", value: "none", important });
-          else if (/^ring(-(1|2|4|8))?$/.test(token)) {
-            decls.push({ at, lo, hi, layer, property: "box-shadow", value: "0 0 0 1px ring", important });
-          }
-        }
-        continue;
-      }
-      const colon = text.indexOf(":");
-      if (colon === -1) continue;
-      const property = text.slice(0, colon).trim().toLowerCase();
-      if (property === "") continue;
-      const value = text.slice(colon + 1).trim();
-      // an interpolation may expand to a value ending in !important
-      const important = value.includes(UNKNOWN) || /\$[A-Za-z_-]/.test(value) ? "unknown" : IMPORTANT.test(value);
-      const longhand = /^border-(style|width|color)$/.exec(property);
-      const logical = /^border-(block|inline)-(style|width|color)$/.exec(property);
-      const values = value.replace(IMPORTANT, "").trim().split(/\s+(?![^(]*\))/);
-      if (longhand && values.length > 1 && values.length <= 4) {
-        // border-width: 0 0 0 0 - one to four values are top, right, bottom, left (CSS 1-4 value syntax)
-        const [a, b = a, c = a, d = b] = values;
-        const bySide = values.length === 2 ? [a, b, a, b] : values.length === 3 ? [a, b, c, b] : [a, b, c, d];
-        BORDER_SIDES.forEach((side, k) => {
-          decls.push({ at, lo, hi, layer, property: "border-" + side + "-" + longhand[1], value: bySide[k], important });
-        });
-        continue;
-      }
-      // A border shorthand sets width, style and colour of the sides it names: an omitted style is none
-      // (nothing is drawn), an omitted width is medium, an omitted colour is currentcolor.
-      const shorthand = /^border(?:-(top|right|bottom|left))?$/.exec(property);
-      if (shorthand) {
-        const sides = shorthand[1] === undefined ? BORDER_SIDES : [shorthand[1]];
-        const bare = value.replace(IMPORTANT, "").trim();
-        let facets;
-        if (/^(inherit|initial|unset|revert|revert-layer)$/i.test(bare)) {
-          facets = { width: bare, style: bare, color: bare };
-        } else {
-          const tokens = bare.split(/\s+(?![^(]*\))/).filter(Boolean);
-          // a var()/env()/interpolated token may carry any facet it is not already known for: such a
-          // facet keeps that token's unresolved value (nothing is defaulted), while the facets that
-          // known tokens fix stay known (border: 0 solid var(--c) has a zero width whatever --c is)
-          const unresolved = tokens.find((t) => t.includes(UNKNOWN) || UNRESOLVED.test(t));
-          const known = tokens.filter((t) => t !== unresolved && !(t.includes(UNKNOWN) || UNRESOLVED.test(t)));
-          const style = known.find((t) => /^(none|hidden|dotted|dashed|solid|double|groove|ridge|inset|outset)$/i.test(t));
-          const widthToken = known.find((t) => /^(thin|medium|thick)$/i.test(t) || /^[+-]?[\d.]/.test(t) || /^calc\(/i.test(t));
-          const width = widthToken === undefined ? undefined : readCalc(widthToken);
-          const color = known.find((t) => t !== style && t !== widthToken);
-          facets = {
-            width: width ?? unresolved ?? "medium",
-            style: style ?? unresolved ?? "none",
-            color: color ?? unresolved ?? "currentcolor",
-          };
-        }
-        const introduces = compensating.test(property + ":");
-        for (const side of sides) {
-          for (const facet of BORDER_FACETS) {
-            decls.push({ at, lo, hi, layer, property: "border-" + side + "-" + facet, value: facets[facet], important, introduces });
-          }
-        }
-        continue;
-      }
-      if (property === "background") {
-        // the shorthand sets the colour and resets the image: only url(), a gradient or image-set()
-        // supplies one
-        // inherit keeps whatever the parent paints: potentially visible, never asserted absent
-        // an unresolved var()/env() can invalidate the whole declaration, so no part of it is known
-        const unresolved = UNRESOLVED.test(value);
-        const inherited = /^inherit(\s*!important)?$/i.test(value) || value.includes(UNKNOWN) || unresolved;
-        const image = inherited || /url\(|gradient\(|image-set\(|paint\(|element\(|cross-fade\(|\bimage\(/i.test(value) ? value : "none";
-        decls.push({ at, lo, hi, layer, property: "background-color", value: unresolved ? value : shorthandBackgroundColor(value), important });
-        decls.push({ at, lo, hi, layer, property: "background-image", value: image, important, introduces: true });
-        continue;
-      }
-      if (logical && values.length === 2) {
-        // border-block-width: 0 0 - start and end (horizontal writing mode: top/bottom, left/right)
-        const sides = logical[1] === "block" ? ["top", "bottom"] : ["left", "right"];
-        sides.forEach((side, k) => {
-          decls.push({ at, lo, hi, layer, logical: true, property: "border-" + side + "-" + logical[2], value: values[k], important });
-        });
-        continue;
-      }
-      // an interpolated value of a relevant property may be an indicator
-      const introduces = (value.includes(UNKNOWN) || UNRESOLVED.test(value)) && FOCUS_RELEVANT_PROPERTY.test(property) && !/^outline(-(style|width))?$/i.test(property);
-      decls.push({ at, lo, hi, layer, property, value, important, introduces });
-    }
-  }
-  // Logical border sides map to physical ones through writing-mode and direction, which may be set
-  // by any rule (an ancestor's, another file's): a logical border declaration is never mapped on an
-  // assumption, so the cascade it takes part in is undecided.
-  if (decls.some((d) => /^border-(block|inline)(-|$)/.test(d.property) || d.logical)) return "unknown";
-  // source order is absolute position (a stable sort keeps the tokens of one @apply in order)
-  decls.sort((x, y) => x.at - y.at);
-  decls.forEach((d, order) => {
-    d.order = order;
-    // an interpolated value is unknown: it may or may not be an indicator, and the cascade decides
-    // whether it can matter at all
-    // (var() and env() are as unresolved as an interpolation: the custom property may hold none)
-    // (all: inherit takes the parent's value, which may be none: an unknown reset)
-    d.enabled =
-      d.value.includes(UNKNOWN) || UNRESOLVED.test(d.value) || (d.property === "all" && /^inherit$/i.test(d.value))
-        ? "unknown"
-        : !DISABLED_VALUE.test(d.value);
-    d.covers = declarationCovers(d.property);
-  });
-  const isSingle = (d) => compareSpecificity(d.lo, d.hi) === 0;
-  // does `a` beat `b` in the cascade? "wins" | "loses" | "unknown"
-  const beats = (a, b) => {
-    // declarations in different cascade layers are ranked by layer order, which is not modelled
-    if (a.layer !== b.layer) return "unknown";
-    if (a.important === "unknown" || b.important === "unknown") {
-      // the outcome under both readings of the unknown importance: decided only if they agree
-      const readings = [];
-      for (const av of a.important === "unknown" ? [true, false] : [a.important]) {
-        for (const bv of b.important === "unknown" ? [true, false] : [b.important]) {
-          readings.push(beats({ ...a, important: av }, { ...b, important: bv }));
-        }
-      }
-      return readings.every((reading) => reading === readings[0]) ? readings[0] : "unknown";
-    }
-    if (a.important !== b.important) return a.important ? "wins" : "loses";
-    if (compareSpecificity(a.lo, b.hi) > 0) return "wins";
-    if (compareSpecificity(a.hi, b.lo) < 0) return "loses";
-    if (isSingle(a) && isSingle(b) && compareSpecificity(a.lo, b.lo) === 0) return a.order > b.order ? "wins" : "loses";
-    return "unknown";
-  };
-  // The state of one facet: the winner's, "unknown" when survivors disagree, null when undeclared.
-  const facetState = (facetDecls) => {
-    if (facetDecls.length === 0) return null;
-    const survivors = facetDecls.filter((d) => !facetDecls.some((other) => other !== d && beats(other, d) === "wins"));
-    const states = new Set(survivors.map((d) => d.enabled));
-    return states.size === 1 ? [...states][0] : "unknown";
-  };
-  const components = new Map(); // "component|facet" -> declarations covering it
-  for (const d of decls) {
-    const pairs = d.covers === "all" ? [] : d.covers;
-    if (pairs === null) continue;
-    for (const [component, facet] of pairs) {
-      const key = component + "|" + facet;
-      if (!components.has(key)) components.set(key, []);
-      components.get(key).push(d);
-    }
-  }
-  // `all` resets every component and facet it competes with
-  // (an unresolved reset takes part too: it may be one, and the cascade decides whether it can win)
-  const resets = decls.filter((d) => d.covers === "all" && d.enabled !== true);
-  const componentNames = new Set([...components.keys()].map((key) => key.split("|")[0]));
-  let unknown = false;
-  for (const component of componentNames) {
-    // an indicator needs an introducer: an enabled declaration of an indicator property
-    const introduced = decls.some(
-      (d) =>
-        d.enabled &&
-        Array.isArray(d.covers) &&
-        d.covers.some(([c]) => c === component) &&
-        (d.introduces === true || compensating.test(d.property + ":")),
-    );
-    if (!introduced) continue;
-    const states = [];
-    for (const [key, facetDecls] of components) {
-      if (key.split("|")[0] !== component) continue;
-      states.push(facetState([...facetDecls, ...resets]));
-    }
-    // A border needs EVERY facet it declares (style and width and colour); a background is visible
-    // with EITHER its colour or its image.
-    const undecided = states.includes("unknown");
-    if (component === "background") {
-      if (states.includes(true)) return "present";
-      if (undecided) unknown = true;
-    } else if (!states.includes(false)) {
-      if (!undecided) return "present";
-      unknown = true;
-    }
-  }
-  // an unresolved or inherited all may bring an indicator in from elsewhere
-  if (resets.some((reset) => reset.enabled === "unknown")) return "unknown";
-  return unknown ? "unknown" : "absent";
-}
-
-/**
- * True when a nested selector part compiles to a compound on the PARENT'S OWN subject: it starts with
- * `&` joined to a class, id, attribute or pseudo-class (or is `&` alone), or wraps `&` in a
- * subject-preserving functional pseudo-class whose every alternative does the same (`:is(&)`,
- * `.x:where(&)`). A descendant or sibling combinator, a name suffix (`&-x`), a pseudo-element, a
- * negation (`:not(&)`) or a relational `:has(&)` names a different subject.
- */
-function namesSameSubject(part, parentIsBareFocus = false) {
-  if (/::|:(before|after|first-line|first-letter)(?![\w-])/i.test(part)) return false;
-  // Ancestor constraints may precede the subject (`.wrapper &`): the LAST compound is the subject, and
-  // it alone may carry the reference to the parent.
-  const compounds = selectorCompounds(part);
-  // (an earlier compound that also names the parent - `& + &` - is context, not the subject)
-  if (compounds.length === 0) return false;
-  let rest = compounds[compounds.length - 1];
-  let anchored = false;
-  const wrapper = /:(?:is|where|matches|-webkit-any|-moz-any|not|nth-child|nth-last-child)\(/i;
-  for (let m = wrapper.exec(rest); m !== null; m = wrapper.exec(rest)) {
-    let depth = 1;
-    let end = m.index + m[0].length;
-    for (; end < rest.length && depth > 0; end++) {
-      if (rest[end] === "(") depth++;
-      else if (rest[end] === ")") depth--;
-    }
-    if (depth !== 0) return false;
-    const args = splitSelectorList(rest.slice(m.index + m[0].length, end - 1));
-    if (args.length === 0) return false;
-    if (/^:nth-(last-)?child\(/i.test(m[0])) {
-      // :nth-child(2 of &): every match is still the parent's subject; without an "of" clause (or
-      // without a reference in it) it is a position filter that only narrows the subject
-      const inner = rest.slice(m.index + m[0].length, end - 1);
-      const of = /\bof\s+([\s\S]*)$/i.exec(inner);
-      if (of && of[1].includes("&")) {
-        if (!namesSameSubject(":is(" + of[1] + ")", parentIsBareFocus)) return false;
-        anchored = true;
-      }
-    } else if (/^:not\(/i.test(m[0])) {
-      const referencing = args.filter((arg) => arg.includes("&"));
-      if (referencing.length > 0) {
-        // a negation of the parent preserves the subject only when it is itself negated:
-        // :not(:not(&)) is &, while :not(&) is everything else; one doubled argument is enough and
-        // every other argument (ordinary or parent-qualified) only narrows it further
-        const doubled = referencing.some((arg) => {
-          const inner = /^:not\(([\s\S]*)\)$/i.exec(arg);
-          // :not(:not(A, B)) is :is(A, B): the same rule as a subject-preserving :is() list
-          return inner !== null && namesSameSubject(":is(" + inner[1] + ")", parentIsBareFocus);
-        });
-        // a negation of the parent that is not doubled only narrows a subject anchored elsewhere
-        // (&:not(&.disabled)); on its own it leaves no anchor and the part is rejected below
-        if (doubled) anchored = true;
-      }
-      // an ordinary negation filter (&:not(.disabled)) narrows the subject and is otherwise ignored
-    } else {
-      // :is(&, .special): the focus-relevant alternative is the parent; an alternative that does not
-      // reference it and cannot be a focus rule matches other elements and does not matter. One that
-      // is a focus selector of its own is a different rule and is not the parent.
-      const same = args.filter((arg) => namesSameSubject(arg, parentIsBareFocus));
-      const others = args.filter((arg) => !namesSameSubject(arg, parentIsBareFocus));
-      // a list that never mentions the parent is an ordinary filter (&:is(.foo, .bar)): it narrows a
-      // subject anchored elsewhere and anchors nothing itself
-      const filterOnly = !args.some((arg) => arg.includes("&"));
-      if (!filterOnly && same.length === 0) return false;
-      if (!filterOnly && others.length > 0) {
-        // another element may be focused without being the parent: it carries the parent's indicator
-        // only when the parent selects EVERY focused element (a bare :focus)
-        if (!parentIsBareFocus) return false;
-        // :focus-within matches an ancestor of the focused element, which the parent does not style
-        if (others.some((arg) => arg.includes("&") || /:focus-within/i.test(arg))) return false;
-      }
-      if (!filterOnly) anchored = true;
-    }
-    rest = rest.slice(0, m.index) + rest.slice(end);
-  }
-  if (rest.includes("&")) {
-    if (rest.indexOf("&") !== rest.lastIndexOf("&") || !/^&([.:#[]|$)/.test(rest)) return false;
-    anchored = true;
-  }
-  return anchored;
-}
-
-/**
- * True for the idiom that hides the ring from mouse users only: `:focus` negated by `:focus-visible`,
- * alone or as one member of the `:not()` list (any other member, however nested, only narrows it).
- */
-function hidesRingFromMouseOnly(selector) {
-  // only the subject (the last compound) and only a negation written on it, not one inside a
-  // relational or functional argument (`div:has(:focus:not(.x)) :focus:not(:focus-visible)`)
-  const compounds = selectorCompounds(selector);
-  let subject = compounds.length > 0 ? compounds[compounds.length - 1] : selector;
-  // a single-argument :is()/:where() only restates its argument (:is(:focus):not(:focus-visible))
-  for (;;) {
-    const flat = subject.replace(/:(?:is|where)\(([^(),]*)\)/gi, "$1");
-    if (flat === subject) break;
-    subject = flat;
-  }
-  const depthAt = (index) => {
-    let outer = 0;
-    for (let i = 0; i < index; i++) {
-      if (subject[i] === "(") outer++;
-      else if (subject[i] === ")") outer--;
-    }
-    return outer;
-  };
-  // a qualifier may sit between them (:focus.foo:not(:focus-visible)): the subject must be :focus and
-  // carry the negation, both written on it
-  if (!requiresFocus(subject)) return false;
-  const pattern = /:not\(/gi;
-  for (let start = pattern.exec(subject); start !== null; start = pattern.exec(subject)) {
-    if (depthAt(start.index) !== 0) continue;
-    let depth = 1;
-    let end = start.index + start[0].length;
-    for (; end < subject.length && depth > 0; end++) {
-      if (subject[end] === "(") depth++;
-      else if (subject[end] === ")") depth--;
-    }
-    if (depth !== 0) continue;
-    const members = splitSelectorList(subject.slice(start.index + start[0].length, end - 1));
-    if (members.some((member) => coversFocusVisible(member))) return true;
-  }
-  return false;
-}
-
-/** True when a negated member matches every focus-visible element: `:focus-visible` itself or a union holding it. */
-function coversFocusVisible(member) {
-  const trimmed = member.trim();
-  if (/^:focus-visible$/i.test(trimmed)) return true;
-  const union = /^:(?:is|where|matches|-webkit-any|-moz-any)\(([\s\S]*)\)$/i.exec(trimmed);
-  return union !== null && splitSelectorList(union[1]).some((alternative) => coversFocusVisible(alternative));
-}
-
-/** A selector that matches every focused element and nothing else: :focus, *:focus, :where(:focus), :is(:focus). */
-function isBareFocus(selector) {
-  // universally true qualifiers change nothing (:focus:where(*), :focus:is(*))
-  let current = selector.replace(/:(?:where|is)\(\s*\*\s*\)/gi, "").trim();
-  for (;;) {
-    const wrapped = /^:(?:is|where)\(\s*([\s\S]*)\)$/i.exec(current);
-    if (wrapped === null) break;
-    current = wrapped[1].trim();
-  }
-  if (/^\*?\s*:focus$/i.test(current)) return true;
-  // a union is bare focus when one member is and every other member can only match focused elements
-  // (:is(:focus, :focus.x) is :focus)
-  const members = splitSelectorList(current);
-  return (
-    members.length > 1 &&
-    members.some((member) => /^\*?\s*:focus$/i.test(member.trim())) &&
-    members.every((member) => requiresFocus(member))
-  );
-}
-
-/**
- * True when every element a compound matches is focused: it holds a depth-zero `:focus`, or a
- * depth-zero :is()/:where() whose every alternative does (:is(:focus.a, :focus.b)).
- */
-function requiresFocus(compound) {
-  const depthAt = (index) => {
-    let outer = 0;
-    for (let i = 0; i < index; i++) {
-      if (compound[i] === "(") outer++;
-      else if (compound[i] === ")") outer--;
-    }
-    return outer;
-  };
-  const focus = /:focus(?![\w-])/gi;
-  for (let hit = focus.exec(compound); hit !== null; hit = focus.exec(compound)) {
-    if (depthAt(hit.index) === 0) return true;
-  }
-  // a doubled negation is its argument: :not(:not(:focus)) is :focus
-  const negation = /:not\(/gi;
-  for (let start = negation.exec(compound); start !== null; start = negation.exec(compound)) {
-    if (depthAt(start.index) !== 0) continue;
-    let depth = 1;
-    let end = start.index + start[0].length;
-    for (; end < compound.length && depth > 0; end++) {
-      if (compound[end] === "(") depth++;
-      else if (compound[end] === ")") depth--;
-    }
-    if (depth !== 0) continue;
-    const inner = /^\s*:not\(([\s\S]*)\)\s*$/i.exec(compound.slice(start.index + start[0].length, end - 1));
-    if (inner !== null && splitSelectorList(inner[1]).every((alternative) => requiresFocus(alternative))) return true;
-  }
-  const wrapper = /:(?:is|where)\(/gi;
-  for (let start = wrapper.exec(compound); start !== null; start = wrapper.exec(compound)) {
-    if (depthAt(start.index) !== 0) continue;
-    let depth = 1;
-    let end = start.index + start[0].length;
-    for (; end < compound.length && depth > 0; end++) {
-      if (compound[end] === "(") depth++;
-      else if (compound[end] === ")") depth--;
-    }
-    if (depth !== 0) continue;
-    const alternatives = splitSelectorList(compound.slice(start.index + start[0].length, end - 1));
-    if (alternatives.length > 0 && alternatives.every((alternative) => requiresFocus(alternative))) return true;
-  }
-  return false;
-}
-
-const UNRESOLVED = /(^|[^\w-])(var|env)\(|\$[A-Za-z_-]/i;
-
-/**
- * A width token with a calc() read statically: a single-term calc is its term (calc(0px) is 0), and a
- * calc with several terms is not decided here (it becomes an unresolved token).
- */
-function readCalc(token) {
-  const m = /^calc\(\s*([\s\S]*)\)$/i.exec(token);
-  if (m === null) return token;
-  return /^[+-]?[\d.]+[a-z%]*$/i.test(m[1].trim()) ? m[1].trim() : UNKNOWN;
-}
-
-/**
- * What an `outline` shorthand value sets: a style ("none" | "styled" | "unknown") and a width
- * ("zero" | "drawn" | "unknown"). Only a style other than none/hidden draws an outline, an omitted style
- * is none, an omitted width is medium, and an unresolved var()/env()/interpolation may carry whichever
- * part no known token fixes.
- */
-function outlineShorthandParts(value) {
-  const bare = value.replace(IMPORTANT, "").trim();
-  if (/^inherit$/i.test(bare)) return { style: "unknown", width: "unknown" };
-  if (/^(initial|unset|revert|revert-layer)$/i.test(bare)) return { style: "none", width: "drawn" };
-  const tokens = bare.split(/\s+(?![^(]*\))/).filter(Boolean).map(readCalc);
-  const isUnresolved = (t) => t.includes(UNKNOWN) || UNRESOLVED.test(t);
-  const unresolved = tokens.some(isUnresolved);
-  const known = tokens.filter((t) => !isUnresolved(t));
-  const style = known.find((t) => /^(none|hidden|dotted|dashed|solid|double|groove|ridge|inset|outset|auto)$/i.test(t));
-  const width = known.find((t) => /^(thin|medium|thick)$/i.test(t) || /^[+-]?[\d.]/.test(t) || /^calc\(/i.test(t));
-  return {
-    style: style !== undefined ? (/^(none|hidden)$/i.test(style) ? "none" : "styled") : unresolved ? "unknown" : "none",
-    width: width !== undefined ? (DISABLED_VALUE.test(width) ? "zero" : "drawn") : unresolved ? "unknown" : "drawn",
-  };
-}
-
-/**
- * The state of the block's WINNING outline: the shorthand and the `outline-style` / `outline-width` longhands are
- * resolved per part, later declarations winning (an important one is not displaced by one that is not).
- * true: it removes the outline; false: it leaves one; "unknown": an unresolved value leaves it open.
- */
-function outlineStateIn(body) {
-  const part = { style: { value: "none", important: false }, width: { value: "drawn", important: false } };
-  let declared = false;
-  const set = (name, value, important) => {
-    declared = true;
-    if (part[name].important && !important) return;
-    part[name] = { value, important };
-  };
-  for (const raw of body.split(";")) {
-    const m = /^\s*(outline|outline-style|outline-width|all)\s*:\s*([\s\S]*)$/i.exec(raw);
-    if (m === null) continue;
-    const property = m[1].toLowerCase();
-    const important = IMPORTANT.test(m[2]);
-    const bare = m[2].replace(IMPORTANT, "").trim();
-    if (property === "all") {
-      // all resets the outline to its initial value (style none); an unresolved or inherited one is open
-      if (/^(initial|unset|revert|revert-layer)$/i.test(bare)) {
-        set("style", "none", important);
-        set("width", "drawn", important);
-      } else if (bare.includes(UNKNOWN) || UNRESOLVED.test(bare) || /^inherit$/i.test(bare)) {
-        set("style", "unknown", important);
-        set("width", "unknown", important);
-      }
-    } else if (property === "outline") {
-      const parts = outlineShorthandParts(m[2]);
-      set("style", parts.style, important);
-      set("width", parts.width, important);
-    } else if (property === "outline-style") {
-      const unresolved = bare.includes(UNKNOWN) || UNRESOLVED.test(bare) || /^inherit$/i.test(bare);
-      set("style", unresolved ? "unknown" : /^(none|hidden|initial|unset|revert|revert-layer)$/i.test(bare) ? "none" : "styled", important);
-    } else {
-      const width = readCalc(bare);
-      const open = width.includes(UNKNOWN) || UNRESOLVED.test(width) || /^inherit$/i.test(width);
-      set("width", open ? "unknown" : /^[+-]?[\d.]/.test(width) && DISABLED_VALUE.test(width) ? "zero" : "drawn", important);
-    }
-  }
-  if (!declared) return false; // no outline declaration at all: nothing is removed
-  if (part.style.value === "none" || part.width.value === "zero") return true;
-  if (part.style.value === "unknown" || part.width.value === "unknown") return "unknown";
-  return false;
-}
-
-/**
- * Does the block's WINNING outline declaration remove the outline? The last `outline` declaration decides
- * (`outline: none; outline: 2px solid blue` restores it), except that an important one is not displaced by
- * a later one that is not.
- */
-function removesOutlineIn(body) {
-  return outlineStateIn(body) === true;
-}
-
-/** A Sass placeholder selector: %name at the start of a compound (50% is a keyframe selector). */
+/** A Sass placeholder selector: %name inside a compound (50% is a keyframe selector). */
 const PLACEHOLDER = /(?<![\d.])%[A-Za-z_-]/;
 
 /** A focus pseudo-class a selector names. `:focus-within` is one: it is matched by the `:focus` prefix. */
 const FOCUS_SELECTOR = /:focus(-visible|-within)?(?![A-Za-z0-9_-])/i;
 
 /**
- * True when a selector selects FOCUSED elements: it names a focus pseudo-class outside any negation,
- * or inside an even number of nested `:not(...)`. `:not(:focus)` selects the opposite and
- * `:focus { :not(&) {...} }` composes to exactly that. A focus pseudo inside `:has(...)` describes
- * a related element, not the subject (`.parent:has(:focus)`).
+ * True when a selector could be a focus rule: it names focus, or it is a form the closed list does not
+ * read (a functional pseudo-class, an interpolation, a placeholder, :host) and so might hide one.
  */
-function isFocusSelector(selector, negated = false) {
-  let outside = "";
-  const inner = [];
-  for (let i = 0; i < selector.length; ) {
-    // pseudo-class names are ASCII case-insensitive: :NOT( and :Has( are :not( and :has(
-    const head = selector.slice(i, i + 5).toLowerCase();
-    const relational = head === ":has(";
-    if (relational || head === ":not(") {
-      const open = relational ? 5 : 5;
-      let depth = 1;
-      let j = i + open;
-      for (; j < selector.length && depth > 0; j++) {
-        if (selector[j] === "(") depth++;
-        else if (selector[j] === ")") depth--;
-      }
-      // :has(...) describes a DESCENDANT or sibling of the subject, never the subject itself.
-      if (!relational) inner.push(selector.slice(i + open, depth === 0 ? j - 1 : j));
-      i = j;
-    } else outside += selector[i++];
+function mayBeFocusRule(selector) {
+  return (
+    /focus/i.test(selector) ||
+    selector.includes(UNKNOWN) ||
+    PLACEHOLDER.test(selector) ||
+    /:(is|where|not|has|matches|host|host-context|nth-[a-z-]+|-webkit-any|-moz-any)\b/i.test(selector) ||
+    /\(/.test(selector)
+  );
+}
+
+/** Why a selector branch is outside the closed list, or null when it is a decided form. */
+function offListSelector(selector) {
+  if (selector.includes(UNKNOWN)) return UNEXAMINABLE_REASONS.selectorInterpolation;
+  if (PLACEHOLDER.test(selector)) return UNEXAMINABLE_REASONS.selectorPlaceholder;
+  const rest = selector
+    .replace(/\[[^\]]*\]/g, "")
+    .replace(/:not\(\s*:focus-visible\s*\)/gi, "");
+  if (/[()&]/.test(rest)) return UNEXAMINABLE_REASONS.selectorFunctional;
+  for (const m of rest.matchAll(/(::?)([A-Za-z-]+)/g)) {
+    const name = m[2].toLowerCase();
+    if (m[1] === "::" ? !DECIDED_PSEUDO_ELEMENTS.has(name) : !DECIDED_PSEUDO_CLASSES.has(name) && !DECIDED_PSEUDO_ELEMENTS.has(name)) {
+      return UNEXAMINABLE_REASONS.selectorFunctional;
+    }
   }
-  return (!negated && FOCUS_SELECTOR.test(outside)) || inner.some((part) => isFocusSelector(part, !negated));
+  return null;
+}
+
+/**
+ * True when a plain, listed selector selects FOCUSED elements. Only called on selectors that passed
+ * offListSelector, so the only parenthesis is `:not(:focus-visible)`, which selects none of the focus
+ * pseudo-classes it names.
+ */
+function isFocusSelector(selector) {
+  return FOCUS_SELECTOR.test(selector.replace(/:not\(\s*:focus-visible\s*\)/gi, ""));
 }
 
 /** Compound selectors of a selector: split on combinators and commas outside parentheses. */
@@ -1371,47 +809,71 @@ function selectorCompounds(selector) {
   return out;
 }
 
-/** Declaration properties whose value decides whether a focus indicator exists. */
-const FOCUS_RELEVANT_PROPERTY = /^(outline(-[a-z]+)?|box-shadow|border(-[a-z]+)*|background(-[a-z]+)?|text-decoration(-[a-z]+)?|--tw-ring[a-z-]*|ring[a-z-]*|filter|all)$/i;
-
 /**
- * Why a style rule cannot be examined because of an interpolation whose value is unknowable, or null
- * when it can. An unknown span is harmless in a declaration that cannot change the answer
- * (`margin: #{$gap}`) and disqualifying where it can: in a property name, in the value of an
- * outline / ring / shadow-like property, in an `@apply` list, or in the same compound as a focus
- * pseudo-class. Only text the block owns is read, so a child's unknown is the child's.
+ * The outline form of a block: { removes } when exactly one plain 'outline: none|0' decides, or
+ * { reason } when the outline is touched in a way the closed list does not decide.
  */
-function unexaminableSelectorBranch(selector) {
-  if (!isFocusSelector(selector)) return false;
-  // An unknown span in the same compound as a focus pseudo-class, before it or after it, can
-  // supply the exempting `:not(:focus-visible)` (`#{$x}:focus`, `:focus#{$x}`, `.#{$x}:focus`).
-  return selectorCompounds(selector).some((compound) => FOCUS_SELECTOR.test(compound) && compound.includes(UNKNOWN));
+function outlineForm(declarations) {
+  const touching = declarations.filter((d) => /^(outline|outline-style|outline-width|all)$/i.test(d.property));
+  if (touching.length === 0) return { removes: false };
+  const only = touching[0];
+  const reason = UNEXAMINABLE_REASONS.outlineForm;
+  if (touching.length !== 1 || only.property.toLowerCase() !== "outline") return { reason };
+  if (/^(none|0)$/i.test(only.value)) return { removes: true };
+  return restoresOutline(only.value) ? { removes: false } : { reason };
 }
 
-function unexaminableReason(node) {
-  // The rule's own body AND the bodies of enclosing rules on the same element: an inherited
-  // replacement that cannot be read (`:focus { @apply #{$ring}; &.x { outline: none } }`) may be a
-  // valid indicator, so it makes the child unexaminable rather than an established failure.
-  const bodies = [node.body, ...node.elementBodies];
-  // an outline whose style or width hangs on var()/env()/an interpolation may be the removal or the restoration
-  if (outlineStateIn(node.body) === "unknown") return "the winning outline declaration cannot be read statically";
-  for (const raw of bodies.flatMap((body) => body.split(";"))) {
-    if (!raw.includes(UNKNOWN)) continue;
-    // an unknown ring token and an unknown value of a property the cascade models are resolved there:
-    // an overridden unknown cannot change the answer
-    if (/^\s*@apply\b/i.test(raw)) continue;
-    const colon = raw.indexOf(":");
-    if (colon === -1) return "an interpolation outside a property: value declaration";
-    if (raw.slice(0, colon).includes(UNKNOWN)) return "an interpolation in a property name may be outline or a ring property";
-    const property = raw.slice(0, colon).trim();
-    // An unknown outline value may itself be the removal (outline: #{$x} can be none), which the
-    // cascade below does not model: it stays undecided. Every other relevant property is resolved in
-    // the cascade (replacementVerdict): a later declaration that wins settles it, an unknown that
-    // can survive leaves it undecided.
-    if (/^outline(-(style|width))?$/i.test(property)) {
-      return `an interpolation in the value of '${property}' cannot be read statically`;
+/**
+ * The decided restoring form: a non-zero literal width, a style other than none/hidden and at most one
+ * more token (the colour, which may be a var() custom property: the style and the width decide).
+ */
+function restoresOutline(value) {
+  const split = value.trim().split(/\s+(?![^(]*\))/).filter(Boolean);
+  const style = split.find((t) => /^(dotted|dashed|solid|double|groove|ridge|inset|outset|auto)$/i.test(t));
+  const width = split.find((t) => /^(\d+\.?\d*|\.\d+)(px|em|rem)$/i.test(t) && parseFloat(t) > 0);
+  if (style === undefined || (width === undefined && !/^auto$/i.test(style))) return false;
+  const rest = split.filter((t) => t !== style && t !== width);
+  return rest.length <= 1;
+}
+
+/** Why a block's replacement declarations are outside the closed list, or null. */
+function replacementReason(declarations) {
+  for (const d of declarations) {
+    if (d.property === "@apply") {
+      // an @apply list is read for exact ring tokens only; an unresolved token may be one
+      if (d.raw.includes(UNKNOWN) || UNRESOLVED_VALUE.test(d.raw)) return UNEXAMINABLE_REASONS.replacementForm;
+      continue;
+    }
+    const family = REPLACEMENT_FAMILY(d.property);
+    if (family === null) continue; // the outline form is read by outlineForm; other properties do not matter
+    if (UNRESOLVED_VALUE.test(d.value) || d.value.includes(UNKNOWN) || IMPORTANT.test(d.value)) {
+      return UNEXAMINABLE_REASONS.replacementForm;
+    }
+    const bare = d.value.trim();
+    // a border or text-decoration shorthand is disabled by ANY disabled token (0 solid red, 2px solid transparent)
+    const anyToken = family === "border" || family === "text-decoration";
+    if (anyToken ? bare.split(/\s+/).some((t) => DISABLED_LITERAL.test(t)) : DISABLED_LITERAL.test(bare)) {
+      return UNEXAMINABLE_REASONS.replacementForm;
     }
   }
+  return null;
+}
+
+/** Does a block declare anything a nested rule could inherit or be overridden by? */
+function declaresStyle(declarations) {
+  return declarations.some(
+    (d) => /^\s*@apply\b/i.test(d.raw) || FOCUS_RELEVANT_PROPERTY.test(d.property) || d.property.includes(UNKNOWN),
+  );
+}
+
+/** Why a nested rule is outside the closed list (inherited declarations, a layer), or null. */
+function nestingReason(node) {
+  for (let ancestor = node.parent; ancestor; ancestor = ancestor.parent) {
+    if (ancestor.atRule === "layer") return UNEXAMINABLE_REASONS.nested;
+    if (ancestor.dataBlock || ancestor.propNest !== null || ancestor.rootEmitted) continue;
+    if (declaresStyle(declarationsOf(ancestor.body))) return UNEXAMINABLE_REASONS.nested;
+  }
+  if (node.atRule === "layer") return UNEXAMINABLE_REASONS.nested;
   return null;
 }
 
@@ -1774,100 +1236,69 @@ export const DETECTORS = [
       const text = file.views.structureOf;
       const findings = [];
       let examined = false;
-      const compensating = /\b(box-shadow|border|border-bottom|border-color|background|background-color|text-decoration|outline-offset|outline-color)\s*:/i;
       const unexaminable = [];
 
       // SCSS interpolation contains braces, which would split a block. Resolve it on a copy of the
       // same length: statically readable spans are substituted (#{none} reads as none) and unknowable
-      // ones become UNKNOWN. Every style rule is then examined under its COMPOSED selector, so a rule
-      // nested under :focus is a focus rule, and an at-rule prelude is never mistaken for a selector.
+      // ones become UNKNOWN. Every style rule is then read under its COMPOSED selector against the
+      // closed list of decided forms above; whatever is off the list is recorded, never decided.
       const resolved = resolveInterpolation(text, file.views.sourceOf, file.text);
       for (const node of parseBlocks(resolved)) {
-        // A conditional group at-rule nested in a rule bubbles its declarations to that rule, so it is
-        // examined under the inherited selector; any other at-rule owns no style declarations.
         if (node.rootEmitted || node.inside || node.dataBlock) continue;
+        // the line anchor (ST-05): the first non-whitespace character of the rule head
         const where = node.selectorStart + Math.max(0, node.selector.search(/\S/));
-        // A Sass placeholder (%name) emits nothing unless it is @extend-ed, and what an extension
-        // would emit is not modelled. Only the placeholder BRANCHES of a selector list are set aside: the
-        // concrete branches are still emitted, and a violation they establish stands.
-        const placeholders = node.composed.filter((composed) => PLACEHOLDER.test(composed));
-        const concrete = node.composed.filter((composed) => !PLACEHOLDER.test(composed));
-        if (placeholders.length > 0 && removesOutlineIn(node.body)) {
-          // An extension can sit in any file of the corpus, which a per-file detector cannot see: a
-          // placeholder that removes the outline is unexaminable, never a finding and never a pass.
-          unexaminable.push({
-            index: where,
-            reason: "a Sass placeholder selector emits nothing unless it is extended, and an @extend may be in another file",
-          });
-        }
-        if (concrete.length === 0) continue;
+        const note = (reason) => unexaminable.push({ index: where, reason });
+        const declarations = declarationsOf(node.body);
+        const outline = outlineForm(declarations);
         if (node.propNest !== null) {
-          // `outline: { style: none }` spells outline-style: none; the declarations are not flat, so
-          // under a focus rule a nested block of a focus-relevant (or unknown) property is not read.
+          // `outline: { style: none }` spells outline-style: none; the declarations are not flat
           const relevant = FOCUS_RELEVANT_PROPERTY.test(node.propNest) || node.propNest.includes(UNKNOWN);
-          if (relevant && concrete.some((selector) => isFocusSelector(selector))) {
-            unexaminable.push({
-              index: where,
-              reason: `a nested property block of '${node.propNest}' spells its declarations indirectly`,
-            });
+          if (relevant && node.composed.some((selector) => mayBeFocusRule(selector))) note(UNEXAMINABLE_REASONS.nestedProperty);
+          continue;
+        }
+        const focusish = node.composed.filter((selector) => mayBeFocusRule(selector));
+        if (node.opaque) {
+          if (node.atRule === null ? focusish.length > 0 || outline.removes || outline.reason : outline.removes || outline.reason) {
+            note(UNEXAMINABLE_REASONS.selectorOpaque);
           }
           continue;
         }
-        // Branches whose focus compound holds an unknown span could supply the :not(:focus-visible)
-        // exemption: they are recorded and set aside, and a violation another branch establishes stands.
-        const undecidedBranches = concrete.filter((selector) => unexaminableSelectorBranch(selector));
-        const focusSelectors = concrete.filter(
-          (selector) => isFocusSelector(selector) && !unexaminableSelectorBranch(selector),
-        );
-        const removesOutline = removesOutlineIn(node.body);
-        if (node.opaque && (node.atRule !== null ? removesOutline : focusSelectors.length > 0 || removesOutline)) {
-          unexaminable.push({
-            index: where,
-            reason: "it sits inside an @include / control directive / mixin whose selector semantics are not modelled",
-          });
+        if (focusish.length === 0) continue; // cannot be a focus rule
+        // an interpolation in a property name, or outside a property: value declaration, may be an outline
+        const shapes = node.body.split(";").filter((raw) => raw.includes(UNKNOWN) && !/^\s*@apply\b/i.test(raw));
+        const badShape = shapes.find((raw) => raw.indexOf(":") === -1 || raw.slice(0, raw.indexOf(":")).includes(UNKNOWN));
+        if (badShape !== undefined) {
+          note(badShape.indexOf(":") === -1 ? UNEXAMINABLE_REASONS.declarationForm : UNEXAMINABLE_REASONS.propertyName);
           continue;
         }
-        // A branch with an unknown span and no literal focus pseudo-class could still be a focus rule,
-        // beside a readable one (a list's other branch may be exempt); it matters when the rule removes
-        // the outline.
-        const unknownBranch =
-          removesOutline && concrete.some((selector) => !isFocusSelector(selector) && selector.includes(UNKNOWN));
-        if (unknownBranch) {
-          // recorded, but a violation the readable branches establish is not discarded
-          unexaminable.push({ index: where, reason: "an interpolation in the selector may make it a focus rule" });
-        }
-        if (undecidedBranches.length > 0) {
-          unexaminable.push({
-            index: where,
-            reason:
-              "an interpolation in the same compound as the focus pseudo-class may supply the :not(:focus-visible) exemption",
-          });
-        }
-        if (focusSelectors.length === 0) continue;
-        const reason = unexaminableReason(node);
-        if (reason !== null) {
-          unexaminable.push({ index: where, reason });
+        const offList = focusish.map((selector) => offListSelector(selector)).filter((reason) => reason !== null);
+        const plainFocus = focusish.filter((selector) => offListSelector(selector) === null && isFocusSelector(selector));
+        if (outline.reason !== undefined) {
+          note(outline.reason);
           continue;
         }
-        const exempt = focusSelectors.every((selector) => hidesRingFromMouseOnly(selector));
-        let verdict = "present";
-        if (!exempt && removesOutline) {
-          // The declarations of the rules this one is attached to on the same element count as well:
-          // in `:focus { box-shadow: ...; &.danger { outline: none } }` the ring still applies, and a
-          // later declaration that wins the cascade can remove it again.
-          verdict = replacementVerdict(node, compensating);
-          if (verdict === "unknown") {
-            unexaminable.push({
-              index: where,
-              reason:
-                "the specificity or selector list of a disabling declaration leaves the cascade between nested same-element rules undecided",
-            });
-            continue;
-          }
+        if (!outline.removes) {
+          if (plainFocus.length > 0) examined = true; // a focus rule that does not remove the outline
+          continue;
+        }
+        // the rule removes the outline with one plain declaration. Off-list branches are recorded but
+        // do not discard what the decided branches establish.
+        if (offList.length > 0) note(offList[0]);
+        if (plainFocus.length === 0) continue;
+        const nested = nestingReason(node);
+        if (nested !== null) {
+          note(nested);
+          continue;
+        }
+        const replacement = replacementReason(declarations);
+        if (replacement !== null) {
+          note(replacement);
+          continue;
         }
         examined = true;
-        if (exempt || !removesOutline) continue;
-        if (verdict === "present") continue;
+        if (plainFocus.every((selector) => /:focus\s*:not\(\s*:focus-visible\s*\)/i.test(selector))) continue;
+        if (COMPENSATING.test(node.body)) continue;
+        if (appliesRingWidth(node.body)) continue;
         const own = text.slice(node.selectorStart, node.selectorStart + node.selector.length).trim();
         const spelled = node.parent ? "(nested) " + own : own;
         findings.push(
