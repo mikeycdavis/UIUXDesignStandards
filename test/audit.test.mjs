@@ -381,8 +381,6 @@ test("ST-07 criteria 1 and 2: a focus block containing #{...} is examined with t
     [":focus {\n  outline: none;\n  @apply ring-0 #{!important};\n  @apply ring-2;\n}\n", [FOCUS_RULE]],
     // an interpolation elsewhere in the block, no replacement indicator
     [":focus-visible {\n  outline: none;\n  margin: #{$gap};\n}\n", [FOCUS_RULE]],
-    // an interpolated selector is still a focus selector
-    [".#{prefix}-button:focus-visible {\n  outline: none;\n}\n", [FOCUS_RULE]],
     // an effective ring plus an interpolation elsewhere is a replacement indicator
     [":focus {\n  outline: none;\n  @apply ring-2;\n  margin: #{$gap};\n}\n", []],
     [":focus {\n  outline: none;\n  box-shadow: 0 0 0 #{$w} blue;\n}\n", []],
@@ -396,15 +394,34 @@ test("ST-07 criteria 1 and 2: a focus block containing #{...} is examined with t
   }
 });
 
-test("ST-07: the finding names the real selector, not the masked text", async () => {
+test("ST-07: an interpolation in a selector head is unexaminable at the rule head's line, never read", async () => {
+  // resolving a selector interpolation at the span's length pads it with spaces, which would read as
+  // a combinator (:focus#{null}.danger is the one compound :focus.danger), so the closed list does not
+  // read a selector head that holds one - not even a statically readable one
   const dir = await mkdtemp(path.join(tmpdir(), "uiux-st07-"));
   try {
     await writeFile(path.join(dir, "f.scss"), "/* h */\n\n.a { color: red; }\n\n.#{p}-x:focus {\n  outline: none;\n}\n");
-    const found = (await runAudit(dir)).findings.filter((f) => f.rule === FOCUS_RULE);
-    assert.equal(found.length, 1);
-    assert.match(found[0].message, /^'\.#\{p\}-x:focus' removes the focus outline/);
+    const r = await runAudit(dir);
+    assert.deepEqual(r.findings.filter((f) => f.rule === FOCUS_RULE), []);
+    const u = r.detectorsUnexaminable.filter((x) => x.rule === FOCUS_RULE);
+    assert.equal(u.length, 1);
+    assert.deepEqual(u[0].evidence, ["f.scss:5"]);
+    assert.match(u[0].reason, /interpolation in the selector/);
   } finally {
     await rm(dir, { recursive: true, force: true });
+  }
+  for (const css of [
+    ":focus#{null}.danger { outline: none; }\n",
+    ".#{prefix}-button:focus-visible { outline: none; }\n",
+    "#{':focus'} { outline: none; }\n",
+    '#{"focus"} { outline: none; }\n',
+    ".a { &:focus#{null}.danger { outline: none; } }\n",
+    ".a#{null} { &:focus { outline: none; } }\n",
+  ]) {
+    const r = await focusAuditFor(css);
+    assert.deepEqual(r.rules.filter((x) => x === FOCUS_RULE), [], css);
+    assert.equal(r.examined, false, css);
+    assert.equal(r.unexaminable.length >= 1, true, css);
   }
 });
 
@@ -503,7 +520,6 @@ test("ST-07: an unexaminable block makes the rule unevaluated even when another 
 test("ST-07: interpolations that cannot change the answer stay examined", async () => {
   const cases = [
     [":focus { outline: none; margin: #{$gap}; }\n", [FOCUS_RULE]],
-    [".#{p}-btn:focus { outline: none; }\n", [FOCUS_RULE]],
     [":focus { outline: 2px solid; width: calc(#{$a} + 1px); }\n", []],
     [':focus { content: "#{$x}"; outline: none; }\n', [FOCUS_RULE]],
     ["// :focus { outline: #{$o}; }\n:focus { outline: none; }\n", [FOCUS_RULE]],
@@ -754,23 +770,11 @@ test("ST-07: generic CSS at-rules keep the enclosing rule around their declarati
   assert.deepEqual((await focusAuditFor(":focus { @keyframes k { @custom s { from { outline: none; } } } }\n")).rules.filter((x) => x === FOCUS_RULE), []);
 });
 
-test("ST-07: Sass null interpolates to nothing; the string \"null\" does not", async () => {
-  for (const css of [
-    ":focus#{null} { outline: none; }\n",
-    ":focus#{ null } { outline: none; }\n",
-    ":focus { outline: none#{null}; }\n",
-    ":focus#{null}#{null} { outline: none; }\n",
-  ]) {
-    const r = await focusAuditFor(css);
-    assert.deepEqual(r.rules.filter((x) => x === FOCUS_RULE), [FOCUS_RULE], css);
-  }
-  // a readable safe sibling does not mask it
-  assert.deepEqual(
-    (await focusAuditFor(":focus-visible { outline: 2px solid; }\n:focus#{null} { outline: none; }\n")).rules.filter((x) => x === FOCUS_RULE),
-    [FOCUS_RULE],
-  );
-  // the quoted string "null" is the text null: :focusnull is not a focus selector
-  assert.deepEqual((await focusAuditFor(':focus#{"null"} { outline: none; }\n')).rules.filter((x) => x === FOCUS_RULE), []);
+test("ST-07: Sass null in a value interpolates to nothing; the string \"null\" does not", async () => {
+  assert.deepEqual((await focusAuditFor(":focus { outline: none#{null}; }\n")).rules.filter((x) => x === FOCUS_RULE), [FOCUS_RULE]);
+  assert.deepEqual((await focusAuditFor(":focus { outline: none#{ null }#{null}; }\n")).rules.filter((x) => x === FOCUS_RULE), [FOCUS_RULE]);
+  // the quoted string "null" is the text null: outline: nonenull is not the removal
+  assert.deepEqual((await focusAuditFor(':focus { outline: none#{"null"}; }\n')).rules.filter((x) => x === FOCUS_RULE), []);
 });
 
 test("ST-07: pseudo-class names are ASCII case-insensitive", async () => {
@@ -927,7 +931,7 @@ test("ST-05 criterion 1: the reported line is the selector's first non-whitespac
   // a one-line rule: both anchors coincide
   assert.deepEqual(await lineFor(".btn:focus { outline: none; }\n"), ["focus.css:1"]);
   // the same anchor in SCSS, with an interpolated selector, and for a nested rule
-  assert.deepEqual(await lineFor("// h\n\n.a { margin: 1px; }\n\n.#{p}-x:focus {\n  outline: none;\n}\n", "f.scss"), ["f.scss:5"]);
+  assert.deepEqual(await lineFor("// h\n\n.a { margin: 1px; }\n\n.a-x:focus {\n  outline: none;\n}\n", "f.scss"), ["f.scss:5"]);
   assert.deepEqual(await lineFor(".a {\n\n  &:focus {\n    outline: none;\n  }\n}\n", "f.scss"), ["f.scss:3"]);
 });
 
@@ -1122,6 +1126,7 @@ test("closed list: a decided branch is not hidden by an off-list branch beside i
   for (const css of [
     ":focus, :is(:focus) { outline: none; }\n",
     ":focus, .#{$p} { outline: none; }\n",
+    ":focus, .a#{null}.b { outline: none; }\n",
     ":focus, %silent { outline: none; }\n",
   ]) {
     const r = await focusAuditFor(css);

@@ -365,7 +365,7 @@ functional selectors, cross-rule interaction). A form is added to this list only
 | Not a removal | exactly one `outline` declaration of a non-zero literal width, a style other than `none`/`hidden`, and at most one more token (a colour, which may be `var()`) |
 | Replacement indicator | a declaration of `box-shadow`, `border`, `border-bottom`, `border-color`, `background`, `background-color`, `text-decoration`, `outline-offset` or `outline-color` with a literal, non-disabled value, or an `@apply` of `ring`/`ring-1`/`ring-2`/`ring-4`/`ring-8` (`ring-0` and `!important` as in the ring model), in the same block |
 | Exemption | `:focus:not(:focus-visible)` |
-| Interpolation | SCSS interpolation whose value is statically readable (`#{none}`, a quoted literal); an unknown span is off the list |
+| Interpolation | SCSS interpolation in a declaration whose value is statically readable (`#{none}`, a quoted literal); an unknown span, or any interpolation in a selector head (even a readable one, because resolving it pads it with spaces that would read as a combinator), is off the list; a top-level selector list is judged branch by branch |
 
 | Off the list: `detectorsUnexaminable[].reason` | Forms |
 | --- | --- |

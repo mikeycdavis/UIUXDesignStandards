@@ -766,6 +766,23 @@ function mayBeFocusRule(selector) {
   );
 }
 
+/** A selector head split on commas outside parentheses, brackets and interpolation braces. */
+function splitHeadParts(head) {
+  const parts = [];
+  let depth = 0;
+  let current = "";
+  for (const ch of head) {
+    if (ch === "(" || ch === "[" || ch === "{") depth++;
+    else if (ch === ")" || ch === "]" || ch === "}") depth = Math.max(0, depth - 1);
+    if (ch === "," && depth === 0) {
+      parts.push(current);
+      current = "";
+    } else current += ch;
+  }
+  parts.push(current);
+  return parts.map((part) => part.trim()).filter((part) => part.length > 0);
+}
+
 /** Why a selector branch is outside the closed list, or null when it is a decided form. */
 function offListSelector(selector) {
   if (selector.includes(UNKNOWN)) return UNEXAMINABLE_REASONS.selectorInterpolation;
@@ -1274,8 +1291,29 @@ export const DETECTORS = [
           note(badShape.indexOf(":") === -1 ? UNEXAMINABLE_REASONS.declarationForm : UNEXAMINABLE_REASONS.propertyName);
           continue;
         }
-        const offList = focusish.map((selector) => offListSelector(selector)).filter((reason) => reason !== null);
-        const plainFocus = focusish.filter((selector) => offListSelector(selector) === null && isFocusSelector(selector));
+        // An interpolation in a selector head is off the list even when its value is readable: resolving it
+        // at the span's length pads it with spaces, which would read as a combinator (:focus#{null}.danger is
+        // the one compound :focus.danger). A top-level list is judged branch by branch (head parts and
+        // composed branches line up one to one); anywhere else an interpolation in this rule's head or an
+        // enclosing one's makes every branch off the list.
+        const headOf = (n) => text.slice(n.selectorStart, n.selectorStart + n.selector.length);
+        const interpolatedAbove = (() => {
+          for (let n = node.parent; n; n = n.parent) if (headOf(n).includes("#{")) return true;
+          return false;
+        })();
+        const headParts = splitHeadParts(headOf(node));
+        const branchFlags =
+          !interpolatedAbove && headParts.length === node.composed.length
+            ? headParts.map((part) => part.includes("#{"))
+            : node.composed.map(() => interpolatedAbove || headOf(node).includes("#{"));
+        const indexed = node.composed.map((selector, k) => ({ selector, interpolated: branchFlags[k] }));
+        const focusBranches = indexed.filter((b) => mayBeFocusRule(b.selector));
+        const offList = focusBranches
+          .map((b) => (b.interpolated ? UNEXAMINABLE_REASONS.selectorInterpolation : offListSelector(b.selector)))
+          .filter((reason) => reason !== null);
+        const plainFocus = focusBranches
+          .filter((b) => !b.interpolated && offListSelector(b.selector) === null && isFocusSelector(b.selector))
+          .map((b) => b.selector);
         if (outline.reason !== undefined) {
           note(outline.reason);
           continue;
