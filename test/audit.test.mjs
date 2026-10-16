@@ -1408,6 +1408,26 @@ test("ST-07: var()/env() are unresolved; every zero length is zero; unknown impo
   }
 });
 
+test("ST-07: an unresolved all reset takes part in the cascade; a doubled negation list is an :is() list", async () => {
+  const cases = [
+    [":focus { outline: none; box-shadow: 0 0 0 2px blue; all: var(--missing, initial); }\n", "unexaminable"],
+    [":focus { outline: none; box-shadow: 0 0 0 2px blue; all: #{$reset}; }\n", "unexaminable"],
+    [":focus { outline: none; all: var(--r); box-shadow: 0 0 0 2px blue; }\n", []],
+    [":focus { outline: none; box-shadow: 0 0 0 2px blue; all: inherit; }\n", []],
+    [":focus { box-shadow: 0 0 0 2px blue; :not(:not(&, .x)) { outline: none; } }\n", []],
+    [".btn:focus { box-shadow: 0 0 0 2px blue; :not(:not(&, .x)) { outline: none; } }\n", [FOCUS_RULE]],
+    [".btn:focus { box-shadow: 0 0 0 2px blue; :not(:not(&.a, &.b)) { outline: none; } }\n", []],
+  ];
+  for (const [css, expected] of cases) {
+    const r = await focusAuditFor(css);
+    const found = r.rules.filter((x) => x === FOCUS_RULE);
+    if (expected === "unexaminable") {
+      assert.deepEqual(found, [], css);
+      assert.equal(r.unexaminable.length >= 1, true, css);
+    } else assert.deepEqual(found, expected, css);
+  }
+});
+
 test("ST-07: a doubly negated reference to the parent keeps the subject", async () => {
   const cases = [
     [":focus { box-shadow: 0 0 0 2px blue; :not(:not(&)) { outline: none; } }\n", []],

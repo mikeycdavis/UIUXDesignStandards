@@ -987,7 +987,8 @@ function replacementVerdict(node, compensating) {
     }
   }
   // `all` resets every component and facet it competes with
-  const resets = decls.filter((d) => d.covers === "all" && !d.enabled);
+  // (an unresolved reset takes part too: it may be one, and the cascade decides whether it can win)
+  const resets = decls.filter((d) => d.covers === "all" && d.enabled !== true);
   const componentNames = new Set([...components.keys()].map((key) => key.split("|")[0]));
   let unknown = false;
   for (const component of componentNames) {
@@ -1053,7 +1054,8 @@ function namesSameSubject(part, parentIsBareFocus = false) {
         // every other argument (ordinary or parent-qualified) only narrows it further
         const doubled = referencing.some((arg) => {
           const inner = /^:not\(([\s\S]*)\)$/i.exec(arg);
-          return inner !== null && splitSelectorList(inner[1]).every((part) => namesSameSubject(part, parentIsBareFocus));
+          // :not(:not(A, B)) is :is(A, B): the same rule as a subject-preserving :is() list
+          return inner !== null && namesSameSubject(":is(" + inner[1] + ")", parentIsBareFocus);
         });
         // a negation of the parent that is not doubled only narrows a subject anchored elsewhere
         // (&:not(&.disabled)); on its own it leaves no anchor and the part is rejected below
