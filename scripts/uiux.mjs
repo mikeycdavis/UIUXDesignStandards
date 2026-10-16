@@ -925,33 +925,52 @@ function outlineForm(declarations) {
  * colour name other than transparent/currentcolor/the keywords, or a var()/env() in the colour place. A
  * 4- or 8-digit hex, rgba()/hsla(), color-mix(), a gradient or a url() can paint nothing and is not decided.
  */
+const NAMED_COLOURS = new Set("aliceblue antiquewhite aqua aquamarine azure beige bisque black blanchedalmond blue blueviolet brown burlywood cadetblue chartreuse chocolate coral cornflowerblue cornsilk crimson cyan darkblue darkcyan darkgoldenrod darkgray darkgreen darkgrey darkkhaki darkmagenta darkolivegreen darkorange darkorchid darkred darksalmon darkseagreen darkslateblue darkslategray darkslategrey darkturquoise darkviolet deeppink deepskyblue dimgray dimgrey dodgerblue firebrick floralwhite forestgreen fuchsia gainsboro ghostwhite gold goldenrod gray green greenyellow grey honeydew hotpink indianred indigo ivory khaki lavender lavenderblush lawngreen lemonchiffon lightblue lightcoral lightcyan lightgoldenrodyellow lightgray lightgreen lightgrey lightpink lightsalmon lightseagreen lightskyblue lightslategray lightslategrey lightsteelblue lightyellow lime limegreen linen magenta maroon mediumaquamarine mediumblue mediumorchid mediumpurple mediumseagreen mediumslateblue mediumspringgreen mediumturquoise mediumvioletred midnightblue mintcream mistyrose moccasin navajowhite navy oldlace olive olivedrab orange orangered orchid palegoldenrod palegreen paleturquoise palevioletred papayawhip peachpuff peru pink plum powderblue purple rebeccapurple red rosybrown royalblue saddlebrown salmon sandybrown seagreen seashell sienna silver skyblue slateblue slategray slategrey snow springgreen steelblue tan teal thistle tomato turquoise violet wheat white whitesmoke yellow yellowgreen".split(" "));
+
 function opaqueColour(token) {
   if (/^#(?:[0-9a-f]{3}|[0-9a-f]{6})$/i.test(token)) return true;
   if (/^(?:rgb|hsl)\(\s*[\d.]+(?:deg)?%?\s*[, ]\s*[\d.]+%?\s*[, ]\s*[\d.]+%?\s*\)$/i.test(token)) return true;
   if (/^(?:var|env)\(.*\)$/i.test(token)) return true;
-  return (
-    /^[a-z]+$/i.test(token) &&
-    !/^(transparent|currentcolor|none|hidden|auto|medium|thin|thick|initial|inherit|unset|revert|dotted|dashed|solid|double|groove|ridge|inset|outset)$/i.test(token)
-  );
+  // the finite CSS named-colour set: an unknown identifier makes the declaration invalid, so it paints nothing
+  return NAMED_COLOURS.has(token.toLowerCase());
 }
 
 /**
- * An indicator value read token by token (comma layers one by one): lengths, drawn style keywords, text
- * decoration keywords, and opaque colours. Anything else - a gradient, a url(), rgba(), a 4/8-digit hex,
- * transparent - cannot be shown to paint, so it is off the list.
+ * An indicator value read against the GRAMMAR of its property, and decided only when it can be shown to paint:
+ *   box-shadow        comma layers of lengths, `inset` and one opaque colour
+ *   background(-color) one opaque colour (no image, no other part)
+ *   text-decoration   at least one line keyword (underline, overline, line-through), plus style keywords,
+ *                     a length and an opaque colour
+ *   text-decoration-line  one or more line keywords
+ *   outline-offset    a length
+ *   outline-color     one opaque colour
+ * Anything else - a gradient, url(), rgba(), a 4/8-digit hex, transparent, an unknown identifier, a keyword the
+ * property does not accept - is not decided.
  */
-function positiveIndicatorValue(value) {
-  const keywords = /^(inset|underline|overline|line-through|dotted|dashed|solid|double|groove|ridge|wavy|outset)$/i;
-  for (const layer of splitSelectorList(value)) {
-    const tokens = layer.trim().split(/\s+(?![^(]*\))/).filter(Boolean);
-    if (tokens.length === 0) return false;
-    for (const token of tokens) {
-      if (/^[+-]?(?:\d+\.?\d*|\.\d+)(?:px|em|rem|%)?$/i.test(token)) continue;
-      if (keywords.test(token)) continue;
-      if (!opaqueColour(token)) return false;
-    }
+function positiveIndicatorValue(property, value) {
+  const p = property.toLowerCase();
+  const length = (t) => /^[+-]?(?:\d+\.?\d*|\.\d+)(?:px|em|rem|%)?$/i.test(t);
+  const tokensOf = (text) => text.trim().split(/\s+(?![^(]*\))/).filter(Boolean);
+  const line = /^(underline|overline|line-through)$/i;
+  if (p === "box-shadow") {
+    return splitSelectorList(value).every((layer) => {
+      const tokens = tokensOf(layer);
+      return tokens.length > 0 && tokens.every((t) => length(t) || /^inset$/i.test(t) || opaqueColour(t));
+    });
   }
-  return true;
+  const tokens = tokensOf(value);
+  if (p === "background" || p === "background-color" || p === "outline-color") {
+    return tokens.length === 1 && opaqueColour(tokens[0]) && splitSelectorList(value).length === 1;
+  }
+  if (p === "outline-offset") return tokens.length === 1 && length(tokens[0]);
+  if (p === "text-decoration-line") return tokens.length > 0 && tokens.every((t) => line.test(t));
+  if (p === "text-decoration") {
+    return (
+      tokens.some((t) => line.test(t)) &&
+      tokens.every((t) => line.test(t) || /^(solid|double|dotted|dashed|wavy)$/i.test(t) || length(t) || opaqueColour(t))
+    );
+  }
+  return false;
 }
 
 /**
@@ -995,7 +1014,7 @@ function replacementReason(declarations) {
     }
     // a value that cannot be shown to paint (a gradient, url(), rgba(), transparent, an 8-digit hex) is off the list;
     // the border shorthand has its own, stricter reading below
-    if (!/^border/i.test(d.property) && !positiveIndicatorValue(d.value)) return UNEXAMINABLE_REASONS.replacementForm;
+    if (!/^border/i.test(d.property) && !positiveIndicatorValue(d.property, d.value)) return UNEXAMINABLE_REASONS.replacementForm;
     const bare = d.value.trim();
     // a border shorthand draws only with a drawn style and a non-zero literal width; an omitted style is none
     if (/^border(-(top|right|bottom|left|block|inline)(-(start|end))?)?$/i.test(d.property) && !restoresOutline(bare, false)) {
