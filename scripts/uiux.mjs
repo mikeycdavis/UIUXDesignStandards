@@ -700,6 +700,7 @@ const DECIDED_PSEUDO_ELEMENTS = new Set(["before", "after", "first-line", "first
 const UNEXAMINABLE_REASONS = {
   selectorInterpolation: "an interpolation in the selector may make it a focus rule",
   selectorPlaceholder: "a Sass placeholder selector emits nothing unless it is extended, and an @extend may be in another file",
+  selectorEscape: "a CSS escape in the selector may spell a focus pseudo-class",
   selectorFunctional: "a functional or unlisted pseudo-class selector is outside the decided list of selector forms",
   selectorOpaque: "it sits inside an @include / control directive / mixin whose selector semantics are not modelled",
   outlineForm: "the outline is not removed by exactly one plain 'outline: none|0' declaration (several declarations, a longhand, all:, an important or unresolved value are not decided)",
@@ -728,7 +729,9 @@ const REPLACEMENT_FAMILY = (property) => {
   if (p === "outline-offset" || p === "outline-color") return p;
   return null;
 };
-const COMPENSATING = /\b(box-shadow|border|border-bottom|border-color|background|background-color|text-decoration|outline-offset|outline-color)\s*:/i;
+/** The properties that ARE a replacement indicator when their literal value is not disabled (facet longhands only modify one). */
+const INDICATOR_PROPERTY =
+  /^(box-shadow|border(-(top|right|bottom|left|block|inline)(-(start|end))?)?(-color)?|background(-(color|image))?|text-decoration(-line)?|outline-offset|outline-color)$/i;
 
 /** The declarations of a block as {property, value}; the value keeps its `!important`. */
 function declarationsOf(body) {
@@ -760,6 +763,7 @@ const FOCUS_SELECTOR = /:focus(-visible|-within)?(?![A-Za-z0-9_-])/i;
 function mayBeFocusRule(selector) {
   return (
     /focus/i.test(selector) ||
+    selector.includes("\\") ||
     selector.includes(UNKNOWN) ||
     PLACEHOLDER.test(selector) ||
     /:(is|where|not|has|matches|host|host-context|nth-[a-z-]+|-webkit-any|-moz-any)\b/i.test(selector) ||
@@ -787,6 +791,7 @@ function splitHeadParts(head) {
 /** Why a selector branch is outside the closed list, or null when it is a decided form. */
 function offListSelector(selector) {
   if (selector.includes(UNKNOWN)) return UNEXAMINABLE_REASONS.selectorInterpolation;
+  if (selector.includes("\\")) return UNEXAMINABLE_REASONS.selectorEscape;
   if (PLACEHOLDER.test(selector)) return UNEXAMINABLE_REASONS.selectorPlaceholder;
   const rest = selector
     .replace(/\[[^\]]*\]/g, "")
@@ -890,6 +895,8 @@ function declaresStyle(declarations) {
 /** Why a nested rule is outside the closed list (inherited declarations, a layer), or null. */
 function nestingReason(node) {
   for (let ancestor = node.parent; ancestor; ancestor = ancestor.parent) {
+    // an @at-root that drops style rules emits what is inside at the root: nothing above it is inherited
+    if (ancestor.atRule === "at-root" && ancestor.ctx.reset) break;
     if (ancestor.atRule === "layer") return UNEXAMINABLE_REASONS.nested;
     if (ancestor.dataBlock || ancestor.propNest !== null || ancestor.rootEmitted) continue;
     if (declaresStyle(declarationsOf(ancestor.body))) return UNEXAMINABLE_REASONS.nested;
@@ -1339,7 +1346,7 @@ export const DETECTORS = [
         }
         examined = true;
         if (plainFocus.every((selector) => /:focus\s*:not\(\s*:focus-visible\s*\)/i.test(selector))) continue;
-        if (COMPENSATING.test(node.body)) continue;
+        if (declarations.some((d) => INDICATOR_PROPERTY.test(d.property))) continue;
         if (appliesRingWidth(node.body)) continue;
         const own = text.slice(node.selectorStart, node.selectorStart + node.selector.length).trim();
         const spelled = node.parent ? "(nested) " + own : own;

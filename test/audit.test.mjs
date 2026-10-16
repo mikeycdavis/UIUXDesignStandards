@@ -1130,6 +1130,35 @@ test("closed list: properties that cannot be an indicator do not matter", async 
   }
 });
 
+test("closed list: every accepted indicator property compensates; a resetting @at-root inherits nothing; escapes are off the list", async () => {
+  for (const css of [
+    ":focus { outline: none; border-top: 2px solid red; }\n",
+    ":focus { outline: none; border-block-end: 2px solid red; }\n",
+    ":focus { outline: none; border-left-color: red; }\n",
+    ":focus { outline: none; background-image: url(x.png); }\n",
+    ":focus { outline: none; text-decoration-line: underline; }\n",
+  ]) {
+    const r = await focusAuditFor(css);
+    assert.deepEqual(r.rules.filter((x) => x === FOCUS_RULE), [], css);
+    assert.deepEqual(r.unexaminable, [], css);
+    assert.equal(r.examined, true, css);
+  }
+  // a bare @at-root emits the rule at the root: the enclosing rule's shadow is not inherited
+  const root = await focusAuditFor(".a { box-shadow: 0 0 2px red; @at-root { :focus { outline: none; } } }\n");
+  assert.deepEqual(root.rules.filter((x) => x === FOCUS_RULE), [FOCUS_RULE]);
+  assert.deepEqual(root.unexaminable, []);
+  const kept = await focusAuditFor(".a:focus { box-shadow: 0 0 2px red; @at-root (without: media) { &.b { outline: none; } } }\n");
+  assert.deepEqual(kept.rules.filter((x) => x === FOCUS_RULE), []);
+  assert.equal(kept.unexaminable.length >= 1, true);
+  // a CSS escape can spell the pseudo-class
+  for (const css of [":foc\\75 s { outline: none; }\n", ".a:\\66ocus { outline: none; }\n"]) {
+    const r = await focusAuditFor(css);
+    assert.deepEqual(r.rules.filter((x) => x === FOCUS_RULE), [], css);
+    assert.equal(r.unexaminable.length >= 1, true, css);
+    assert.match(r.unexaminable[0].reason, /CSS escape in the selector/, css);
+  }
+});
+
 test("closed list: a decided branch is not hidden by an off-list branch beside it", async () => {
   for (const css of [
     ":focus, :is(:focus) { outline: none; }\n",
