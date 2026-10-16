@@ -1035,7 +1035,7 @@ function namesSameSubject(part, parentIsBareFocus = false) {
   if (compounds.length === 0 || compounds.slice(0, -1).some((compound) => compound.includes("&"))) return false;
   let rest = compounds[compounds.length - 1];
   let anchored = false;
-  const wrapper = /:(?:is|where|matches|-webkit-any|-moz-any|not)\(/i;
+  const wrapper = /:(?:is|where|matches|-webkit-any|-moz-any|not|nth-child|nth-last-child)\(/i;
   for (let m = wrapper.exec(rest); m !== null; m = wrapper.exec(rest)) {
     let depth = 1;
     let end = m.index + m[0].length;
@@ -1046,7 +1046,16 @@ function namesSameSubject(part, parentIsBareFocus = false) {
     if (depth !== 0) return false;
     const args = splitSelectorList(rest.slice(m.index + m[0].length, end - 1));
     if (args.length === 0) return false;
-    if (/^:not\(/i.test(m[0])) {
+    if (/^:nth-(last-)?child\(/i.test(m[0])) {
+      // :nth-child(2 of &): every match is still the parent's subject; without an "of" clause (or
+      // without a reference in it) it is a position filter that only narrows the subject
+      const inner = rest.slice(m.index + m[0].length, end - 1);
+      const of = /\bof\s+([\s\S]*)$/i.exec(inner);
+      if (of && of[1].includes("&")) {
+        if (!namesSameSubject(":is(" + of[1] + ")", parentIsBareFocus)) return false;
+        anchored = true;
+      }
+    } else if (/^:not\(/i.test(m[0])) {
       const referencing = args.filter((arg) => arg.includes("&"));
       if (referencing.length > 0) {
         // a negation of the parent preserves the subject only when it is itself negated:
@@ -1614,7 +1623,7 @@ export const DETECTORS = [
           unexaminable.push({ index: where, reason });
           continue;
         }
-        const exempt = focusSelectors.every((selector) => /:focus\s*:not\(\s*:focus-visible\s*\)/i.test(selector));
+        const exempt = focusSelectors.every((selector) => /:focus\s*:not\(\s*(?:[^(),]*,\s*)*:focus-visible\s*(?:,[^()]*)?\)/i.test(selector));
         let verdict = "present";
         if (!exempt && removesOutline) {
           // The declarations of the rules this one is attached to on the same element count as well:

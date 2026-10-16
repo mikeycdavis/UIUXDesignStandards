@@ -1428,6 +1428,22 @@ test("ST-07: an unresolved all reset takes part in the cascade; a doubled negati
   }
 });
 
+test("ST-07: :nth-child(... of &) keeps the subject; a focus-visible negation with filters is still the exemption", async () => {
+  const cases = [
+    [":focus { box-shadow: 0 0 0 2px blue; :nth-child(2 of &) { outline: none; } }\n", []],
+    [".btn:focus { box-shadow: 0 0 0 2px blue; :nth-last-child(odd of &.x) { outline: none; } }\n", []],
+    [".btn:focus { box-shadow: 0 0 0 2px blue; :nth-child(2 of &, .y) { outline: none; } }\n", [FOCUS_RULE]],
+    [".btn:focus { box-shadow: 0 0 0 2px blue; &:nth-child(2) { outline: none; } }\n", []],
+    [":focus { &:not(:focus-visible, .disabled) { outline: none; } }\n", []],
+    [":focus { &:not(.disabled, :focus-visible) { outline: none; } }\n", []],
+    [":focus:not(.a, :focus-visible, .b) { outline: none; }\n", []],
+    [":focus:not(.a, .b) { outline: none; }\n", [FOCUS_RULE]],
+  ];
+  for (const [css, expected] of cases) {
+    assert.deepEqual((await focusAuditFor(css)).rules.filter((x) => x === FOCUS_RULE), expected, css);
+  }
+});
+
 test("ST-07: a doubly negated reference to the parent keeps the subject", async () => {
   const cases = [
     [":focus { box-shadow: 0 0 0 2px blue; :not(:not(&)) { outline: none; } }\n", []],
