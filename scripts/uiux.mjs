@@ -775,6 +775,7 @@ function declarationCovers(property) {
   if (p === "background-color") return [["background", "color"]];
   if (p === "background-image") return [["background", "image"]];
   if (/^text-decoration(-(line|color|style|thickness))?$/.test(p)) return [["text-decoration", "*"]];
+  if (/^(outline(-[a-z]+)?|--tw-ring[a-z-]*|ring[a-z-]*|filter)$/.test(p)) return [[p, "*"]];
   const border = /^border(?:-(top|right|bottom|left|block-start|block-end|inline-start|inline-end|block|inline))?(?:-(style|width|color))?$/.exec(p);
   if (border) {
     const where = border[1];
@@ -873,6 +874,30 @@ function replacementVerdict(node, compensating) {
         });
         continue;
       }
+      // A border shorthand sets width, style and colour of the sides it names: an omitted style is none
+      // (nothing is drawn), an omitted width is medium, an omitted colour is currentcolor.
+      const shorthand = /^border(?:-(top|right|bottom|left))?$/.exec(property);
+      if (shorthand) {
+        const sides = shorthand[1] === undefined ? BORDER_SIDES : [shorthand[1]];
+        const bare = value.replace(IMPORTANT, "").trim();
+        let facets;
+        if (bare.includes(UNKNOWN) || /^(inherit)$/i.test(bare)) facets = { width: bare, style: bare, color: bare };
+        else if (/^(initial|unset|revert|revert-layer)$/i.test(bare)) facets = { width: bare, style: bare, color: bare };
+        else {
+          const tokens = bare.split(/\s+(?![^(]*\))/).filter(Boolean);
+          const style = tokens.find((t) => /^(none|hidden|dotted|dashed|solid|double|groove|ridge|inset|outset)$/i.test(t));
+          const width = tokens.find((t) => /^(thin|medium|thick)$/i.test(t) || /^[+-]?[\d.]/.test(t) || /^calc\(/i.test(t));
+          const color = tokens.find((t) => t !== style && t !== width);
+          facets = { width: width ?? "medium", style: style ?? "none", color: color ?? "currentcolor" };
+        }
+        const introduces = compensating.test(property + ":");
+        for (const side of sides) {
+          for (const facet of BORDER_FACETS) {
+            decls.push({ at, lo, hi, layer, property: "border-" + side + "-" + facet, value: facets[facet], important, introduces });
+          }
+        }
+        continue;
+      }
       if (property === "background") {
         // the shorthand sets the colour and resets the image: only url(), a gradient or image-set()
         // supplies one
@@ -891,7 +916,9 @@ function replacementVerdict(node, compensating) {
         });
         continue;
       }
-      decls.push({ at, lo, hi, layer, property, value, important });
+      // an interpolated value of a relevant property may be an indicator
+      const introduces = value.includes(UNKNOWN) && FOCUS_RELEVANT_PROPERTY.test(property);
+      decls.push({ at, lo, hi, layer, property, value, important, introduces });
     }
   }
   // Logical border sides map to physical ones through writing-mode and direction, which may be set
@@ -1126,7 +1153,11 @@ function unexaminableReason(node) {
     if (colon === -1) return "an interpolation outside a property: value declaration";
     if (raw.slice(0, colon).includes(UNKNOWN)) return "an interpolation in a property name may be outline or a ring property";
     const property = raw.slice(0, colon).trim();
-    if (FOCUS_RELEVANT_PROPERTY.test(property) && declarationCovers(property) === null) {
+    // An unknown outline value may itself be the removal (outline: #{$x} can be none), which the
+    // cascade below does not model: it stays undecided. Every other relevant property is resolved in
+    // the cascade (replacementVerdict): a later declaration that wins settles it, an unknown that
+    // can survive leaves it undecided.
+    if (/^outline(-(style|width))?$/i.test(property)) {
       return `an interpolation in the value of '${property}' cannot be read statically`;
     }
   }

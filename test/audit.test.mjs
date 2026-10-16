@@ -1346,6 +1346,29 @@ test("ST-07: a negated parent reference may narrow an anchored subject; :host() 
   }
 });
 
+test("ST-07: border shorthands are read as width, style and colour; unmodelled unknowns are resolved by later declarations", async () => {
+  const cases = [
+    [":focus { border: 2px solid blue; &.x { outline: none; border: 0 solid red; } }\n", [FOCUS_RULE]],
+    [":focus { border: 2px solid blue; &.x { outline: none; border: 2px dotted red; } }\n", []],
+    [":focus { outline: none; border: 2px blue; }\n", [FOCUS_RULE]],
+    [":focus { outline: none; border: solid; }\n", []],
+    [":focus { outline: none; border-bottom: 3px double; }\n", []],
+    [":focus { outline: none; border: 0; }\n", [FOCUS_RULE]],
+    [":focus { outline: none; border: none; border: 1px solid red; }\n", []],
+    [":focus { filter: #{$maybe}; filter: none !important; outline: none; }\n", [FOCUS_RULE]],
+    [":focus { filter: none !important; filter: #{$maybe}; outline: none; }\n", "unexaminable"],
+    [":focus { outline: none; filter: #{$maybe}; }\n", "unexaminable"],
+  ];
+  for (const [css, expected] of cases) {
+    const r = await focusAuditFor(css);
+    const found = r.rules.filter((x) => x === FOCUS_RULE);
+    if (expected === "unexaminable") {
+      assert.deepEqual(found, [], css);
+      assert.equal(r.unexaminable.length >= 1, true, css);
+    } else assert.deepEqual(found, expected, css);
+  }
+});
+
 test("ST-07: a doubly negated reference to the parent keeps the subject", async () => {
   const cases = [
     [":focus { box-shadow: 0 0 0 2px blue; :not(:not(&)) { outline: none; } }\n", []],
