@@ -403,6 +403,9 @@ function resolveInterpolation(text, sourceText = text, rawText = sourceText) {
     // `null` interpolates to nothing, while the string "null" interpolates to the text null.
     const raw = terminated ? rawText.slice(i + 2, j).trim() : null;
     let literal = inner !== null && /^!?[A-Za-z0-9_.%-]+$/.test(inner) ? inner : null;
+    // A plain quoted string interpolates to its text, punctuation included (#{":focus"} is :focus).
+    const quoted = raw !== null ? /^(["'])([^"'\\\n{}#]*)\1$/.exec(raw) : null;
+    if (quoted !== null) literal = quoted[2];
     if (literal === "null" && raw === "null") literal = "";
     spans.push({ start: i, end, literal });
     i = end;
@@ -1206,12 +1209,29 @@ function requiresFocus(compound) {
 }
 
 /**
- * Does the block's WINNING outline declaration remove the outline? The last `outline` declaration decides
- * (`outline: none; outline: 2px solid blue` restores it), except that an important one is not displaced by
- * a later one that is not.
+ * Does an `outline` shorthand value draw nothing? true: it removes the outline; false: it restores one;
+ * "unknown": an unresolved var()/env()/interpolation leaves the style or width open. Only a style that is
+ * not none/hidden draws one, and a zero width draws nothing: `initial`, `unset`, `0`, `medium`, `2px red`
+ * leave the style at none.
  */
-function removesOutlineIn(body) {
-  let removes = false;
+function outlineValueState(value) {
+  const bare = value.replace(IMPORTANT, "").trim();
+  if (/^inherit$/i.test(bare)) return "unknown"; // whatever the parent draws
+  if (/^(initial|unset|revert|revert-layer)$/i.test(bare)) return true;
+  const tokens = bare.split(/\s+(?![^(]*\))/).filter(Boolean);
+  const unresolved = tokens.some((t) => t.includes(UNKNOWN) || /(^|[^\w-])(var|env)\(/i.test(t));
+  const known = tokens.filter((t) => !(t.includes(UNKNOWN) || /(^|[^\w-])(var|env)\(/i.test(t)));
+  const style = known.find((t) => /^(none|hidden|dotted|dashed|solid|double|groove|ridge|inset|outset|auto)$/i.test(t));
+  const zeroWidth = known.some((t) => /^[+-]?[\d.]/.test(t) && DISABLED_VALUE.test(t));
+  if (style !== undefined && /^(none|hidden)$/i.test(style)) return true;
+  if (zeroWidth) return true;
+  if (style !== undefined) return false;
+  return unresolved ? "unknown" : true;
+}
+
+/** The state of the block's WINNING outline declaration (see outlineValueState); false when it has none. */
+function outlineStateIn(body) {
+  let state = false;
   let important = false;
   for (const raw of body.split(";")) {
     const m = /^\s*outline\s*:\s*([\s\S]*)$/i.exec(raw);
@@ -1219,9 +1239,18 @@ function removesOutlineIn(body) {
     const isImportant = IMPORTANT.test(m[1]);
     if (important && !isImportant) continue;
     important = isImportant;
-    removes = /^(none|0)\b/i.test(m[1].trim());
+    state = outlineValueState(m[1]);
   }
-  return removes;
+  return state;
+}
+
+/**
+ * Does the block's WINNING outline declaration remove the outline? The last `outline` declaration decides
+ * (`outline: none; outline: 2px solid blue` restores it), except that an important one is not displaced by
+ * a later one that is not.
+ */
+function removesOutlineIn(body) {
+  return outlineStateIn(body) === true;
 }
 
 /** A Sass placeholder selector: %name at the start of a compound (50% is a keyframe selector). */
@@ -1298,6 +1327,8 @@ function unexaminableReason(node) {
   // replacement that cannot be read (`:focus { @apply #{$ring}; &.x { outline: none } }`) may be a
   // valid indicator, so it makes the child unexaminable rather than an established failure.
   const bodies = [node.body, ...node.elementBodies];
+  // an outline whose style or width hangs on var()/env()/an interpolation may be the removal or the restoration
+  if (outlineStateIn(node.body) === "unknown") return "the winning outline declaration cannot be read statically";
   for (const raw of bodies.flatMap((body) => body.split(";"))) {
     if (!raw.includes(UNKNOWN)) continue;
     // an unknown ring token and an unknown value of a property the cascade models are resolved there:

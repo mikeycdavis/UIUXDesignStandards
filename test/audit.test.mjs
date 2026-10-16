@@ -1574,6 +1574,36 @@ test("ST-07: the winning outline declaration decides whether the outline is remo
   }
 });
 
+test("ST-07: an outline set through var() is undecided", async () => {
+  const r = await focusAuditFor(":focus { outline: none; outline: var(--o); }\n");
+  assert.deepEqual(r.rules.filter((x) => x === FOCUS_RULE), []);
+  assert.equal(r.unexaminable.length >= 1, true);
+});
+
+test("ST-07: only a styled outline restores it; quoted literals interpolate their punctuation", async () => {
+  const cases = [
+    [":focus { outline: none; outline: initial; }\n", [FOCUS_RULE]],
+    [":focus { outline: none; outline: unset; }\n", [FOCUS_RULE]],
+    [":focus { outline: none; outline: medium; }\n", [FOCUS_RULE]],
+    [":focus { outline: none; outline: 2px red; }\n", [FOCUS_RULE]],
+    [":focus { outline: none; outline: solid 0; }\n", [FOCUS_RULE]],
+    [":focus { outline: none; outline: 2px solid red; }\n", []],
+    [":focus { outline: none; outline: 2px solid var(--c); }\n", []],
+    [":focus { outline: none; outline: var(--w) solid red; }\n", []],
+    [":focus { outline: none; outline: 0 var(--s) red; }\n", [FOCUS_RULE]],
+    [":focus { outline: none; outline: solid; }\n", []],
+    [":focus { outline: none; outline: auto; }\n", []],
+    [":focus { outline: none; outline: inherit; }\n", []],
+    [":focus { outline: hidden; }\n", [FOCUS_RULE]],
+    ["#{':focus'} { outline: none; }\n", [FOCUS_RULE]],
+    ["#{\":focus-visible\"} { outline: none; }\n", [FOCUS_RULE]],
+    ["button#{':focus'} { outline: none; }\n", [FOCUS_RULE]],
+  ];
+  for (const [css, expected] of cases) {
+    assert.deepEqual((await focusAuditFor(css)).rules.filter((x) => x === FOCUS_RULE), expected, css);
+  }
+});
+
 test("ST-07: a doubly negated reference to the parent keeps the subject", async () => {
   const cases = [
     [":focus { box-shadow: 0 0 0 2px blue; :not(:not(&)) { outline: none; } }\n", []],
