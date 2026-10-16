@@ -664,7 +664,7 @@ function composeSelectors(selector, parents, reset = false) {
 }
 
 const IMPORTANT = /!\s*important\s*$/i;
-const DISABLED_VALUE = /^(none|hidden|0|0(px|em|rem)|initial|unset|revert|transparent)(\s*!important)?$/i;
+const DISABLED_VALUE = /^(none|hidden|0|0(px|em|rem)|initial|unset|revert|revert-layer|transparent)(\s*!important)?$/i;
 
 /** Specificity of a selector as [ids, classes/attributes/pseudo-classes, types/pseudo-elements]. */
 function specificity(selector) {
@@ -954,8 +954,11 @@ function replacementVerdict(node, compensating) {
  */
 function namesSameSubject(part) {
   if (/::|:(before|after|first-line|first-letter)(?![\w-])/i.test(part)) return false;
-  if (selectorCompounds(part).length !== 1) return false;
-  let rest = part;
+  // Ancestor constraints may precede the subject (`.wrapper &`): the LAST compound is the subject, and
+  // it alone may carry the reference to the parent.
+  const compounds = selectorCompounds(part);
+  if (compounds.length === 0 || compounds.slice(0, -1).some((compound) => compound.includes("&"))) return false;
+  let rest = compounds[compounds.length - 1];
   let anchored = false;
   const wrapper = /:(?:is|where|matches|-webkit-any|-moz-any|not)\(/i;
   for (let m = wrapper.exec(rest); m !== null; m = wrapper.exec(rest)) {

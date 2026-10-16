@@ -1196,6 +1196,21 @@ test("ST-07: only colour functions enable a background shorthand's colour; nth-c
   }
 });
 
+test("ST-07: revert-layer resets like the other CSS-wide values; ancestor constraints keep the subject", async () => {
+  const cases = [
+    [":focus { box-shadow: 0 0 0 2px blue; &.danger { all: revert-layer; outline: none; } }\n", [FOCUS_RULE]],
+    [":focus { box-shadow: 0 0 0 2px blue; &.danger { outline: none; box-shadow: revert-layer; } }\n", [FOCUS_RULE]],
+    [":focus { outline: none; box-shadow: 0 0 0 2px blue; box-shadow: revert-layer; }\n", [FOCUS_RULE]],
+    [":focus { box-shadow: 0 0 0 2px blue; .wrapper & { outline: none; } }\n", []],
+    [":focus { box-shadow: 0 0 0 2px blue; .a > .b & { outline: none; } }\n", []],
+    [":focus { box-shadow: 0 0 0 2px blue; & .wrapper { outline: none; } }\n", [FOCUS_RULE]],
+    [":focus { box-shadow: 0 0 0 2px blue; .wrapper & .x { outline: none; } }\n", [FOCUS_RULE]],
+  ];
+  for (const [css, expected] of cases) {
+    assert.deepEqual((await focusAuditFor(css)).rules.filter((x) => x === FOCUS_RULE), expected, css);
+  }
+});
+
 test("ST-07: a doubly negated reference to the parent keeps the subject", async () => {
   const cases = [
     [":focus { box-shadow: 0 0 0 2px blue; :not(:not(&)) { outline: none; } }\n", []],
