@@ -1488,6 +1488,10 @@ test("closed list: blockless @extend, @include and Less mixin calls make the blo
     ["button:focus { outline: none; .ring; }\n", "f.less"],
     ["button:focus { outline: none; .m(@a: 1); }\n", "f.less"],
     ["button:focus { outline: none; @include ring; }\n", "f.scss"],
+    ["button:focus { @include no-ring { color: red; } }\n", "f.scss"],
+    ["button:focus { margin: 0; @if $x { outline: none; } }\n", "f.scss"],
+    ["&:focus { outline: none; }\n", "f.scss"],
+    ["&.a:focus { outline: none; }\n", "f.scss"],
   ]) {
     const r = await focusAuditFor(css, file);
     assert.deepEqual(r.rules.filter((x) => x === FOCUS_RULE), [], css);

@@ -716,7 +716,8 @@ function composeSelectors(selector, parents, reset = false) {
   if (parts.length * parents.length > MAX_COMPOSED) return [OVER_CAP];
   for (const part of parts) {
     for (const parent of parents) {
-      if (part.includes("&")) composed.push(part.replaceAll("&", parent));
+      // at the stylesheet root there is no parent: a top-level & is invalid Sass and stays unresolved (off the list)
+      if (part.includes("&")) composed.push(part.replaceAll("&", parent === "" ? "&" : parent));
       else composed.push(parent === "" || reset ? part : `${parent} ${part}`);
     }
   }
@@ -1593,8 +1594,9 @@ export const DETECTORS = [
         // a selector whose subject is not focused and that has no off-list branch is not a focus rule at all:
         // nothing about its declarations can matter
         if (plainFocus.length === 0 && offList.length === 0) continue;
-        // a blockless @include/@extend/Less mixin call may supply or remove anything: the block is not decided
-        if (hasBlocklessCall(node.body)) {
+        // a blockless @include/@extend/Less mixin call, or an @include/control-directive block inside the rule, may
+        // supply or remove anything: the block is not decided, whatever else it declares
+        if (enclosesOpaque.has(node) || hasBlocklessCall(node.body)) {
           note(UNEXAMINABLE_REASONS.opaqueChild);
           continue;
         }
@@ -1610,10 +1612,6 @@ export const DETECTORS = [
         // do not discard what the decided branches establish.
         if (offList.length > 0) note(offList[0]);
         if (plainFocus.length === 0) continue;
-        if (enclosesOpaque.has(node)) {
-          note(UNEXAMINABLE_REASONS.opaqueChild);
-          continue;
-        }
         const nested = nestingReason(node);
         if (nested !== null) {
           note(nested);

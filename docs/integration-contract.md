@@ -369,7 +369,7 @@ functional selectors, cross-rule interaction). A form is added to this list only
 
 | Off the list: `detectorsUnexaminable[].reason` | Forms |
 | --- | --- |
-| a functional or unlisted pseudo-class selector is outside the decided list of selector forms | `:is() :where() :not()` other than `:not(:focus-visible)`, `:has() :host() :nth-*()`, any other pseudo-class or functional selector, an unresolved `&` |
+| a functional or unlisted pseudo-class selector is outside the decided list of selector forms | `:is() :where() :not()` other than `:not(:focus-visible)`, `:has() :host() :nth-*()`, any other pseudo-class or functional selector, an unresolved `&` (a top-level `&` has no parent and is invalid Sass) |
 | an interpolation in the selector may make it a focus rule | an unknown interpolation anywhere in a selector, or any interpolation in a selector head |
 | a comment inside the selector may split or join its compounds | a `/* */` or `//` comment between the parts of a selector head (a comment before the head is not inside it) |
 | a selector the closed list does not positively recognise (malformed or unlisted syntax) | a selector that is not compounds of type/universal, `#id`, `.class`, `[attribute]`, listed pseudo-classes and pseudo-elements joined by descendant, child or sibling combinators (`:focus..x`, `a >> b`, a trailing combinator, a pseudo-element before a combinator, an empty list member such as `:focus,`, an attribute selector without a value after its operator, a leading combinator in a composed selector, Less `@{...}` interpolation) |
