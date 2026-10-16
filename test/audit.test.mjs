@@ -1369,6 +1369,19 @@ test("ST-07: border shorthands are read as width, style and colour; unmodelled u
   }
 });
 
+test("ST-07: variable border shorthands are not defaulted; paint() is a background image", async () => {
+  const cases = [
+    [":focus { --focus-border: 2px solid blue; outline: none; border: var(--focus-border); }\n", []],
+    [":focus { outline: none; border: 2px var(--s) blue; }\n", []],
+    [":focus { outline: none; background: paint(focus-ring); }\n", []],
+    [":focus { outline: none; background: element(#ring); }\n", []],
+    [":focus { outline: none; background: paint(focus-ring); background-image: none; }\n", [FOCUS_RULE]],
+  ];
+  for (const [css, expected] of cases) {
+    assert.deepEqual((await focusAuditFor(css)).rules.filter((x) => x === FOCUS_RULE), expected, css);
+  }
+});
+
 test("ST-07: a doubly negated reference to the parent keeps the subject", async () => {
   const cases = [
     [":focus { box-shadow: 0 0 0 2px blue; :not(:not(&)) { outline: none; } }\n", []],

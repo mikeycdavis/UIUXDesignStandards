@@ -797,7 +797,10 @@ function shorthandBackgroundColor(value) {
   if (value.includes(UNKNOWN)) return value; // an interpolated shorthand may be any colour
   if (/^inherit(\s*!important)?$/i.test(value.trim())) return value;
   // image functions and sizes are not colours; var()/env() may be anything and are read as a colour
-  const stripped = value.replace(/(url|image-set|-?[a-z-]*gradient)\((?:[^()]|\([^()]*\))*\)/gi, " ");
+  const stripped = value.replace(
+    /(url|image-set|paint|element|cross-fade|image|-?[a-z-]*gradient)\((?:[^()]|\([^()]*\))*\)/gi,
+    " ",
+  );
   for (const token of stripped.split(/[\s/]+/).filter(Boolean)) {
     const t = token.toLowerCase();
     if (BACKGROUND_KEYWORDS.has(t) || /^[+-]?[\d.]/.test(t) || t === "!important") continue;
@@ -881,7 +884,10 @@ function replacementVerdict(node, compensating) {
         const sides = shorthand[1] === undefined ? BORDER_SIDES : [shorthand[1]];
         const bare = value.replace(IMPORTANT, "").trim();
         let facets;
-        if (bare.includes(UNKNOWN) || /^(inherit)$/i.test(bare)) facets = { width: bare, style: bare, color: bare };
+        // a var()/env() part may carry any facet: nothing is defaulted, the value is kept for all three
+        if (bare.includes(UNKNOWN) || /^(inherit)$/i.test(bare) || /\b(var|env)\(/i.test(bare)) {
+          facets = { width: bare, style: bare, color: bare };
+        }
         else if (/^(initial|unset|revert|revert-layer)$/i.test(bare)) facets = { width: bare, style: bare, color: bare };
         else {
           const tokens = bare.split(/\s+(?![^(]*\))/).filter(Boolean);
@@ -903,7 +909,7 @@ function replacementVerdict(node, compensating) {
         // supplies one
         // inherit keeps whatever the parent paints: potentially visible, never asserted absent
         const inherited = /^inherit(\s*!important)?$/i.test(value) || value.includes(UNKNOWN);
-        const image = inherited || /url\(|gradient\(|image-set\(/i.test(value) ? value : "none";
+        const image = inherited || /url\(|gradient\(|image-set\(|paint\(|element\(|cross-fade\(|\bimage\(/i.test(value) ? value : "none";
         decls.push({ at, lo, hi, layer, property: "background-color", value: shorthandBackgroundColor(value), important });
         decls.push({ at, lo, hi, layer, property: "background-image", value: image, important, introduces: true });
         continue;
