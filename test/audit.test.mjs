@@ -10,11 +10,13 @@ import { strict as assert } from "node:assert";
 import { test } from "node:test";
 import { mkdtemp, cp, readFile, writeFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
+import { spawnSync } from "node:child_process";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import {
   splitSource,
   runAudit,
+  runValidate,
   readCorpus,
   runDetectors,
   DETECTORS,
@@ -263,10 +265,10 @@ test("a compensating focus style keeps the detector silent — the whitelist is 
 
 // --- ST-04: an @apply ring is the replacement focus indicator ---------------------------------------
 
-async function focusRulesFor(css) {
+async function focusRulesFor(css, file = "index.css") {
   const dir = await mkdtemp(path.join(tmpdir(), "uiux-st04-"));
   try {
-    await writeFile(path.join(dir, "index.css"), css);
+    await writeFile(path.join(dir, file), css);
     return rulesOf((await runAudit(dir)).findings);
   } finally {
     await rm(dir, { recursive: true, force: true });
@@ -372,7 +374,1223 @@ test("ST-04 criterion 4: existing focus behaviour is unchanged", async () => {
   assert.deepEqual(await focusRulesFor(":focus:not(:focus-visible) { outline: none; }\n"), []);
 });
 
+// --- ST-07: a block containing SCSS interpolation is examined, not skipped --------------------------
+
+test("ST-07 criteria 1 and 2: a focus block containing #{...} is examined with the interpolation masked", async () => {
+  const cases = [
+    // the reproduced block: an important zero-width ring wins over the later ring-2
+    [":focus {\n  outline: none;\n  @apply ring-0 #{!important};\n  @apply ring-2;\n}\n", [FOCUS_RULE]],
+    // an interpolation elsewhere in the block, no replacement indicator
+    [":focus-visible {\n  outline: none;\n  margin: #{$gap};\n}\n", [FOCUS_RULE]],
+    // an effective ring plus an interpolation elsewhere is a replacement indicator
+    [":focus {\n  outline: none;\n  @apply ring-2;\n  margin: #{$gap};\n}\n", []],
+    [":focus {\n  outline: none;\n  box-shadow: 0 0 0 #{$w} blue;\n}\n", []],
+    // an important ring written through interpolation is not displaced by a later ring-0
+    [":focus {\n  outline: none;\n  @apply ring-2 #{!important};\n  @apply ring-0;\n}\n", []],
+    // nested braces inside an interpolation do not end the span early
+    [":focus {\n  outline: none;\n  width: #{map-get((a: 1), a)};\n}\n", [FOCUS_RULE]],
+  ];
+  for (const [css, expected] of cases) {
+    assert.deepEqual(await focusRulesFor(css, "focus.scss"), expected, css);
+  }
+});
+
+test("ST-07: an interpolation in a selector head is unexaminable at the rule head's line, never read", async () => {
+  // resolving a selector interpolation at the span's length pads it with spaces, which would read as
+  // a combinator (:focus#{null}.danger is the one compound :focus.danger), so the closed list does not
+  // read a selector head that holds one - not even a statically readable one
+  const dir = await mkdtemp(path.join(tmpdir(), "uiux-st07-"));
+  try {
+    await writeFile(path.join(dir, "f.scss"), "/* h */\n\n.a { color: red; }\n\n.#{p}-x:focus {\n  outline: none;\n}\n");
+    const r = await runAudit(dir);
+    assert.deepEqual(r.findings.filter((f) => f.rule === FOCUS_RULE), []);
+    const u = r.detectorsUnexaminable.filter((x) => x.rule === FOCUS_RULE);
+    assert.equal(u.length, 1);
+    assert.deepEqual(u[0].evidence, ["f.scss:5"]);
+    assert.match(u[0].reason, /interpolation in the selector/);
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+  for (const css of [
+    ":focus#{null}.danger { outline: none; }\n",
+    ".#{prefix}-button:focus-visible { outline: none; }\n",
+    "#{':focus'} { outline: none; }\n",
+    '#{"focus"} { outline: none; }\n',
+    ".a { &:focus#{null}.danger { outline: none; } }\n",
+    ".a#{null} { &:focus { outline: none; } }\n",
+  ]) {
+    const r = await focusAuditFor(css);
+    assert.deepEqual(r.rules.filter((x) => x === FOCUS_RULE), [], css);
+    assert.equal(r.examined, false, css);
+    assert.equal(r.unexaminable.length >= 1, true, css);
+  }
+});
+
+test("ST-07: masking an interpolation does not move the reported line", async () => {
+  const lineOf = async (head) => {
+    const dir = await mkdtemp(path.join(tmpdir(), "uiux-st07-"));
+    try {
+      await writeFile(path.join(dir, "f.scss"), `${head}\n.b {\n  outline: none;\n}\n:focus {\n  outline: none;\n}\n`);
+      return (await runAudit(dir)).findings.filter((f) => f.rule === FOCUS_RULE).map((f) => f.evidence[0]);
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  };
+  const plain = await lineOf(".a { margin: 1px\n  + 2px; }");
+  const interpolated = await lineOf(".a { margin: #{1px\n  + 2px}; }");
+  assert.equal(plain.length, 1);
+  assert.deepEqual(interpolated, plain);
+});
+
+test("ST-07 criterion 3: blocks without #{ are unchanged", async () => {
+  assert.deepEqual(await focusRulesFor(":focus { outline: none; @apply ring-0 !important; @apply ring-2; }\n", "a.scss"), [FOCUS_RULE]);
+  assert.deepEqual(await focusRulesFor(":focus { outline: none; @apply ring-2; }\n", "a.scss"), []);
+  assert.deepEqual(await focusRulesFor(":focus-visible { outline: none; }\n"), [FOCUS_RULE]);
+  assert.deepEqual(await focusRulesFor(":focus:not(:focus-visible) { outline: none; }\n", "a.scss"), []);
+});
+
+// --- ST-07: an interpolation that cannot be read statically makes the block unexaminable -----------
+
+async function focusAuditFor(css, file = "f.scss") {
+  const dir = await mkdtemp(path.join(tmpdir(), "uiux-st07u-"));
+  try {
+    await writeFile(path.join(dir, file), css);
+    const audit = await runAudit(dir);
+    return {
+      rules: rulesOf(audit.findings),
+      examined: audit.detectorsExamined.includes(FOCUS_RULE),
+      unexaminable: audit.detectorsUnexaminable.filter((u) => u.rule === FOCUS_RULE),
+      withoutSubject: audit.detectorsWithoutSubject.filter((u) => u.rule === FOCUS_RULE),
+    };
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+}
+
+test("ST-07: a statically readable interpolation is read, not masked", async () => {
+  for (const css of [
+    ":focus { outline: #{none}; }\n",
+    ":focus { outline: #{0}; }\n",
+    ':focus { outline: #{"none"}; }\n',
+    ":focus { outline: #{ none }; }\n",
+    ":focus { outline: no#{ne}; }\n",
+    ":focus { outline: #{no}ne; }\n",
+  ]) {
+    const r = await focusAuditFor(css);
+    assert.deepEqual(r.rules, [FOCUS_RULE], css);
+    assert.equal(r.examined, true, css);
+    assert.deepEqual(r.unexaminable, [], css);
+  }
+});
+
+test("ST-07: every position an unknowable interpolation can take is unexaminable, never examined-clean", async () => {
+  const positions = {
+    "outline value": ":focus { outline: #{$none}; }\n",
+    "outline shorthand width": ":focus { outline: #{$w} solid; }\n",
+    "function call value": ":focus { outline: #{if($x, none, auto)}; }\n",
+    "map value": ":focus { outline: #{map-get((a: none), a)}; }\n",
+    "property name": ":focus { #{$prop}: none; }\n",
+    "partial property name": ":focus { out#{$part}: none; }\n",
+    "box-shadow value": ":focus { outline: none; box-shadow: #{$s}; }\n",
+    "compensating property value": ":focus { outline: none; box-shadow: #{$c}; }\n",
+    "@apply list": ":focus { outline: none; @apply #{$ring}; }\n",
+    "@apply variant token with colon": ":focus { outline: none; @apply focus:#{$r} sm:ring-0; }\n",
+    "@apply mixed with static": ":focus { outline: none; @apply ring-0 #{$x}; }\n",
+    "nested focus block": ".a { &:focus { outline: #{$o}; } }\n",
+    "selector :not": ":focus:not(#{$fv}) { outline: none; }\n",
+    "whole-selector interpolation": "#{$sel} { outline: none; }\n",
+    "selector pseudo fragment": ".a:#{$state} { outline: none; }\n",
+    "inside @media": "@media (min-width: 1px) { :focus { outline: #{$o}; } }\n",
+    "unterminated span": ":focus { outline: #{$o;\n}\n",
+  };
+  for (const [name, css] of Object.entries(positions)) {
+    const r = await focusAuditFor(css);
+    assert.equal(r.examined, false, `${name}: the rule must not be evaluated`);
+    assert.equal(r.unexaminable.length >= 1, true, `${name}: an unexaminable record is emitted`);
+    assert.equal(r.withoutSubject.length, 1, `${name}: the rule is listed as not established`);
+  }
+});
+
+test("ST-07: an unexaminable block makes the rule unevaluated even when another block is readable", async () => {
+  const r = await focusAuditFor(":focus-visible { outline: 2px solid blue; }\n:focus { outline: #{$o}; }\n");
+  assert.equal(r.examined, false);
+  assert.equal(r.unexaminable.length, 1);
+  assert.match(r.unexaminable[0].evidence[0], /^f\.scss:2$/);
+});
+
+test("ST-07: interpolations that cannot change the answer stay examined", async () => {
+  const cases = [
+    [":focus { outline: none; margin: #{$gap}; }\n", [FOCUS_RULE]],
+    [":focus { outline: 2px solid red; width: calc(#{$a} + 1px); }\n", []],
+    [':focus { content: "#{$x}"; outline: none; }\n', [FOCUS_RULE]],
+    ["// :focus { outline: #{$o}; }\n:focus { outline: none; }\n", [FOCUS_RULE]],
+    ["/* :focus { outline: #{$o}; } */\n:focus { outline: none; }\n", [FOCUS_RULE]],
+  ];
+  for (const [css, rules] of cases) {
+    const r = await focusAuditFor(css);
+    assert.deepEqual(r.rules, rules, css);
+    assert.equal(r.examined, true, css);
+    assert.deepEqual(r.unexaminable, [], css);
+  }
+});
+
+test("ST-07: a nested rule is examined under its COMPOSED selector", async () => {
+  const cases = [
+    // [css, expected rules, expected examined]
+    [".a { &:focus { outline: none; } }\n", [FOCUS_RULE]],
+    [":focus { &.danger { outline: none; } }\n", [FOCUS_RULE]],
+    [":focus { .danger { outline: none; } }\n", []],
+    [":focus { & > .x { outline: none; } }\n", []],
+    [":focus { .a &, .b { outline: none; } }\n", [FOCUS_RULE]],
+    [".a, :focus { outline: none; }\n", [FOCUS_RULE]],
+    [".a, .b:focus { .c { outline: none; } }\n", []],
+    [".a, .b { &:focus-visible { outline: none; } }\n", [FOCUS_RULE]],
+    [".a { .b { &:focus { outline: none; } } }\n", [FOCUS_RULE]],
+    [":focus-within { &.x { outline: none; } }\n", [FOCUS_RULE]],
+    [":focus { &:hover { outline: none; } }\n", [FOCUS_RULE]],
+    [".a { .b { outline: none; } }\n", []],
+    [":focus { outline: none; &:hover { color: red; } }\n", [FOCUS_RULE]],
+    [":focus { outline: none; &:hover { box-shadow: 0 0 0 2px blue; } }\n", [FOCUS_RULE]],
+    [":focus:not(:focus-visible) { &.x { outline: none; } }\n", []],
+    [":focus:not(:focus-visible), .a:focus { outline: none; }\n", [FOCUS_RULE]],
+  ];
+  for (const [css, rules] of cases) {
+    const r = await focusAuditFor(css);
+    assert.deepEqual(r.rules, rules, css);
+    assert.deepEqual(r.unexaminable, [], css);
+  }
+});
+
+test("ST-07: a focus pseudo inside a negation does not select focused elements", async () => {
+  const none = [
+    ":focus { :not(&) { outline: none; } }\n",
+    ":not(:focus) { outline: none; }\n",
+    ".a:not(:focus-visible) { outline: none; }\n",
+    ":not(:focus-within) { outline: none; }\n",
+    ".a { &:not(:focus) { outline: none; } }\n",
+    ":not(:not(:not(:focus))) { outline: none; }\n",
+  ];
+  for (const css of none) {
+    const r = await focusAuditFor(css);
+    assert.deepEqual(r.rules, [], css);
+    // the :focus parent of the first form is itself an examined focus rule
+    if (!css.startsWith(":focus {")) assert.equal(r.examined, false, css);
+  }
+  // a double negation, or a negation other than :not(:focus-visible), is off the closed list: unexaminable
+  for (const css of [
+    ":not(:not(:focus)) { outline: none; }\n",
+    ":focus:not(.disabled) { outline: none; }\n",
+    ".a:not(.b):focus { outline: none; }\n",
+  ]) {
+    const r = await focusAuditFor(css);
+    assert.deepEqual(r.rules, [], css);
+    assert.equal(r.unexaminable.length >= 1, true, css);
+  }
+});
+
+test("ST-07: adjacent static interpolations concatenate; one unknown makes the run unknown", async () => {
+  for (const css of [
+    ":focus { outline: #{n}#{one}; }\n",
+    ":focus { outline: #{no}#{ne}; }\n",
+    ":focus { outline: #{n}#{o}#{n}#{e}; }\n",
+    ":focus { outline: #{no}ne; }\n",
+    ":focus { outline: n#{o}#{ne}; }\n",
+  ]) {
+    const r = await focusAuditFor(css);
+    assert.deepEqual(r.rules, [FOCUS_RULE], css);
+    assert.equal(r.examined, true, css);
+    assert.deepEqual(r.unexaminable, [], css);
+  }
+  for (const css of [":focus { outline: #{n}#{$one}; }\n", ":focus { outline: #{$n}#{one}; }\n"]) {
+    const r = await focusAuditFor(css);
+    assert.equal(r.examined, false, css);
+    assert.equal(r.unexaminable.length, 1, css);
+  }
+});
+
+test("ST-07: a focus pseudo inside :has(...) describes a related element, not the subject", async () => {
+  for (const css of [
+    ":focus { .parent:has(&) { outline: none; } }\n",
+    ".parent:has(:focus) { outline: none; }\n",
+    ".parent:has(:focus-visible, .x) { outline: none; }\n",
+    ".parent:has(:not(:focus)) { outline: none; }\n",
+  ]) {
+    assert.deepEqual((await focusAuditFor(css)).rules.filter((x) => x === FOCUS_RULE), [], css);
+  }
+  // :is/:where/:has are functional selectors outside the closed list: unexaminable, never decided
+  for (const css of [":is(:focus) { outline: none; }\n", ".a:has(.b):focus { outline: none; }\n"]) {
+    const r = await focusAuditFor(css);
+    assert.deepEqual(r.rules, [], css);
+    assert.equal(r.unexaminable.length >= 1, true, css);
+  }
+});
+
+test("ST-07: an at-rule prelude is not a selector", async () => {
+  // A prelude naming :focus-visible must not make the rule examined: no focus rule was inspected.
+  for (const css of [
+    "@supports selector(:focus-visible) { .button { color: red; } }\n",
+    "@media (prefers-reduced-motion: reduce) { .a { color: red; } }\n",
+    "@layer base { .a { outline: none; } }\n",
+    "@container card (min-width: 1px) { .a { color: red; } }\n",
+  ]) {
+    const r = await focusAuditFor(css);
+    assert.equal(r.examined, false, css);
+    assert.deepEqual(r.rules, [], css);
+  }
+  // Children of an at-rule are examined under the ancestor selector, the at-rule excluded.
+  assert.deepEqual((await focusAuditFor("@supports selector(:focus-visible) { :focus { outline: none; } }\n")).rules.filter((x) => x === FOCUS_RULE), [FOCUS_RULE]);
+  assert.deepEqual((await focusAuditFor(":focus { @media (min-width: 1px) { outline: none; } }\n")).rules.filter((x) => x === FOCUS_RULE), [FOCUS_RULE]);
+  assert.deepEqual((await focusAuditFor(":focus { @media (min-width: 1px) { &.x { outline: none; } } }\n")).rules.filter((x) => x === FOCUS_RULE), [FOCUS_RULE]);
+  assert.deepEqual((await focusAuditFor("@media (min-width: 1px) { .a { &:focus { outline: none; } } }\n")).rules.filter((x) => x === FOCUS_RULE), [FOCUS_RULE]);
+});
+
+test("ST-07: @at-root replaces the ancestor selector, and at-rule names are case-insensitive", async () => {
+  // @at-root children are not descendants of the enclosing rule
+  assert.deepEqual((await focusAuditFor(":focus { @at-root { .not-focus { outline: none; } } }\n")).rules, []);
+  assert.deepEqual((await focusAuditFor(":focus { @at-root (without: media) { .not-focus { outline: none; } } }\n")).rules.filter((x) => x === FOCUS_RULE), []); // without: media keeps the rule, but .not-focus is its descendant
+  assert.deepEqual((await focusAuditFor(":focus { @at-root .not-focus { outline: none; } }\n")).rules, []);
+  // ...but a literal & still names the enclosing rule, and @at-root .x:focus is a focus rule itself
+  assert.deepEqual((await focusAuditFor(".a { @at-root { &:focus { outline: none; } } }\n")).rules.filter((x) => x === FOCUS_RULE), [FOCUS_RULE]);
+  assert.deepEqual((await focusAuditFor(".a { @at-root .b:focus { outline: none; } }\n")).rules.filter((x) => x === FOCUS_RULE), [FOCUS_RULE]);
+  // names are lower-cased before every at-rule comparison
+  assert.deepEqual((await focusAuditFor(":focus { @MEDIA (min-width: 1px) { outline: none; } }\n")).rules.filter((x) => x === FOCUS_RULE), [FOCUS_RULE]);
+  assert.deepEqual((await focusAuditFor(":focus { @Supports (display: grid) { &.x { outline: none; } } }\n")).rules.filter((x) => x === FOCUS_RULE), [FOCUS_RULE]);
+  assert.deepEqual((await focusAuditFor(":focus { @AT-ROOT { .not-focus { outline: none; } } }\n")).rules, []);
+  assert.equal((await focusAuditFor("@SUPPORTS selector(:focus-visible) { .b { color: red; } }\n")).examined, false);
+});
+
+test("ST-07: @at-root queries x nesting depth (Sass query semantics, reset carried through group at-rules)", async () => {
+  // [query, resets] - resets iff the query excludes style rules
+  const queries = [
+    ["", true],
+    ["(without: rule)", true],
+    ["(without: all)", true],
+    ["(without: media rule)", true],
+    ["(without: media)", false],
+    ["(without: supports)", false],
+    ["(with: rule)", false],
+    ["(with: all)", false],
+    ["(with: rule media)", false],
+    ["(with: media)", true],
+    ["(with: supports layer)", true],
+    ["(WITHOUT: RULE)", true],
+  ];
+  // wrappers between the @at-root and the style rule
+  const wrappers = [
+    ["", ""],
+    ["@media (width > 1px) {", "}"],
+    ["@supports (display: grid) { @container c (min-width: 1px) {", "} }"],
+    ["@MEDIA print { @container c (min-width: 1px) {", "} }"],
+  ];
+  for (const [query, resets] of queries) {
+    for (const [open, close] of wrappers) {
+      // a rule inside: under :focus when the rule is preserved, a plain .not-focus when it is reset
+      const rule = `:focus { @at-root ${query} { ${open} .not-focus { outline: none; } ${close} } }\n`;
+      const r = await focusAuditFor(rule);
+      assert.deepEqual(r.rules, [], rule); // a descendant of :focus is not the focused element
+      assert.deepEqual(r.unexaminable, [], rule);
+      // a declaration directly inside belongs to the enclosing rule when it is preserved
+      const direct = `:focus { @at-root ${query} { ${open} outline: none; ${close} } }\n`;
+      const d = await focusAuditFor(direct);
+      assert.deepEqual(d.rules, resets ? [] : [FOCUS_RULE], direct);
+      // a literal & always names the enclosing rule
+      const amp = `.a { @at-root ${query} { ${open} &:focus { outline: none; } ${close} } }\n`;
+      assert.deepEqual((await focusAuditFor(amp)).rules, [FOCUS_RULE], amp);
+    }
+  }
+  // a reset is not undone by a nested preserving query
+  assert.deepEqual((await focusAuditFor(":focus { @at-root { @at-root (without: media) { .a { outline: none; } } } }\n")).rules, []);
+  assert.deepEqual((await focusAuditFor(":focus { @at-root { @media print { @at-root (with: all) { .a { outline: none; } } } } }\n")).rules, []);
+  // an unreadable query is not guessed at
+  for (const q of ["(without: #{$x})", "(foo: rule)", "(without:)"]) {
+    const r = await focusAuditFor(`:focus { @at-root ${q} { .a { outline: none; } } }\n`);
+    assert.equal(r.examined, false, q);
+    assert.equal(r.unexaminable.length >= 1, true, q);
+  }
+});
+
+test("ST-07: an established violation is not suppressed by an unreadable sibling", async () => {
+  const r = await focusAuditFor(":focus { outline: none; }\n:focus { outline: #{$value}; }\n");
+  assert.deepEqual(r.rules, [FOCUS_RULE]);
+  assert.equal(r.examined, true);
+  assert.equal(r.unexaminable.length, 1);
+  // and at validate level the observed violation is a failure, not not-evaluated
+  const dir = await mkdtemp(path.join(tmpdir(), "uiux-st07v-"));
+  try {
+    await cp(path.join(path.dirname(fileURLToPath(import.meta.url)), "fixtures", "compliant"), dir, { recursive: true });
+    await writeFile(path.join(dir, "focus-st07.scss"), ":focus { outline: none; }\n:focus { outline: #{$value}; }\n");
+    const result = await runValidate(dir, { allowUnreleasedFramework: true });
+    const rule = result.envelope.uiCompliance.results.find((x) => x.ruleId === FOCUS_RULE);
+    assert.equal(rule.status, "failed");
+    // the same file with only the unreadable block is not a pass
+    await writeFile(path.join(dir, "focus-st07.scss"), ":focus { outline: #{$value}; }\n");
+    const unreadable = (await runValidate(dir, { allowUnreleasedFramework: true })).envelope.uiCompliance.results.find((x) => x.ruleId === FOCUS_RULE);
+    assert.notEqual(unreadable.status, "passed");
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test("ST-07: at-rules emitted at the stylesheet root do not inherit the enclosing selector", async () => {
+  for (const css of [
+    ":focus { @keyframes pulse { from { outline: none; } to { outline: none; } } }\n",
+    ":focus { @-webkit-keyframes pulse { 50% { outline: none; } } }\n",
+    ":focus { @font-face { outline: none; } }\n",
+    ":focus { @KEYFRAMES pulse { from { outline: none; } } }\n",
+    ":focus { @media print { @keyframes k { from { outline: none; } } } }\n",
+  ]) {
+    const r = await focusAuditFor(css);
+    assert.deepEqual(r.rules.filter((x) => x === FOCUS_RULE), [], css);
+  }
+  // inside the root-emitted at-rule a focus rule of its own is still examined
+  assert.deepEqual((await focusAuditFor("@keyframes k { from { outline: none; } }\n:focus { outline: none; }\n")).rules.filter((x) => x === FOCUS_RULE), [FOCUS_RULE]);
+  // an interpolated at-rule name cannot be classified
+  const r = await focusAuditFor(":focus { @#{$name} { .a { outline: none; } } }\n");
+  assert.equal(r.examined, false);
+  assert.equal(r.unexaminable.length >= 1, true);
+});
+
+test("ST-07: only conditional group at-rules keep the enclosing rule; any other at-rule is not decided", async () => {
+  for (const css of [
+    ":focus { @media (min-width: 1px) { outline: none; } }\n",
+    ":focus { @supports (display: grid) { &.x { outline: none; } } }\n",
+    ":focus { @media print { @supports (a: b) { outline: none; } } }\n",
+    ":focus { @-moz-document url-prefix() { outline: none; } }\n",
+  ]) {
+    const r = await focusAuditFor(css);
+    assert.deepEqual(r.rules.filter((x) => x === FOCUS_RULE), [FOCUS_RULE], css);
+  }
+  for (const css of [
+    ":focus { @custom state { outline: none; } }\n",
+    ":focus { @page { outline: none; } }\n",
+    ":focus { @property --x { outline: none; } }\n",
+    ":focus { @CUSTOM state { outline: none; } }\n",
+    "@page { :focus { outline: none; } }\n",
+    "@counter-style x { :focus { outline: none; } }\n",
+  ]) {
+    const r = await focusAuditFor(css);
+    assert.deepEqual(r.rules.filter((x) => x === FOCUS_RULE), [], css);
+    assert.equal(r.unexaminable.length >= 1, true, css);
+  }
+  // not under a focus rule: nothing to report
+  assert.deepEqual((await focusAuditFor(".a { @custom state { outline: none; } }\n")).rules.filter((x) => x === FOCUS_RULE), []);
+  // a keyframes/font-face between the rule and the generic at-rule still breaks the context
+  assert.deepEqual((await focusAuditFor(":focus { @keyframes k { @custom s { from { outline: none; } } } }\n")).rules.filter((x) => x === FOCUS_RULE), []);
+});
+
+test("ST-07: Sass null in a value interpolates to nothing; the string \"null\" does not", async () => {
+  assert.deepEqual((await focusAuditFor(":focus { outline: none#{null}; }\n")).rules.filter((x) => x === FOCUS_RULE), [FOCUS_RULE]);
+  assert.deepEqual((await focusAuditFor(":focus { outline: none#{ null }#{null}; }\n")).rules.filter((x) => x === FOCUS_RULE), [FOCUS_RULE]);
+  // the quoted string "null" is the text null: outline: nonenull is not the removal
+  assert.deepEqual((await focusAuditFor(':focus { outline: none#{"null"}; }\n')).rules.filter((x) => x === FOCUS_RULE), []);
+});
+
+test("ST-07: pseudo-class names are ASCII case-insensitive", async () => {
+  for (const css of [
+    ":focus { :NOT(&) { outline: none; } }\n",
+    ":focus { .parent:HAS(&) { outline: none; } }\n",
+    ":focus { .parent:Has(&) { outline: none; } }\n",
+    ":NOT(:FOCUS) { outline: none; }\n",
+    ":FOCUS:NOT(:FOCUS-VISIBLE) { outline: none; }\n",
+    ":Focus:Not(:Focus-Visible) { outline: none; }\n",
+  ]) {
+    assert.deepEqual((await focusAuditFor(css)).rules.filter((x) => x === FOCUS_RULE), [], css);
+  }
+  for (const css of [":FOCUS { outline: none; }\n", ":Focus-Visible { outline: none; }\n"]) {
+    assert.deepEqual((await focusAuditFor(css)).rules.filter((x) => x === FOCUS_RULE), [FOCUS_RULE], css);
+  }
+});
+
+test("ST-07: a block that belongs to a declaration is not a rule", async () => {
+  // a custom property's value is data, however much it looks like a rule
+  for (const css of [
+    ":focus { --theme: { outline: none; }; }\n",
+    ":focus { --theme: { .a { outline: none; } }; }\n",
+    ":focus { --a: x { outline: none; }; }\n",
+    ".a { --theme: { :focus { outline: none; } }; }\n",
+  ]) {
+    const r = await focusAuditFor(css);
+    assert.deepEqual(r.rules.filter((x) => x === FOCUS_RULE), [], css);
+    assert.deepEqual(r.unexaminable, [], css);
+  }
+  // the data block does not hide the enclosing rule's own declarations
+  assert.deepEqual((await focusAuditFor(":focus { outline: none; --theme: { color: red; }; }\n")).rules, [FOCUS_RULE]);
+  // Sass property nesting: outline: { style: none } is outline-style: none - not read, not passed
+  for (const css of [
+    ":focus { outline: { style: none; } }\n",
+    ":focus { outline: none { width: 0; } }\n",
+    ":focus { #{$prop}: { style: none; } }\n",
+    ":focus { box-shadow: { x: 0; } }\n",
+  ]) {
+    const r = await focusAuditFor(css);
+    assert.equal(r.unexaminable.length >= 1, true, css);
+    assert.deepEqual(r.rules.filter((x) => x === FOCUS_RULE), [], css);
+  }
+  // an unrelated nested property is harmless, and a selector with a pseudo is still a rule
+  const margin = await focusAuditFor(":focus { margin: { top: 1px; } outline: none; }\n");
+  assert.deepEqual(margin.rules, [FOCUS_RULE]);
+  assert.deepEqual(margin.unexaminable, []);
+  assert.deepEqual((await focusAuditFor(".a { &:hover { outline: none; } :focus { outline: none; } }\n")).rules, [FOCUS_RULE]);
+});
+
+test("ST-07: a directive whose selector semantics are not modelled makes its contents unexaminable", async () => {
+  const cases = [
+    "@include breakpoint(md) { :focus { outline: none; } }\n",
+    ".a { @include on-focus { outline: none; } }\n",
+    ".a { @each $c in red, blue { &:focus { outline: none; } } }\n",
+    ".a:focus { @if $x { outline: none; } }\n",
+    ".a:focus { @if $x { outline: 1px solid; } @else { outline: none; } }\n",
+    "@for $i from 1 through 3 { .a:focus { outline: none; } }\n",
+    "@while $i > 0 { .a:focus { outline: none; } }\n",
+    "@mixin focus-reset { &:focus { outline: none; } }\n",
+    "@function f() { @return 1; }\n.a { @include m { &:focus { outline: none; } } }\n",
+    "@INCLUDE bp { :focus { outline: none; } }\n",
+  ];
+  for (const css of cases) {
+    const r = await focusAuditFor(css);
+    assert.equal(r.examined, false, css);
+    assert.equal(r.unexaminable.length >= 1, true, css);
+    assert.deepEqual(r.rules, [], css);
+  }
+  // an opaque region with nothing focus-relevant in it is not noise
+  assert.deepEqual((await focusAuditFor(".a { @include m { color: red; } }\n")).unexaminable, []);
+});
+
+test("ST-07: an unknown span after the focus pseudo-class can supply the exemption", async () => {
+  for (const css of [
+    ":focus#{$exclusion} { outline: none; }\n",
+    ":focus.#{$c} { outline: none; }\n",
+    ".a:focus-visible#{$x}.b { outline: none; }\n",
+    ".a { &:focus#{$x} { outline: none; } }\n",
+    ":focus:not(#{$x}) { outline: none; }\n",
+    ".a:not(#{$x}):focus { outline: none; }\n",
+  ]) {
+    const r = await focusAuditFor(css);
+    assert.equal(r.examined, false, css);
+    assert.equal(r.unexaminable.length, 1, css);
+    assert.deepEqual(r.rules, [], css);
+  }
+  // an unknown BEFORE the pseudo-class in the same compound can supply it too
+  for (const css of [
+    "#{$exclusion}:focus { outline: none; }\n",
+    ".#{$p}:focus { outline: none; }\n",
+    ".#{$p}-btn:focus-visible { outline: none; }\n",
+    ".a#{$x}.b:focus { outline: none; }\n",
+  ]) {
+    const r = await focusAuditFor(css);
+    assert.equal(r.examined, false, css);
+    assert.equal(r.unexaminable.length, 1, css);
+  }
+  // in a later compound it cannot change the answer, but the closed list does not read a selector
+  // with an unknown span at all: it is unexaminable (the readable focus branch of a list still decides)
+  const later = await focusAuditFor(":focus .#{$p} { outline: none; }\n");
+  assert.deepEqual(later.rules.filter((x) => x === FOCUS_RULE), []);
+  assert.equal(later.unexaminable.length, 1);
+  assert.deepEqual(
+    (await focusAuditFor(":focus, .#{$p} { outline: none; }\n")).rules.filter((x) => x === FOCUS_RULE),
+    [FOCUS_RULE],
+  );
+});
+
+test("ST-07: an unknown span belongs to the block that owns it", async () => {
+  // The child's unknown does not make the parent unexaminable; the parent's own declarations are known.
+  const parent = await focusAuditFor(":focus { outline: none; &:hover { margin: #{$m}; } }\n");
+  assert.deepEqual(parent.rules, [FOCUS_RULE]);
+  assert.equal(parent.examined, true);
+  assert.deepEqual(parent.unexaminable, []);
+  // The child's unknown in a deciding position is the child's alone, and it still disqualifies the rule.
+  const child = await focusAuditFor(":focus { outline: none; &:hover { outline: #{$o}; } }\n");
+  assert.equal(child.examined, true); // the parent's failure is established; the child's unknown only prevents a clean pass
+  assert.equal(child.unexaminable.length, 1);
+  assert.deepEqual(child.rules, [FOCUS_RULE]);
+  // A parent's unknown is not attributed to a clean child.
+  const own = await focusAuditFor(":focus { margin: #{$m}; &:hover { color: red; } }\n");
+  assert.equal(own.examined, true);
+  assert.deepEqual(own.unexaminable, []);
+});
+
 // --- The audit command ------------------------------------------------------------------------------
+
+// --- ST-05 / #39 (owner decision, option A): the reported line is the line of the selector's first
+// non-whitespace character, the rule head. A declaration line is not required.
+
+test("ST-05 criterion 1: the reported line is the selector's first non-whitespace character", async () => {
+  const lineFor = async (css, file = "focus.css") => {
+    const dir = await mkdtemp(path.join(tmpdir(), "uiux-st05-"));
+    try {
+      await writeFile(path.join(dir, file), css);
+      return (await runAudit(dir)).findings.filter((f) => f.rule === FOCUS_RULE).map((f) => f.evidence[0]);
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  };
+  // the issue's reproduction: main reported line 3 (the closing line of the preceding rule)
+  assert.deepEqual(
+    await lineFor("/* header */\n\n.a { color: red; }\n\n/* note */\n\n:focus-visible {\n  outline: none;\n}\n"),
+    ["focus.css:7"],
+  );
+  // `{` and the declaration on a later line than the selector's own line; other declarations first
+  assert.deepEqual(
+    await lineFor("/* header */\n\n.a { color: red; }\n\n/* note */\n\n:focus-visible\n{\n  color: red;\n  outline: none;\n}\n"),
+    ["focus.css:7"],
+  );
+  // indented selector, and a multi-line selector list: the line of the first character of the rule head
+  assert.deepEqual(await lineFor("@media print {\n\n    .x,\n    .y:focus {\n      outline: 0;\n    }\n}\n"), ["focus.css:3"]);
+  // a one-line rule: both anchors coincide
+  assert.deepEqual(await lineFor(".btn:focus { outline: none; }\n"), ["focus.css:1"]);
+  // the same anchor in SCSS, with an interpolated selector, and for a nested rule
+  assert.deepEqual(await lineFor("// h\n\n.a { margin: 1px; }\n\n.a-x:focus {\n  outline: none;\n}\n", "f.scss"), ["f.scss:5"]);
+  assert.deepEqual(await lineFor(".a {\n\n  &:focus {\n    outline: none;\n  }\n}\n", "f.scss"), ["f.scss:3"]);
+});
+
+
+// --- the closed list of decided focus forms (docs/integration-contract.md) --------------------------
+// The detector DECIDES a small closed set of forms and routes everything else to detectorsUnexaminable
+// with a named reason: an unknown is never an exemption and never a pass.
+
+const REASON = {
+  selector: /functional or unlisted pseudo-class selector/,
+  placeholder: /Sass placeholder selector/,
+  interpolation: /interpolation in the selector/,
+  outline: /outline is not removed by exactly one plain/,
+  replacement: /replacement indicator is not a plain literal/,
+  nested: /nested rule inherits declarations/,
+  propertyName: /in a property name/,
+};
+
+const DECIDED_FORMS = [
+  // [css, finding?, examined?]
+  [":focus { outline: none; }\n", true],
+  [":focus { outline: 0; }\n", true],
+  ["a:focus-visible, button:focus { outline: none; }\n", true],
+  [".card:focus-within > .x:hover:focus { outline: none; }\n", true],
+  [".btn[data-x=\"a:b\"]:focus { outline: none; }\n", true],
+  [":focus { outline: none; box-shadow: 0 0 0 2px blue; }\n", false],
+  [":focus { outline: none; box-shadow: 0 0 2px red, 0 0 4px blue; }\n", false],
+  [":focus { outline: none; border: 2px solid blue; }\n", false],
+  [":focus { outline: none; background-color: yellow; }\n", false],
+  [":focus { outline: none; text-decoration: underline red; }\n", false],
+  [":focus { outline: none; box-shadow: -2px -2px 2px red; }\n", false],
+  [":focus { outline: none; outline-offset: 2px; outline-color: red; }\n", true],
+  [":focus { outline: none; @apply ring-2; }\n", false],
+  [":focus { outline: none; @apply ring-0 !important; @apply ring-2; }\n", true],
+  [":focus { outline: none; @apply ring-0; }\n", true],
+  [":focus:not(:focus-visible) { outline: none; }\n", false],
+  [":focus:hover:not(:focus-visible) { outline: none; }\n", false],
+  [".a:not(:focus-visible):focus.b { outline: none; }\n", false],
+  [":focus { outline: 2px solid var(--c); }\n", false],
+  [":focus { outline: 3px dashed red; margin: 0; }\n", false],
+  [":focus { margin: 0; }\n", false],
+  [":focus { outline: #{none}; }\n", true],
+  [".a { &:focus { outline: none; } }\n", true],
+  [".a { &:focus { outline: none; box-shadow: 0 0 0 2px blue; } }\n", false],
+  [".a { margin: 0; &:focus { outline: none; } }\n", true],
+];
+
+test("closed list: a focus pseudo-class on an ancestor compound is not a focus rule", async () => {
+  for (const css of [".a:focus::before { outline: none; }\n", ":focus { &::after { outline: none; } }\n", ":focus:before { outline: none; }\n", ".button:focus .icon { outline: none; }\n", ".button:focus { .icon { outline: none; } }\n", ":focus-within > .x { outline: none; }\n"]) {
+    const r = await focusAuditFor(css);
+    assert.deepEqual(r.rules.filter((x) => x === FOCUS_RULE), [], css);
+    assert.deepEqual(r.unexaminable, [], css);
+  }
+});
+
+test("closed list: every decided form is decided correctly", async () => {
+  for (const [css, finding] of DECIDED_FORMS) {
+    const r = await focusAuditFor(css);
+    assert.deepEqual(r.rules.filter((x) => x === FOCUS_RULE), finding ? [FOCUS_RULE] : [], css);
+    assert.deepEqual(r.unexaminable, [], css);
+    assert.equal(r.examined, true, css);
+  }
+});
+
+const OFF_LIST_FORMS = [
+  // [css, reason] - selectors
+  [":is(:focus) { outline: none; }\n", REASON.selector],
+  [":where(:focus) { outline: none; }\n", REASON.selector],
+  [":not(:focus) { outline: none; }\n", REASON.selector],
+  [":focus:not(.disabled) { outline: none; }\n", REASON.selector],
+  [":focus:not(:focus-visible, .disabled) { outline: none; }\n", REASON.selector],
+  [".p:has(:focus) { outline: none; }\n", REASON.selector],
+  [":host(:focus) { outline: none; }\n", REASON.selector],
+  [":host-context(.t):focus { outline: none; }\n", REASON.selector],
+  [":nth-child(2 of :focus) { outline: none; }\n", REASON.selector],
+  [":focus:nth-child(2) { outline: none; }\n", REASON.selector],
+  [":focus:custom-state { outline: none; }\n", REASON.selector],
+  [":focus:where(*) { outline: none; }\n", REASON.selector],
+  [":focus { :is(&, .x) { outline: none; } }\n", REASON.selector],
+  [":focus { &:not(&.x) { outline: none; } }\n", REASON.selector],
+  ["%silent:focus { outline: none; }\n", REASON.placeholder],
+  ["button%silent:focus { outline: none; }\n", REASON.placeholder],
+  [".#{$p}:focus { outline: none; }\n", REASON.interpolation],
+  [":focus#{$s} { outline: none; }\n", REASON.interpolation],
+  ["@include m { :focus { outline: none; } }\n", /@include \/ control directive/],
+  // [css, reason] - the outline form
+  [":focus { outline: none; outline: 2px solid red; }\n", REASON.outline],
+  [":focus { outline: 2px solid red; outline: none; }\n", REASON.outline],
+  [":focus { outline-style: none; }\n", REASON.outline],
+  [":focus { outline-width: 0; }\n", REASON.outline],
+  [":focus { outline: none; outline-style: solid; }\n", REASON.outline],
+  [":focus { outline: none; all: initial; }\n", REASON.outline],
+  [":focus { outline: none; all: revert; }\n", REASON.outline],
+  [":focus { all: unset; }\n", REASON.outline],
+  [":focus { outline: none !important; }\n", REASON.outline],
+  [":focus { outline: none $imp; }\n", REASON.outline],
+  [":focus { outline: var(--o); }\n", REASON.outline],
+  [":focus { outline: $o; }\n", REASON.outline],
+  [":focus { outline: #{$o}; }\n", REASON.outline],
+  [":focus { outline: calc(0px) solid red; }\n", REASON.outline],
+  [":focus { outline: medium; }\n", REASON.outline],
+  [":focus { outline: 2px solid red blue; }\n", REASON.outline],
+  [":focus { outline: solid; }\n", REASON.outline],
+  [":focus { outline: 2px red; }\n", REASON.outline],
+  [":focus { outline: initial; }\n", REASON.outline],
+  [":focus { outline: inherit; }\n", REASON.outline],
+  [":focus { outline: none; outline: var(--o); }\n", REASON.outline],
+  // [css, reason] - the replacement form
+  [":focus { outline: none; box-shadow: var(--ring); }\n", REASON.replacement],
+  [":focus { outline: none; box-shadow: $ring; }\n", REASON.replacement],
+  [":focus { outline: none; box-shadow: #{$ring}; }\n", REASON.replacement],
+  [":focus { outline: none; box-shadow: none; }\n", REASON.replacement],
+  [":focus { outline: none; background-image: none, none; }\n", REASON.replacement],
+  [":focus { outline: none; background: red, blue; }\n", REASON.replacement],
+  [":focus { outline: none; box-shadow: none, none; }\n", REASON.replacement],
+  [":focus { outline: none; box-shadow: 0 0 2px red, none; }\n", REASON.replacement],
+  [":focus { outline: none; box-shadow: 0 0 0 2px blue !important; }\n", REASON.replacement],
+  [":focus { outline: none; box-shadow: 0 0 0 2px blue; box-shadow: none; }\n", REASON.replacement],
+  [":focus { outline: none; border: 0; }\n", REASON.replacement],
+  [":focus { outline: none; border: calc(1px + 1px) solid red; }\n", REASON.replacement],
+  [":focus { outline: none; border: 0 solid red; }\n", REASON.replacement],
+  [":focus { outline: none; border-style: solid; border-width: 2px; border-color: red; }\n", REASON.replacement],
+  [":focus { outline: none; border-top-style: solid; border-top-width: 2px; }\n", REASON.replacement],
+  [":focus { outline: none; border: 2px solid red; border-image: linear-gradient(transparent, transparent) 1; }\n", REASON.replacement],
+  [":focus { outline: none; box-shadow: 0 0 2px red; box-shadow: 0 0 3px blue; }\n", REASON.replacement],
+  [":focus { outline: none; border: 2px solid red; border: 2px solid blue; }\n", REASON.replacement],
+  [":focus { outline: none; box-shadow: 0 0 2px red; opacity: 0; }\n", REASON.replacement],
+  [":focus { outline: none; box-shadow: 0 0 2px red; clip-path: inset(100%); }\n", REASON.replacement],
+  [":focus { outline: none; box-shadow: 0 0 2px red; visibility: hidden; }\n", REASON.replacement],
+  [":focus { outline: none; box-shadow: 0 0 2px red; filter: opacity(0); }\n", REASON.replacement],
+  [":focus { outline: none; box-shadow: 0 0 2px red; mask: none; }\n", REASON.replacement],
+  [":focus { outline: none; border: 2px solid red; border-style: n\\6f ne; }\n", REASON.replacement],
+  [":focus { outline: none; box-shadow: 0 0 2px r\\65d; }\n", REASON.replacement],
+  [":focus { outline: none; border: 2px solid red; border-color: rgba(0,0,0,0); }\n", REASON.replacement],
+  [":focus { outline: none; border: 2px solid red; border-top-color: transparent; }\n", REASON.replacement],
+  [":focus { outline: none; border: 2px solid red; border-color: red blue green yellow orange; }\n", REASON.replacement],
+  [":focus { outline: none; box-shadow: 1px 0 0 -9999px red; }\n", REASON.replacement],
+  [":focus { outline: none; box-shadow: 0 0 2px -1px red; }\n", REASON.replacement],
+  [":focus { outline: none; text-decoration: underline +0px red; }\n", REASON.replacement],
+  [":focus { outline: none; text-decoration: underline 0px red; }\n", REASON.replacement],
+  [":focus { outline: none; box-shadow: 0 0 0 red; }\n", REASON.replacement],
+  [":focus { outline: none; box-shadow: 0 0 0 0 red; }\n", REASON.replacement],
+  [":focus { outline: none; box-shadow: 0 0 0 -2px red; }\n", REASON.replacement],
+  [":focus { outline: none; box-shadow: inset 0 0 0 red; }\n", REASON.replacement],
+  [":focus { outline: none; box-shadow: 0 0 -2px red; }\n", REASON.replacement],
+  [":focus { outline: none; box-shadow: 0 0 -0.1em 2px red; }\n", REASON.replacement],
+  [":focus { outline: none; text-decoration-line: underline; }\n", REASON.replacement],
+  [":focus { outline: none; text-decoration: underline; }\n", REASON.replacement],
+  [":focus { outline: none; text-decoration: underline wavy; }\n", REASON.replacement],
+  [":focus { outline: none; box-shadow: 2 2 red; }\n", REASON.replacement],
+  [":focus { outline: none; box-shadow: 10% 10% red; }\n", REASON.replacement],
+  [":focus { outline: none; box-shadow: 0 0 2px; }\n", REASON.replacement],
+  [":focus { outline: none; box-shadow: 2px 2px 2px 2px 2px red; }\n", REASON.replacement],
+  [":focus { outline: none; border-top: 2px solid rgb(1, 2 3); }\n", REASON.replacement],
+  [":focus { outline: none; border-top: 2px solid rgb(1 2, 3); }\n", REASON.replacement],
+  [":focus { outline: none; border-top: 2px solid rgb(1, 2%, 3); }\n", REASON.replacement],
+  [":focus { outline: none; border-top: 2px solid hsl(1, 2, 3); }\n", REASON.replacement],
+  [":focus { outline: none; box-shadow: red; }\n", REASON.replacement],
+  [":focus { outline: none; box-shadow: 2px; }\n", REASON.replacement],
+  [":focus { outline: none; box-shadow: 0 0 0 0 0 red; }\n", REASON.replacement],
+  [":focus { outline: none; box-shadow: 0 red 0 2px; }\n", REASON.replacement],
+  [":focus { outline: none; box-shadow: inset inset 0 0 red; }\n", REASON.replacement],
+  [":focus { outline: none; box-shadow: 0 0 red blue; }\n", REASON.replacement],
+  [":focus { outline: none; text-decoration-line: underline underline; }\n", REASON.replacement],
+  [":focus { outline: none; text-decoration: underline underline; }\n", REASON.replacement],
+  [":focus { outline: none; text-decoration: underline solid dotted; }\n", REASON.replacement],
+  [":focus { outline: none; text-decoration: underline red blue; }\n", REASON.replacement],
+  [":focus { outline: none; text-decoration-line: solid; }\n", REASON.replacement],
+  [":focus { outline: none; text-decoration: solid; }\n", REASON.replacement],
+  [":focus { outline: none; text-decoration-line: underline solid; }\n", REASON.replacement],
+  [":focus { outline: none; border-top: 2px solid definitelynotacolor; }\n", REASON.replacement],
+  [":focus { outline: none; background-color: notacolor; }\n", REASON.replacement],
+  [":focus { outline: none; background: red no-repeat; }\n", REASON.replacement],
+  [":focus { outline: none; box-shadow: 0 0 0 2px notacolor; }\n", REASON.replacement],
+  [":focus { outline: none; box-shadow: solid; }\n", REASON.replacement],
+  [":focus { outline: none; border-top: 2px solid #0000; }\n", REASON.replacement],
+  [":focus { outline: none; border-top: 2px solid #00000000; }\n", REASON.replacement],
+  [":focus { outline: none; border: 2px solid rgba(0, 0, 0, 0); }\n", REASON.replacement],
+  [":focus { outline: none; border: 2px solid rgb(0 0 0 / 0); }\n", REASON.replacement],
+  [":focus { outline: none; border: 2px solid transparent; }\n", REASON.replacement],
+  [":focus { outline: none; border: 2px solid currentcolor; }\n", REASON.replacement],
+  [":focus { outline: none; background-image: linear-gradient(transparent, transparent); }\n", REASON.replacement],
+  [":focus { outline: none; background-image: url(x.png); }\n", REASON.replacement],
+  [":focus { outline: none; background: url(x.png); }\n", REASON.replacement],
+  [":focus { outline: none; background-color: #0000; }\n", REASON.replacement],
+  [":focus { outline: none; background-color: rgba(0, 0, 0, 0); }\n", REASON.replacement],
+  [":focus { outline: none; box-shadow: 0 0 0 2px #0000; }\n", REASON.replacement],
+  [":focus { outline: none; box-shadow: 0 0 0 2px color-mix(in srgb, red, blue); }\n", REASON.replacement],
+  [":focus { outline: none; text-decoration: underline transparent; }\n", REASON.replacement],
+  [":focus { outline: none; border-top: 2px red; }\n", REASON.replacement],
+  [":focus { outline: none; border: 2px; }\n", REASON.replacement],
+  [":focus { outline: none; border-block-end: solid; }\n", REASON.replacement],
+  [":focus { outline: none; border: 2px solid auto; }\n", REASON.replacement],
+  [":focus { outline: none; border: 2px solid transparent; }\n", REASON.replacement],
+  [":focus { outline: none; text-decoration: none; }\n", REASON.replacement],
+  [":focus { outline: none; border: 2px solid red; border-style: none; }\n", REASON.replacement],
+  [":focus { outline: none; background: red var(--missing); }\n", REASON.replacement],
+  [":focus { outline: none; background: inherit; }\n", REASON.replacement],
+  [":focus { outline: none; text-decoration: var(--td); }\n", REASON.replacement],
+  [":focus { outline: none; @apply #{$ring}; }\n", REASON.replacement],
+  [":focus { outline: none; @apply $ring; }\n", REASON.replacement],
+  [":focus { outline: none; border-bottom: 2px solid env(x); }\n", REASON.replacement],
+  // [css, reason] - nesting and layers
+  [":focus { box-shadow: 0 0 0 2px blue; &.x { outline: none; } }\n", REASON.nested],
+  [".a { outline: none; &:focus { outline: none; } }\n", REASON.nested],
+  [":focus { @media (min-width: 1px) { box-shadow: 0 0 0 2px blue; &.x { outline: none; } } }\n", REASON.nested],
+  ["@layer base { :focus { outline: none; } }\n", REASON.nested],
+  [":focus { @layer base { outline: none; } }\n", REASON.nested],
+  // [css, reason] - property names
+  [":focus { #{$p}: none; }\n", REASON.propertyName],
+];
+
+test("closed list: every off-list form is unexaminable with its named reason, never a pass or a finding", async () => {
+  for (const [css, reason] of OFF_LIST_FORMS) {
+    const r = await focusAuditFor(css);
+    assert.deepEqual(r.rules.filter((x) => x === FOCUS_RULE), [], css);
+    assert.equal(r.examined, false, css);
+    assert.equal(r.unexaminable.length >= 1, true, css);
+    assert.match(r.unexaminable[0].reason, reason, css);
+  }
+});
+
+test("closed list: deny by default - a generated off-list selector or body is never decided", async () => {
+  const selectors = [];
+  for (const wrap of [":is(", ":where(", ":not(", ":has(", ":host(", ":nth-child(2 of ", ":matches("]) {
+    for (const inner of [":focus", ":focus-visible", ".a:focus", ":focus, .b"]) {
+      if (wrap === ":not(" && inner === ":focus-visible") continue; // the decided exemption form
+      selectors.push(wrap + inner + ")");
+    }
+  }
+  for (const pseudo of [":custom", ":-webkit-any-link", ":local(.a)", ":focus-ring", ":user-invalid-x", "(.a)", ":hover(.a)"]) selectors.push(":focus" + pseudo);
+  for (const dyn of ["%x:focus", ".#{$a}:focus", ":focus.#{$a}", "#{$a}"]) selectors.push(dyn);
+  for (const selector of selectors) {
+    const css = selector + " { outline: none; }" + "\n";
+    const r = await focusAuditFor(css);
+    assert.deepEqual(r.rules.filter((x) => x === FOCUS_RULE), [], css);
+    assert.equal(r.examined, false, css);
+    assert.equal(r.unexaminable.length >= 1, true, css);
+  }
+  const bodies = [];
+  for (const prop of ["box-shadow", "border", "border-color", "background", "background-color", "text-decoration"]) {
+    for (const value of ["var(--x)", "env(x)", "$x", "#{$x}", "calc(1px + 1px)", "min(1px, 2px)", "max(1px, 2px)", "clamp(1px, 2px, 3px)", "none", "0", "initial", "unset", "revert", "inherit", "red !important", "none, none"]) {
+      bodies.push("outline: none; " + prop + ": " + value + ";");
+    }
+  }
+  for (const extra of ["all: initial;", "all: revert;", "all: unset;", "all: inherit;", "outline-style: none;", "outline-width: 0;", "outline: none;"]) {
+    bodies.push("outline: none; " + extra);
+  }
+  for (const body of bodies) {
+    const css = ":focus { " + body + " }" + "\n";
+    const r = await focusAuditFor(css);
+    assert.deepEqual(r.rules.filter((x) => x === FOCUS_RULE), [], css);
+    assert.equal(r.examined, false, css);
+    assert.equal(r.unexaminable.length >= 1, true, css);
+  }
+});
+
+test("closed list: the repo's fixtures decide as before; only the anchor line moved", async () => {
+  // differential against main: the compliant fixture's focus rules are examined and clean, and the
+  // never-violations focus finding differs from main only in the line (3 -> 5, the rule head)
+  const compliant = await runAudit(fixture("compliant"));
+  assert.equal(compliant.detectorsExamined.includes(FOCUS_RULE), true);
+  assert.deepEqual(compliant.detectorsUnexaminable.filter((u) => u.rule === FOCUS_RULE), []);
+  assert.deepEqual(compliant.findings.filter((f) => f.rule === FOCUS_RULE), []);
+  const violations = await runAudit(fixture("never-violations"));
+  assert.deepEqual(violations.findings.filter((f) => f.rule === FOCUS_RULE).map((f) => f.evidence[0]), ["styles.css:5"]);
+});
+
+test("closed list: properties that cannot be an indicator do not matter", async () => {
+  for (const css of [":focus { outline: none; border-radius: var(--r); }\n", ":focus { outline: none; background-position: calc(1px + 1px) 0; }\n", ":focus { outline: none; filter: var(--f); }\n", ":focus { outline: none; --tw-ring-width: $w; }\n", ":focus { outline: none; border-collapse: collapse; border-spacing: 0; }\n"]) {
+    const r = await focusAuditFor(css);
+    assert.deepEqual(r.rules.filter((x) => x === FOCUS_RULE), [FOCUS_RULE], css);
+    assert.deepEqual(r.unexaminable, [], css);
+  }
+});
+
+test("closed list: every accepted indicator property compensates; a resetting @at-root inherits nothing; escapes are off the list", async () => {
+  for (const css of [
+    ":focus { outline: none; border-top: 2px solid red; }\n",
+    ":focus { outline: none; border-block-end: 2px solid red; }\n",
+  ]) {
+    const r = await focusAuditFor(css);
+    assert.deepEqual(r.rules.filter((x) => x === FOCUS_RULE), [], css);
+    assert.deepEqual(r.unexaminable, [], css);
+    assert.equal(r.examined, true, css);
+  }
+  // a bare @at-root emits the rule at the root: the enclosing rule's shadow is not inherited
+  const root = await focusAuditFor(".a { box-shadow: 0 0 2px red; @at-root { :focus { outline: none; } } }\n");
+  assert.deepEqual(root.rules.filter((x) => x === FOCUS_RULE), [FOCUS_RULE]);
+  assert.deepEqual(root.unexaminable, []);
+  const kept = await focusAuditFor(".a:focus { box-shadow: 0 0 2px red; @at-root (without: media) { &.b { outline: none; } } }\n");
+  assert.deepEqual(kept.rules.filter((x) => x === FOCUS_RULE), []);
+  assert.equal(kept.unexaminable.length >= 1, true);
+  // a CSS escape can spell the pseudo-class
+  for (const css of [":foc\\75 s { outline: none; }\n", ".a:\\66ocus { outline: none; }\n"]) {
+    const r = await focusAuditFor(css);
+    assert.deepEqual(r.rules.filter((x) => x === FOCUS_RULE), [], css);
+    assert.equal(r.unexaminable.length >= 1, true, css);
+    assert.match(r.unexaminable[0].reason, /CSS escape in the selector/, css);
+  }
+});
+
+test("closed list: a selector-form @at-root is an inheritance boundary", async () => {
+  const r = await focusAuditFor(".a { box-shadow: 0 0 2px red; @at-root :focus { outline: none; } }\n");
+  assert.deepEqual(r.rules.filter((x) => x === FOCUS_RULE), [FOCUS_RULE]);
+  assert.deepEqual(r.unexaminable, []);
+  const q = await focusAuditFor(".a:focus { box-shadow: 0 0 2px red; @at-root (with: rule) { outline: none; } }\n");
+  assert.equal(q.unexaminable.length >= 1, true);
+});
+
+test("closed list: a rule that encloses a directive is not decided; a non-focus subject is not noise", async () => {
+  for (const css of [
+    ":focus { outline: none; box-shadow: 0 0 0 2px blue; @if true { box-shadow: none; } }\n",
+    ":focus { outline: none; box-shadow: 0 0 0 2px blue; @include reset; }\n",
+    ".a { :focus { outline: none; @each $c in x { box-shadow: none; } } }\n",
+  ]) {
+    const r = await focusAuditFor(css);
+    assert.deepEqual(r.rules.filter((x) => x === FOCUS_RULE), [], css);
+    assert.equal(r.examined, false, css);
+    assert.equal(r.unexaminable.length >= 1, true, css);
+    assert.match(r.unexaminable[0].reason, /control directive, @include, @extend or mixin call in the rule/, css);
+  }
+  // a rule whose subject is not focused leaves no record, however its declarations look
+  for (const css of [
+    ".button:focus .icon { outline: var(--o); }\n",
+    ".button:focus .icon { outline: none; outline: 2px solid red; }\n",
+    ".button:focus .icon { all: initial; outline-style: none; }\n",
+  ]) {
+    const r = await focusAuditFor(css);
+    assert.deepEqual(r.rules.filter((x) => x === FOCUS_RULE), [], css);
+    assert.deepEqual(r.unexaminable, [], css);
+  }
+  // so another, clean focus rule in the same file is still examined
+  const mixed = await focusAuditFor(".button:focus .icon { outline: var(--o); }\na:focus { outline: none; box-shadow: 0 0 0 2px blue; }\n");
+  assert.equal(mixed.examined, true);
+  assert.deepEqual(mixed.unexaminable, []);
+});
+
+test("closed list: an outline shorthand is a finding or unexaminable unless it positively restores one", async () => {
+  // every ordered combination of one to three tokens from a pool that includes the zero/none/auto traps
+  const pool = ["0", "0px", "0.0em", ".0rem", "calc(0px)", "thin", "medium", "2px", "none", "auto", "solid", "hidden", "red", "#fff", "var(--c)"];
+  const forms = [];
+  const walk = (prefix) => {
+    if (prefix.length > 0) forms.push(prefix);
+    if (prefix.length === 3) return;
+    for (const token of pool) if (!prefix.includes(token)) walk([...prefix, token]);
+  };
+  walk([]);
+  // an independent oracle: only a non-zero literal width, a drawn style and at most one colour restore it
+  const restores = (tokens) => {
+    const width = tokens.filter((x) => /^(\d+\.?\d*|\.\d+)(px|em|rem)$/.test(x) && parseFloat(x) > 0);
+    const style = tokens.filter((x) => ["solid", "auto"].includes(x));
+    const colour = tokens.filter((x) => ["red", "#fff", "var(--c)"].includes(x));
+    return width.length === 1 && style.length === 1 && colour.length === 1 && width.length + style.length + colour.length === tokens.length;
+  };
+  const dir = await mkdtemp(path.join(tmpdir(), "uiux-outline-"));
+  try {
+    await writeFile(path.join(dir, "f.css"), forms.map((tokens) => "a:focus { outline: " + tokens.join(" ") + "; }").join("\n") + "\n");
+    const result = await runAudit(dir);
+    const lineOf = (evidence) => Number(evidence[0].split(":").pop());
+    const found = new Set(result.findings.filter((f) => f.rule === FOCUS_RULE).map((f) => lineOf(f.evidence)));
+    const unknown = new Set(result.detectorsUnexaminable.filter((u) => u.rule === FOCUS_RULE).map((u) => lineOf(u.evidence)));
+    let restoring = 0;
+    forms.forEach((tokens, index) => {
+      const line = index + 1;
+      const spelled = tokens.join(" ");
+      if (restores(tokens)) {
+        restoring++;
+        assert.equal(found.has(line) || unknown.has(line), false, "restoring form must be silent: " + spelled);
+      } else {
+        assert.equal(found.has(line) || unknown.has(line), true, "must be a finding or unexaminable, never a pass: " + spelled);
+      }
+    });
+    assert.equal(restoring > 0, true);
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test("closed list: a generated box-shadow or text-decoration is a finding unless it positively paints", async () => {
+  const dir = await mkdtemp(path.join(tmpdir(), "uiux-shadow-"));
+  try {
+    const rules = [];
+    const walk = (pool, prefix, depth, out) => {
+      if (prefix.length > 0) out.push(prefix);
+      if (prefix.length === depth) return;
+      for (const token of pool) walk(pool, [...prefix, token], depth, out);
+    };
+    const shadows = [];
+    walk(["0", "2px", "inset", "red", "#fff", "transparent", "foo"], [], 4, shadows);
+    const decorations = [];
+    walk(["underline", "overline", "solid", "wavy", "2px", "red", "none", "foo"], [], 3, decorations);
+    const isLength = (x) => x === "0" || x === "2px";
+    const isColour = (x) => ["red", "#fff"].includes(x);
+    const shadowPaints = (tokens) => {
+      const at = tokens.map((x, i) => (isLength(x) ? i : -1)).filter((i) => i >= 0);
+      const inset = tokens.filter((x) => x === "inset").length;
+      const colour = tokens.filter(isColour).length;
+      const n = at.map((i) => parseFloat(tokens[i]));
+      const area = n[0] !== 0 || n[1] !== 0 || (n[2] ?? 0) > 0 || (n[3] ?? 0) > 0;
+      return at.length >= 2 && at.length <= 4 && at[at.length - 1] - at[0] === at.length - 1 && inset <= 1 && colour === 1 && area &&
+        at.length + inset + colour === tokens.length;
+    };
+    const decorationPaints = (tokens) => {
+      const lines = tokens.filter((x) => ["underline", "overline"].includes(x));
+      const styles = tokens.filter((x) => ["solid", "wavy"].includes(x)).length;
+      const lengths = tokens.filter((x) => x === "2px").length;
+      const colours = tokens.filter(isColour).length;
+      return lines.length > 0 && new Set(lines).size === lines.length && styles <= 1 && lengths <= 1 && colours === 1 &&
+        lines.length + styles + lengths + colours === tokens.length;
+    };
+    const forms = [];
+    for (const tokens of shadows) forms.push([tokens, "box-shadow", shadowPaints(tokens)]);
+    for (const tokens of decorations) forms.push([tokens, "text-decoration", decorationPaints(tokens)]);
+    await writeFile(path.join(dir, "f.css"), forms.map(([tokens, property]) => "a:focus { outline: none; " + property + ": " + tokens.join(" ") + "; }").join("\n") + "\n");
+    const result = await runAudit(dir);
+    const lineOf = (evidence) => Number(evidence[0].split(":").pop());
+    const loud = new Set([
+      ...result.findings.filter((f) => f.rule === FOCUS_RULE).map((f) => lineOf(f.evidence)),
+      ...result.detectorsUnexaminable.filter((u) => u.rule === FOCUS_RULE).map((u) => lineOf(u.evidence)),
+    ]);
+    let painting = 0;
+    forms.forEach(([tokens, property, paints], index) => {
+      const spelled = property + ": " + tokens.join(" ");
+      if (paints) painting++;
+      assert.equal(loud.has(index + 1), !paints, spelled);
+    });
+    assert.equal(painting > 0, true);
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test("closed list: perf guards - work is bounded on small hostile inputs (selector cross product, unclosed blocks, deep nesting)", async () => {
+  const cases = [
+    // 8 nested rules of 8-selector lists: the full cross product is 16M selectors
+    ["cross product", Array.from({ length: 8 }, () => ".a1,.a2,.a3,.a4,.a5,.a6,.a7,.a8 {").join("") + ":focus{outline:none;}" + "}".repeat(8), /decided bound/],
+    // 60,000 unclosed blocks (120 KB, under the read cap), and 20,000 closed ones
+    ["unclosed blocks", "a{".repeat(60000), null],
+    ["deep closed nesting", "a{".repeat(20000) + "}".repeat(20000), null],
+    // nesting past the bound is not composed
+    ["deep nesting", "a{".repeat(40) + ":focus{outline:none;}" + "}".repeat(40), /decided bound/],
+  ];
+  for (const [name, css, reason] of cases) {
+    const dir = await mkdtemp(path.join(tmpdir(), "uiux-perf-"));
+    try {
+      await writeFile(path.join(dir, "f.scss"), css);
+      const started = Date.now();
+      // a small heap: an unbounded implementation aborts out of memory instead of finishing
+      const run = spawnSync(process.execPath, ["--max-old-space-size=256", path.join(ROOT, "scripts/uiux.mjs"), "audit", dir, "--json"], {
+        encoding: "utf8",
+        maxBuffer: 1 << 28,
+      });
+      const elapsed = Date.now() - started;
+      assert.equal(run.status, 0, name + " exit " + run.status + " " + String(run.stderr).slice(0, 120));
+      assert.equal(elapsed < 8000, true, name + " took " + elapsed + " ms");
+      const result = JSON.parse(run.stdout);
+      assert.deepEqual(result.findings.filter((f) => f.rule === FOCUS_RULE), [], name);
+      if (reason !== null) {
+        const u = result.detectorsUnexaminable.filter((x) => x.rule === FOCUS_RULE);
+        assert.equal(u.length >= 1, true, name);
+        assert.match(u[0].reason, reason, name);
+      }
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  }
+});
+
+test("closed list: a comment inside a selector head is off the list; one before it is not", async () => {
+  for (const css of [
+    ":focus/**/.danger { outline: none; }\n",
+    ".a:focus /* c */ .b { outline: none; }\n",
+    ".x { &:focus/**/.danger { outline: none; } }\n",
+  ]) {
+    const r = await focusAuditFor(css);
+    assert.deepEqual(r.rules.filter((x) => x === FOCUS_RULE), [], css);
+    assert.equal(r.unexaminable.length >= 1, true, css);
+    assert.match(r.unexaminable[0].reason, /comment inside the selector/, css);
+  }
+  // the comment belongs to ONE branch: a decided focus branch beside it still decides
+  for (const css of [":focus, .x/**/.y { outline: none; }\n", ":focus,/* c */.a { outline: none; }\n", ".a, .b { :focus, .x#{$s} { outline: none; } }\n", ".a, .b { :focus, .x/**/.y { outline: none; } }\n"]) {
+    const r = await focusAuditFor(css);
+    assert.equal(r.rules.filter((x) => x === FOCUS_RULE).length >= 1, true, css);
+  }
+  // a marker inside a quoted attribute value is data, not a comment
+  for (const css of [':focus[href="//example"] { outline: none; }\n', ":focus[data-x='/*'] { outline: none; }\n"]) {
+    const r = await focusAuditFor(css);
+    assert.deepEqual(r.rules.filter((x) => x === FOCUS_RULE), [FOCUS_RULE], css);
+    assert.deepEqual(r.unexaminable, [], css);
+  }
+  // a comment before the head, or after the block, is not inside it
+  for (const css of ["/* header */\n:focus { outline: none; }\n", "// note\n:focus { outline: none; } /* tail */\n"]) {
+    const r = await focusAuditFor(css, "f.scss");
+    assert.deepEqual(r.rules.filter((x) => x === FOCUS_RULE), [FOCUS_RULE], css);
+    assert.deepEqual(r.unexaminable, [], css);
+  }
+});
+
+test("closed list: rgb() and hsl() are decided only in their real grammars", async () => {
+  for (const value of ["rgb(1, 2, 3)", "rgb(1 2 3)", "rgb(10% 20% 30%)", "rgb(1 20% 3)", "hsl(120, 50%, 50%)", "hsl(120deg 50% 50%)", "rgb(1,2,3)"]) {
+    const r = await focusAuditFor(":focus { outline: none; border-top: 2px solid " + value + "; }\n");
+    assert.deepEqual(r.rules.filter((x) => x === FOCUS_RULE), [], value);
+    assert.deepEqual(r.unexaminable, [], value);
+  }
+});
+
+test("closed list: escapes in a property name, empty or negative layers, an omitted colour and legacy-only pseudo-elements", async () => {
+  for (const css of [":focus { out\\6c ine: none; }\n", ":focus { outline: none; box-shadow: 0 0 2px red,; }\n", ":focus { outline: none; text-decoration: underline -2px red; }\n", ":focus { color: transparent; outline: none; border: 2px solid; }\n", ":focus { outline: 2px solid; }\n", ":focus:marker { outline: none; }\n", ":focus:selection { outline: none; }\n"]) {
+    const r = await focusAuditFor(css);
+    assert.deepEqual(r.rules.filter((x) => x === FOCUS_RULE), [], css);
+    assert.equal(r.examined, false, css);
+    assert.equal(r.unexaminable.length >= 1 || css.includes(":focus:"), true, css);
+  }
+});
+
+test("closed list: malformed selector syntax is not decided as a focus rule", async () => {
+  for (const css of [
+    ":focus..x { outline: none; }\n",
+    ":focus.#x { outline: none; }\n",
+    ":focus## { outline: none; }\n",
+    ":focus >> a { outline: none; }\n",
+    "a >:focus > { outline: none; }\n",
+    ":focus[ { outline: none; }\n",
+    ":focus[=x] { outline: none; }\n",
+    ".1a:focus { outline: none; }\n",
+    "a:focus: { outline: none; }\n",
+    ":focus:::before { outline: none; }\n",
+    ":focus, .x::before:first-child { outline: none; }\n",
+    ":focus, .x::after:checked { outline: none; }\n",
+    ":focus, .x::before.foo { outline: none; }\n",
+    ":focus, .x::before::after { outline: none; }\n",
+    ".x::before#id:focus { outline: none; }\n",
+    ".x::before .y:focus { outline: none; }\n",
+    ".x:before > .y:focus { outline: none; }\n",
+    ":focus[foo=  ] { outline: none; }\n",
+    "> :focus { outline: none; }\n",
+    "+ :focus { outline: none; }\n",
+    ":focus, { outline: none; }\n",
+    ", :focus { outline: none; }\n",
+    ":focus,, .a { outline: none; }\n",
+    ":focus[foo=] { outline: none; }\n",
+    ":focus[foo=1] { outline: none; }\n",
+    ":focus[=x] { outline: none; }\n",
+  ]) {
+    const r = await focusAuditFor(css);
+    assert.deepEqual(r.rules.filter((x) => x === FOCUS_RULE), [], css);
+  }
+  for (const css of [":focus > .a:hover { outline: none; }\n", "a[href]:focus[data-x=y] { outline: none; }\n", "ul > li + li ~ a:focus { outline: none; }\n", "*:focus { outline: none; }\n"]) {
+    assert.deepEqual((await focusAuditFor(css)).rules.filter((x) => x === FOCUS_RULE).length, css.startsWith(":focus >") ? 0 : 1, css);
+  }
+});
+
+test("closed list: Less @{...} interpolation is never read", async () => {
+  for (const css of [
+    "@state: -visible;\n:focus@{state} { outline: none; }\n",
+    ".a@{x}:focus { outline: none; }\n",
+    ":focus { outline: @{v}; }\n",
+  ]) {
+    const r = await focusAuditFor(css, "f.less");
+    assert.deepEqual(r.rules.filter((x) => x === FOCUS_RULE), [], css);
+    assert.equal(r.unexaminable.length >= 1, true, css);
+  }
+  // a nested rule's leading combinator is fine once composed
+  assert.deepEqual((await focusAuditFor(".a { > :focus { outline: none; } }\n")).rules.filter((x) => x === FOCUS_RULE), [FOCUS_RULE]);
+});
+
+test("closed list: blockless @extend, @include and Less mixin calls make the block undecided", async () => {
+  for (const [css, file] of [
+    [".no-ring { outline: none; }\nbutton:focus { @extend .no-ring; }\n", "f.scss"],
+    ["button:focus { @extend %silent; margin: 0; }\n", "f.scss"],
+    [".ring() { box-shadow: 0 0 2px red; }\nbutton:focus { outline: none; .ring(); }\n", "f.less"],
+    ["button:focus { outline: none; .ring; }\n", "f.less"],
+    ["button:focus { outline: none; .m(@a: 1); }\n", "f.less"],
+    ["button:focus { outline: none; @include ring; }\n", "f.scss"],
+    ["button:focus { @include no-ring { color: red; } }\n", "f.scss"],
+    ["button:focus { margin: 0; @if $x { outline: none; } }\n", "f.scss"],
+    ["&:focus { outline: none; }\n", "f.scss"],
+    ["&.a:focus { outline: none; }\n", "f.scss"],
+  ]) {
+    const r = await focusAuditFor(css, file);
+    assert.deepEqual(r.rules.filter((x) => x === FOCUS_RULE), [], css);
+    assert.equal(r.examined, false, css);
+    assert.equal(r.unexaminable.length >= 1, true, css);
+  }
+});
+
+test("closed list: dialects and the parent selector - interpolation only in scss, & only at a compound start, one bad member kills the list", async () => {
+  for (const [css, file] of [
+    [":focus { outline: #{none}; }\n", "f.css"],
+    [":focus { outline: #{none}; }\n", "f.less"],
+    [".x { span&:focus { outline: none; } }\n", "f.scss"],
+    [".x { .a&:focus { outline: none; } }\n", "f.scss"],
+    [":focus, .x..y { outline: none; }\n", "f.scss"],
+    [":focus, a >> b { outline: none; }\n", "f.css"],
+    [":focus, .a[foo=] { outline: none; }\n", "f.css"],
+  ]) {
+    const r = await focusAuditFor(css, file);
+    assert.deepEqual(r.rules.filter((x) => x === FOCUS_RULE), [], css + " " + file);
+    assert.equal(r.unexaminable.length >= 1, true, css + " " + file);
+  }
+  // the same interpolation in a Sass file is read
+  assert.deepEqual((await focusAuditFor(":focus { outline: #{none}; }\n", "f.scss")).rules.filter((x) => x === FOCUS_RULE), [FOCUS_RULE]);
+  assert.deepEqual((await focusAuditFor(".x { &-y:focus, &.z:focus { outline: none; } }\n", "f.scss")).rules.filter((x) => x === FOCUS_RULE).length, 1);
+});
+
+test("closed list: a data: URL holds a semicolon; an unknown pseudo-class leaves its whole list undecided", async () => {
+  const r = await focusAuditFor(":focus { outline: none; cursor: url(data:image/gif;base64,R0lGODlhAQABAIAAAAAA), auto; }\n");
+  assert.deepEqual(r.rules.filter((x) => x === FOCUS_RULE), [FOCUS_RULE]);
+  assert.deepEqual(r.unexaminable, []);
+  for (const css of [
+    ":focus, :definitely-not-a-pseudo { outline: none; }\n",
+    ":focus, :user-invalid { outline: none; }\n",
+    ":focus, .a::unknown-element { outline: none; }\n",
+    ":focus, :unknown-fn(x) { outline: none; }\n",
+  ]) {
+    const x = await focusAuditFor(css);
+    assert.deepEqual(x.rules.filter((y) => y === FOCUS_RULE), [], css);
+    assert.equal(x.unexaminable.length >= 1, true, css);
+  }
+  // known functional members do not make the list uncertain
+  assert.deepEqual((await focusAuditFor(":focus, :is(:focus) { outline: none; }\n")).rules.filter((y) => y === FOCUS_RULE), [FOCUS_RULE]);
+});
+
+test("closed list: @scope contents and malformed functional pseudo-classes are not decided", async () => {
+  for (const css of [
+    "@scope (:focus) { :scope { outline: none; } }\n",
+    "@scope (.card) to (.x) { :scope:focus { outline: none; } }\n",
+  ]) {
+    const r = await focusAuditFor(css, "f.css");
+    assert.deepEqual(r.rules.filter((x) => x === FOCUS_RULE), [], css);
+    assert.equal(r.unexaminable.length >= 1, true, css);
+  }
+  for (const css of [":focus, :not() { outline: none; }\n", ":focus, :is(:focus { outline: none; }\n", ":focus, :nth-child(foo) { outline: none; }\n", ":focus, :nth-child() { outline: none; }\n"]) {
+    const r = await focusAuditFor(css);
+    assert.deepEqual(r.rules.filter((x) => x === FOCUS_RULE), [], css);
+  }
+  assert.deepEqual((await focusAuditFor(":focus, :nth-child(2n+1 of .a) { outline: none; }\n")).rules.filter((x) => x === FOCUS_RULE), [FOCUS_RULE]);
+});
+
+test("closed list: a decided branch is not hidden by an off-list branch beside it", async () => {
+  for (const css of [
+    ":focus, :is(:focus) { outline: none; }\n",
+    ":focus, .#{$p} { outline: none; }\n",
+    ":focus, %silent { outline: none; }\n",
+  ]) {
+    const r = await focusAuditFor(css);
+    assert.deepEqual(r.rules.filter((x) => x === FOCUS_RULE), [FOCUS_RULE], css);
+    assert.equal(r.unexaminable.length >= 1, true, css);
+  }
+});
 
 test("audit reaches no verdict: no status, no score, and no policy is consulted", async () => {
   const result = await runAudit(fixture("never-violations"));

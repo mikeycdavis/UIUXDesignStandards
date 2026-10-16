@@ -339,6 +339,7 @@ mistake for one.
   "evidenceSurface": { "…": "see below" },
   "detectorsExamined": ["accessibility.img-alt-text"],
   "detectorsWithoutSubject": [{ "rule": "…", "detector": "…", "reason": "…" }],
+  "detectorsUnexaminable": [{ "rule": "…", "detector": "…", "evidence": ["styles.scss:12"], "reason": "…" }],
   "findings": [{ "id": "img-alt", "rule": "accessibility.img-alt-text", "category": "accessibility", "severity": "error", "label": "OBSERVED", "evidence": ["index.html:17"], "message": "…", "standardRef": null }]
 }
 ```
@@ -346,6 +347,59 @@ mistake for one.
 It exits 0 even with findings. `--strict` exits 1 instead, for a consumer that wants discovery to
 break a build — the default does not, because a discovery command that fails is a command people stop
 running.
+
+`detectorsUnexaminable` lists spans a detector met but could not read statically (for example a SCSS interpolation whose value is a variable in an outline or ring declaration). A span is never counted as examined-clean: a rule with any such span and no established finding is not in `detectorsExamined` and appears in `detectorsWithoutSubject`. The one exception is a rule for which the detector also established a definite violation: it stays in `detectorsExamined` (so validation reports the failure) and is omitted from `detectorsWithoutSubject`, while the unreadable span is still listed in `detectorsUnexaminable`.
+
+**Line anchor.** In `findings[].evidence` and `detectorsUnexaminable[].evidence` an entry `path:line` names the line containing the first non-whitespace character of the construct's head: for a style rule, the first character of its selector (the rule head), not the line of any declaration inside it and not the end of the preceding rule. A declaration line is not reported; a multi-line rule reports the line it starts on. For a one-line rule the two coincide. (Owner decision on ST-05, option A.)
+
+**Decided forms of `accessibility.no-removed-focus-indicators` (a closed list).** The detector decides the
+forms below and routes everything else to `detectorsUnexaminable` with a named reason. An unexaminable form is never an
+exemption and never a pass: a rule with one and no established finding is not in `detectorsExamined`. The detector does
+not model the CSS cascade (importance, specificity, source order, layers, `all`, custom properties, Sass variables,
+functional selectors, cross-rule interaction). A form is added to this list only with a decision and a test, never in passing.
+
+| Decided (one block, plain literal values) | Rule |
+| --- | --- |
+| Selector | a style rule whose branches are simple selectors (type, class, id, attribute, universal, combinators) with pseudo-classes from `:focus :focus-visible :focus-within :hover :active :visited :link :disabled :enabled :checked :required :optional :invalid :valid :read-only :read-write :placeholder-shown :first-child :last-child :only-child :first-of-type :last-of-type :only-of-type :empty :target`, pseudo-elements from `::before ::after ::first-line ::first-letter ::placeholder ::selection ::marker` (only the first four may be written with a single colon), and `:not(:focus-visible)`; the focus pseudo-class must be on the rule's subject (its last compound: `.btn:focus .icon` styles the icon and is not a focus rule; a pseudo-element subject such as `:focus::before` is not the focused element either); nesting whose enclosing rules declare nothing the nested rule could inherit |
+| Removal | exactly one `outline` declaration in the block, whose value is `none` or `0` |
+| Not a removal | exactly one `outline` declaration of a non-zero literal width (`2px`, `0.5em`; never `auto` without one), a style from `dotted dashed solid double groove ridge inset outset auto`, and exactly one more token, which must be a colour (an omitted colour is `currentcolor`, which cannot be shown to paint) (a hex, a colour function such as `rgb()`, a colour name, or `var()`/`env()`); a zero width, `thin`/`medium`/`thick`, `none`, `0` or any other token in the colour place is not a colour |
+| Replacement indicator | a declaration of `box-shadow`, `border` (or a physical/logical side shorthand of it, which must carry a drawn style and a non-zero literal width: `border-top: 2px red` draws nothing), `background`, `background-color`, or `text-decoration` with a value that fits THAT property's grammar and can be shown to paint (`box-shadow`: comma layers of two to four contiguous lengths (zero, or a number with a length unit; never a percentage or a bare non-zero number), at most one `inset`, a non-negative blur (the third length), some area (a non-zero offset, a positive blur or a positive spread; a negative spread is off the list, its effect depending on the box), and exactly one opaque colour; `background`/`background-color`: one opaque colour; `text-decoration`: a unique line keyword plus an optional style keyword and length and exactly one opaque colour (`text-decoration-line` alone defaults to `currentcolor` and is off the list); opaque colour = a 3- or 6-digit hex, `rgb()`/`hsl()` without alpha, or a CSS named colour other than `transparent`/`currentcolor`; a gradient, `url()`, `rgba()`, a 4- or 8-digit hex, an unknown identifier, or a keyword the property does not accept is off the list, as is `background-image` on its own), or an `@apply` of `ring`/`ring-1`/`ring-2`/`ring-4`/`ring-8` (`ring-0` and `!important` as in the ring model), in the same block |
+| Exemption | `:focus:not(:focus-visible)` |
+| Interpolation | SCSS interpolation in a declaration whose value is statically readable (`#{none}`, a quoted literal); an unknown span, or any interpolation in a selector head (even a readable one, because resolving it pads it with spaces that would read as a combinator), is off the list; a top-level selector list is judged branch by branch |
+
+| Off the list: `detectorsUnexaminable[].reason` | Forms |
+| --- | --- |
+| a functional or unlisted pseudo-class selector is outside the decided list of selector forms | `:is() :where() :not()` other than `:not(:focus-visible)`, `:has() :host() :nth-*()`, any other pseudo-class or functional selector, an unresolved `&` (a top-level `&` has no parent and is invalid Sass) |
+| an interpolation in the selector may make it a focus rule | an unknown interpolation anywhere in a selector, or any interpolation in a selector head |
+| a comment inside the selector may split or join its compounds | a `/* */` or `//` comment between the parts of a selector head (a comment before the head is not inside it) |
+| a selector the closed list does not positively recognise (malformed or unlisted syntax) | a selector that is not compounds of type/universal, `#id`, `.class`, `[attribute]`, listed pseudo-classes and pseudo-elements joined by descendant, child or sibling combinators (`:focus..x`, `a >> b`, a trailing combinator, a pseudo-element before a combinator or followed by a class, id, attribute, another pseudo-element or a pseudo-class other than `:hover :active :focus :focus-visible`, a CSS escape in any indicator value, an empty list member such as `:focus,`, an attribute selector without a value after its operator, a leading combinator in a composed selector, Less `@{...}` interpolation, Sass `#{...}` interpolation outside a `.scss` file, a parent selector `&` that is not at the start of a compound, and ANY malformed member in a selector list, or one naming a pseudo-class or pseudo-element not known to be valid, or a known functional pseudo-class with an empty, unbalanced or (nth-*) non-An+B argument, which invalidates the whole list) |
+| a CSS escape in the selector may spell a focus pseudo-class | a backslash escape anywhere in a selector (for example the escaped spelling of focus) |
+| a Sass placeholder selector emits nothing unless it is extended, and an @extend may be in another file | `%name` anywhere in a selector |
+| the outline is not removed by exactly one plain 'outline: none\|0' declaration (several declarations, a longhand, all:, an important or unresolved value are not decided) | several `outline` declarations, `outline-style`, `outline-width`, `all`, `!important`, `var()`, `env()`, a Sass variable, an interpolation or a calculation in the outline, or an outline that is neither the removal nor the not-a-removal form |
+| a replacement indicator is not a plain literal in this block (an unresolved, calculated, disabled, important or repeated value is not decided) | an unresolved, calculated (`calc() min() max() clamp()`), disabled (`none`, `0`, `transparent`, `initial`, `unset`, `revert`, `inherit`) or `!important` value of an indicator property, an unknown `@apply` token, a border built from style/width longhands without a shorthand, a repeated indicator property, and any of `opacity`, `visibility`, `display`, `clip`, `clip-path`, `mask*`, `filter`, `backdrop-filter`, `mix-blend-mode`, `forced-color-adjust`, `content-visibility`, `border-image*` beside an indicator (they can hide what it paints) |
+| a nested rule inherits declarations of an enclosing rule or layer, and the cascade between them is not decided | a rule nested under a rule or group at-rule that declares an indicator, outline or `@apply`; any rule inside `@layer` |
+| an interpolation or a CSS escape in a property name may be outline or an indicator property; an interpolation outside a property: value declaration | an unknown property name or declaration shape |
+| the rule is nested deeper, or its composed selector list is longer, than the decided bound (32 levels, 256 selectors) | nesting beyond 32 levels, or a rule whose composed selector list (the cross product of comma lists with its ancestors) exceeds 256; work per rule is bounded, so a small hostile file cannot exhaust memory or time |
+| a control directive, @include, @extend or mixin call in the rule may change its declarations, which are not modelled | a block-less `@include`, `@extend` or Less mixin call (`.ring();`) in the rule's own text, or a control directive / `@include` block inside it |
+| it sits inside an @include / control directive / mixin whose selector semantics are not modelled | `@include`, `@each`, `@if`, `@else`, `@for`, `@while`, `@mixin`, `@function`, `@scope`, and every at-rule other than the conditional group rules `@media @supports @container @layer @document @starting-style` (`@page`, `@property`, an unknown one) |
+| a nested property block spells its declarations indirectly | `outline: { style: none }` under a focus rule |
+
+**The `var()` assumption, stated once.** A custom property is decided in exactly one place: the colour token of a
+restoring outline whose width and style are literal (a literal width and style with a `var()` colour, the form the compliant fixture
+uses), where it is assumed to resolve to a colour. Everywhere else `var()`, `env()`, a Sass variable or an interpolation is
+unresolved: in the outline's width, style or whole value, and in any replacement indicator's value, it makes the rule
+unexaminable (a `box-shadow` declared through `var()` is not decided as an indicator).
+
+**Deliberate widenings and narrowings against main (for owner awareness).** These forms changed by design:
+a replacement indicator that main did not count (`border-top`, `text-decoration`,
+logical borders) now compensates an `outline: none`, while a bare `border-color` (which draws nothing without a style), `outline-offset` and `outline-color` (an `outline: none` leaves no style for them to act on) no longer do; a rule whose subject is not focused (`input:focus + label`,
+`.btn:focus .icon`, `:focus &`) now produces no record (main reported `.btn:focus .icon`); and every form that
+main decided but the closed list does not (functional selectors, `all:`, `!important`, `var()`, disabled or repeated indicator
+values, nested inheritance, `@layer`, directives, placeholders, escapes, selector interpolation) is now
+unexaminable, so `validate` moves from failed to not-evaluated for those rules.
+
+A selector list is read branch by branch: a decided focus branch still establishes a finding beside an off-list branch, which is
+recorded as unexaminable. Cross-rule interaction (an indicator declared by another rule) is not part of the decided model, as on main.
 
 `evidenceSurface` is present on both commands, always, with not-attempted defaults:
 
