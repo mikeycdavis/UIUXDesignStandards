@@ -987,7 +987,7 @@ test("ST-07: a subject-preserving functional nesting carries the parent's replac
     [":focus { box-shadow: 0 0 0 2px blue; :is(&.a, &:hover) { outline: none; } }\n", []],
     [":focus { box-shadow: 0 0 0 2px blue; & { outline: none; } }\n", []],
     // an alternative that is not the parent's subject, or any other wrapper, does not carry it
-    [":focus { box-shadow: 0 0 0 2px blue; :is(&, .b) { outline: none; } }\n", [FOCUS_RULE]],
+
     [":focus { box-shadow: 0 0 0 2px blue; :is(& .c) { outline: none; } }\n", [FOCUS_RULE]],
     [":focus { box-shadow: 0 0 0 2px blue; :is(&)::before { outline: none; } }\n", [FOCUS_RULE]],
     [":focus { box-shadow: 0 0 0 2px blue; &.x::after { outline: none; } }\n", [FOCUS_RULE]],
@@ -1297,6 +1297,23 @@ test("ST-07: an unknown value matters only if it can survive the cascade", async
     ":focus { box-shadow: 0 0 0 2px blue; :not(&.a, :not(&)) { outline: none; } }\n",
   ]) {
     assert.deepEqual((await focusAuditFor(css)).rules.filter((x) => x === FOCUS_RULE), [], css);
+  }
+});
+
+test("ST-07: an interpolated background shorthand is unknown; :is() lists may mix the parent with other elements", async () => {
+  const unknown = await focusAuditFor(":focus { outline: none; background: #{$maybe}; }\n");
+  assert.deepEqual(unknown.rules.filter((x) => x === FOCUS_RULE), []);
+  assert.equal(unknown.unexaminable.length >= 1, true);
+  const cases = [
+    [":focus { box-shadow: 0 0 0 2px blue; :is(&, .special) { outline: none; } }\n", []],
+    [":focus { box-shadow: 0 0 0 2px blue; :is(&.a, .special .b) { outline: none; } }\n", []],
+    // another focus selector is a different rule; a second reference that is not the parent is not allowed
+    [".btn:focus { box-shadow: 0 0 0 2px blue; :is(&, .a:focus) { outline: none; } }\n", [FOCUS_RULE]],
+    [":focus { box-shadow: 0 0 0 2px blue; :is(&, & .x) { outline: none; } }\n", [FOCUS_RULE]],
+    [":focus { box-shadow: 0 0 0 2px blue; :is(.a, .b) { outline: none; } }\n", [FOCUS_RULE]],
+  ];
+  for (const [css, expected] of cases) {
+    assert.deepEqual((await focusAuditFor(css)).rules.filter((x) => x === FOCUS_RULE), expected, css);
   }
 });
 

@@ -784,6 +784,7 @@ const BACKGROUND_KEYWORDS = new Set([
 
 /** The colour a background shorthand sets: its colour token, else transparent (the initial value). */
 function shorthandBackgroundColor(value) {
+  if (value.includes(UNKNOWN)) return value; // an interpolated shorthand may be any colour
   if (/^inherit(\s*!important)?$/i.test(value.trim())) return value;
   // image functions and sizes are not colours; var()/env() may be anything and are read as a colour
   const stripped = value.replace(/(url|image-set|-?[a-z-]*gradient)\((?:[^()]|\([^()]*\))*\)/gi, " ");
@@ -866,7 +867,7 @@ function replacementVerdict(node, compensating) {
         // the shorthand sets the colour and resets the image: only url(), a gradient or image-set()
         // supplies one
         // inherit keeps whatever the parent paints: potentially visible, never asserted absent
-        const inherited = /^inherit(\s*!important)?$/i.test(value);
+        const inherited = /^inherit(\s*!important)?$/i.test(value) || value.includes(UNKNOWN);
         const image = inherited || /url\(|gradient\(|image-set\(/i.test(value) ? value : "none";
         decls.push({ at, lo, hi, layer, property: "background-color", value: shorthandBackgroundColor(value), important });
         decls.push({ at, lo, hi, layer, property: "background-image", value: image, important, introduces: true });
@@ -997,8 +998,16 @@ function namesSameSubject(part) {
         anchored = true;
       }
       // an ordinary negation filter (&:not(.disabled)) narrows the subject and is otherwise ignored
-    } else if (!args.every((arg) => namesSameSubject(arg))) return false;
-    else anchored = true;
+    } else {
+      // :is(&, .special): the focus-relevant alternative is the parent; an alternative that does not
+      // reference it and cannot be a focus rule matches other elements and does not matter. One that
+      // is a focus selector of its own is a different rule and is not the parent.
+      const same = args.filter((arg) => namesSameSubject(arg));
+      const others = args.filter((arg) => !namesSameSubject(arg));
+      if (same.length === 0) return false;
+      if (others.some((arg) => arg.includes("&") || isFocusSelector(arg))) return false;
+      anchored = true;
+    }
     rest = rest.slice(0, m.index) + rest.slice(end);
   }
   if (rest.includes("&")) {
