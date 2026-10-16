@@ -1488,6 +1488,20 @@ test("ST-07: a wrapped bare :focus is bare; the exemption is read on the subject
   }
 });
 
+test("ST-07: a qualifier may sit between :focus and its focus-visible negation", async () => {
+  const cases = [
+    [":focus.foo:not(:focus-visible) { outline: none; }\n", []],
+    ["button:focus[data-x]:not(.a, :focus-visible) { outline: none; }\n", []],
+    [".foo:not(:focus-visible):focus { outline: none; }\n", []],
+    [":focus.foo:not(.a) { outline: none; }\n", [FOCUS_RULE]],
+    [":focus-visible.foo:not(:focus-visible) { outline: none; }\n", [FOCUS_RULE]],
+    ["a:has(:focus-visible) .foo:not(:focus-visible) { outline: none; }\n", []],
+  ];
+  for (const [css, expected] of cases) {
+    assert.deepEqual((await focusAuditFor(css)).rules.filter((x) => x === FOCUS_RULE), expected, css);
+  }
+});
+
 test("ST-07: a doubly negated reference to the parent keeps the subject", async () => {
   const cases = [
     [":focus { box-shadow: 0 0 0 2px blue; :not(:not(&)) { outline: none; } }\n", []],

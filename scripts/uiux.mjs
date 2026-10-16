@@ -1108,14 +1108,25 @@ function hidesRingFromMouseOnly(selector) {
   // relational or functional argument (`div:has(:focus:not(.x)) :focus:not(:focus-visible)`)
   const compounds = selectorCompounds(selector);
   const subject = compounds.length > 0 ? compounds[compounds.length - 1] : selector;
-  const pattern = /:focus\s*:not\(/gi;
-  for (let start = pattern.exec(subject); start !== null; start = pattern.exec(subject)) {
+  const depthAt = (index) => {
     let outer = 0;
-    for (let i = 0; i < start.index; i++) {
+    for (let i = 0; i < index; i++) {
       if (subject[i] === "(") outer++;
       else if (subject[i] === ")") outer--;
     }
-    if (outer !== 0) continue;
+    return outer;
+  };
+  // a qualifier may sit between them (:focus.foo:not(:focus-visible)): the subject must be :focus and
+  // carry the negation, both written on it
+  const focus = /:focus(?![\w-])/gi;
+  let focused = false;
+  for (let hit = focus.exec(subject); hit !== null; hit = focus.exec(subject)) {
+    if (depthAt(hit.index) === 0) focused = true;
+  }
+  if (!focused) return false;
+  const pattern = /:not\(/gi;
+  for (let start = pattern.exec(subject); start !== null; start = pattern.exec(subject)) {
+    if (depthAt(start.index) !== 0) continue;
     let depth = 1;
     let end = start.index + start[0].length;
     for (; end < subject.length && depth > 0; end++) {
