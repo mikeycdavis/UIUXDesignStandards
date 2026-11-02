@@ -1714,3 +1714,34 @@ test("pilot P2 controls: a valid functional argument keeps the list valid and th
     assert.equal(r.unexaminable.length >= 1, true, css); // the functional branch itself stays off the list
   }
 });
+
+// --- ST-05 / #39 criterion 2: every other detector family reports the line the construct is on -------
+// Each construct sits after leading blank lines and comments, so a count that drifts from the source is visible.
+
+test("ST-05 criterion 2: each detector family reports the actual line of its finding", async () => {
+  const lead = "\n\n";
+  const html = (body) => `<!doctype html>\n${lead}<html lang="en">\n<head><title>t</title></head>\n<body>\n${body}\n</body>\n</html>\n`;
+  const tokenCss = (await readFile(path.join(fixture("token-system"), "styles.css"), "utf8")).replace(/^/, "/* a */\n\n\n");
+  const cases = [
+    { name: "markup element", file: "index.html", rule: "accessibility.img-alt-text", marker: "<img src", text: html("\n<p>a</p>\n\n<img src=\"a.png\">") },
+    { name: "heading structure", file: "index.html", rule: "accessibility.heading-structure", marker: "<h3", text: html("<h1>a</h1>\n<!-- c -->\n\n<h3>b</h3>") },
+    { name: "custom control", file: "index.html", rule: "accessibility.no-inaccessible-custom-controls", marker: "<div onclick", text: html("<p>x</p>\n\n<div onclick=\"go()\">go</div>") },
+    { name: "placeholder copy", file: "index.html", rule: "design-integrity.no-fabricated-data", marker: "Lorem ipsum", text: html("<p>a</p>\n\n\n<p>Lorem ipsum dolor</p>") },
+    { name: "token drift", file: "styles.css", rule: "design-system.tokens-used", marker: "color: #333333;", text: tokenCss },
+    { name: "reduced motion", file: "styles.css", rule: "motion.reduced-motion-support", marker: "@keyframes", text: "/* a */\n\n\n.a { color: red; }\n\n@keyframes spin { from { opacity: 0; } to { opacity: 1; } }\n" },
+  ];
+  for (const c of cases) {
+    const dir = await mkdtemp(path.join(tmpdir(), "uiux-st05-"));
+    try {
+      await writeFile(path.join(dir, c.file), c.text);
+      const audit = await runAudit(dir);
+      const found = audit.findings.filter((f) => f.rule === c.rule);
+      assert.equal(found.length >= 1, true, `${c.name}: the construct produced no finding`);
+      const expected = c.text.split("\n").findIndex((line) => line.includes(c.marker)) + 1;
+      assert.equal(expected > 3, true, `${c.name}: the construct must not be on the first lines`);
+      assert.equal(found[0].evidence[0], `${c.file}:${expected}`, c.name);
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  }
+});
