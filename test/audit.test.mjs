@@ -741,6 +741,7 @@ test("ST-07: at-rules emitted at the stylesheet root do not inherit the enclosin
   ]) {
     const r = await focusAuditFor(css);
     assert.deepEqual(r.rules.filter((x) => x === FOCUS_RULE), [], css);
+    assert.equal(r.unexaminable.length, 0, css); // decided, not merely undecided
   }
   // inside the root-emitted at-rule a focus rule of its own is still examined
   assert.deepEqual((await focusAuditFor("@keyframes k { from { outline: none; } }\n:focus { outline: none; }\n")).rules.filter((x) => x === FOCUS_RULE), [FOCUS_RULE]);
