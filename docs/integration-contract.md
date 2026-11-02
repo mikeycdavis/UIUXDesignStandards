@@ -352,6 +352,23 @@ running.
 
 **Line anchor.** In `findings[].evidence` and `detectorsUnexaminable[].evidence` an entry `path:line` names the line containing the first non-whitespace character of the construct's head: for a style rule, the first character of its selector (the rule head), not the line of any declaration inside it and not the end of the preceding rule. A declaration line is not reported; a multi-line rule reports the line it starts on. For a one-line rule the two coincide. (Owner decision on ST-05, option A.)
 
+**Fail-closed rule (owner decision, option A, 2026-11-02).** The table below is the whole of what the detector decides;
+it is exhaustive, not illustrative. Every construct it does not positively model is unexaminable by default: it yields no
+finding and no examined-clean pass, only a `detectorsUnexaminable` entry whose `reason` is one of the texts in the second table.
+Those texts are stable: changing one is a contract change. The detector never recovers part of an unreadable construct
+and never guesses: a rule is decided in full by the closed list or not at all. A form is added to the list only with a
+decision and a test that pins both the form and the nearest off-list neighbour.
+
+**A selector list is valid or undecided as a whole.** A browser discards a selector list that holds an invalid member, so
+uncertainty about ONE member leaves the whole list undecided and no branch of it establishes a finding. Known valid but
+off-list members (for example `:is(.a)`) do not make the list uncertain: the decided branches decide and the off-list branch is
+recorded. A member is valid only when it is positively recognised: a listed pseudo-class or pseudo-element; or a functional
+pseudo-class whose argument fits its grammar: `:nth-*()` an `An+B` expression (optionally `of <selector>`), `:dir()`
+`ltr` or `rtl`, `:lang()` a comma list of identifiers or wildcard ranges, and `:is() :where() :not() :has() :matches()
+:host() :host-context() :-webkit-any() :-moz-any()` a comma list of selectors in the recognised syntax with no empty member
+(`:has()` members may start with a combinator). Any other argument, an empty argument, a quoted `:lang()` range, or a
+pseudo-class or pseudo-element outside the lists, leaves the list undecided.
+
 **Decided forms of `accessibility.no-removed-focus-indicators` (a closed list).** The detector decides the
 forms below and routes everything else to `detectorsUnexaminable` with a named reason. An unexaminable form is never an
 exemption and never a pass: a rule with one and no established finding is not in `detectorsExamined`. The detector does
@@ -377,7 +394,7 @@ functional selectors, cross-rule interaction). A form is added to this list only
 | a Sass placeholder selector emits nothing unless it is extended, and an @extend may be in another file | `%name` anywhere in a selector |
 | the outline is not removed by exactly one plain 'outline: none\|0' declaration (several declarations, a longhand, all:, an important or unresolved value are not decided) | several `outline` declarations, `outline-style`, `outline-width`, `all`, `!important`, `var()`, `env()`, a Sass variable, an interpolation or a calculation in the outline, or an outline that is neither the removal nor the not-a-removal form |
 | a replacement indicator is not a plain literal in this block (an unresolved, calculated, disabled, important or repeated value is not decided) | an unresolved, calculated (`calc() min() max() clamp()`), disabled (`none`, `0`, `transparent`, `initial`, `unset`, `revert`, `inherit`) or `!important` value of an indicator property, an unknown `@apply` token, a border built from style/width longhands without a shorthand, a repeated indicator property, and any of `opacity`, `visibility`, `display`, `clip`, `clip-path`, `mask*`, `filter`, `backdrop-filter`, `mix-blend-mode`, `forced-color-adjust`, `content-visibility`, `border-image*` beside an indicator (they can hide what it paints) |
-| a nested rule inherits declarations of an enclosing rule or layer, and the cascade between them is not decided | a rule nested under a rule or group at-rule that declares an indicator, outline or `@apply`; any rule inside `@layer` |
+| a nested rule inherits declarations of an enclosing rule or layer, and the cascade between them is not decided | a rule nested under a rule or group at-rule that declares an indicator, outline or `@apply`; a rule that declares an indicator or `@apply` nested under any ancestor that declares `opacity`, `visibility`, `display`, `clip`, `clip-path`, `mask*`, `filter`, `backdrop-filter`, `mix-blend-mode`, `forced-color-adjust`, `content-visibility` or `border-image*` (the ancestor can hide what the nested rule paints); any rule inside `@layer` |
 | an interpolation or a CSS escape in a property name may be outline or an indicator property; an interpolation outside a property: value declaration | an unknown property name or declaration shape |
 | the rule is nested deeper, or its composed selector list is longer, than the decided bound (32 levels, 256 selectors) | nesting beyond 32 levels, or a rule whose composed selector list (the cross product of comma lists with its ancestors) exceeds 256; work per rule is bounded, so a small hostile file cannot exhaust memory or time |
 | a control directive, @include, @extend or mixin call in the rule may change its declarations, which are not modelled | a block-less `@include`, `@extend` or Less mixin call (`.ring();`) in the rule's own text, or a control directive / `@include` block inside it |
