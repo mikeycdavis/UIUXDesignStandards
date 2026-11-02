@@ -1634,3 +1634,83 @@ test("the audit-only detector is absent from a validate-shaped run", async () =>
   assert.ok(!gated.examined.includes("interaction.duplicate-component-signals"));
   assert.ok(audited.examined.includes("interaction.duplicate-component-signals"));
 });
+
+// --- pilot (owner option A, 2026-11-02): the two findings open on PR #42 at 4260040 -----------------
+// A form the detector does not positively model is unexaminable by default: no finding, no examined-clean
+// pass, and a stable reason (docs/integration-contract.md, "Fail-closed rule").
+
+test("pilot P1: a paint-affecting declaration on an ancestor rule makes a nested rule's indicator undecided", async () => {
+  // Codex P1 on 4260040: the ancestor hides the element, so the child's box-shadow paints nothing; the child
+  // was recorded examined-clean
+  for (const css of [
+    ":focus { opacity: 0; &.x { outline: none; box-shadow: 0 0 2px red; } }\n",
+    ":focus { visibility: hidden; &.x { outline: none; box-shadow: 0 0 2px red; } }\n",
+    ":focus { display: none; &.x { outline: none; border: 2px solid red; } }\n",
+    ":focus { clip-path: inset(50%); &.x { outline: none; background-color: yellow; } }\n",
+    ":focus { filter: opacity(0); &.x { outline: none; text-decoration: underline red; } }\n",
+    ":focus { opacity: 0; &.x { outline: none; @apply ring-2; } }\n",
+    ".a { opacity: 0; .b { &:focus { outline: none; box-shadow: 0 0 2px red; } } }\n",
+    ".a { visibility: hidden; @media (min-width: 1px) { &:focus { outline: none; box-shadow: 0 0 2px red; } } }\n",
+  ]) {
+    const r = await focusAuditFor(css);
+    assert.deepEqual(r.rules.filter((x) => x === FOCUS_RULE), [], css);
+    assert.equal(r.examined, false, css);
+    assert.equal(r.unexaminable.length >= 1, true, css);
+    assert.match(r.unexaminable[0].reason, REASON.nested, css);
+  }
+});
+
+test("pilot P1 controls: a paint-affecting ancestor does not hide a real violation or a decided clean rule", async () => {
+  // no indicator in the child: the outline is removed and nothing replaces it, whatever the ancestor paints
+  const violation = await focusAuditFor(".a { opacity: 0.9; &:focus { outline: none; } }\n");
+  assert.deepEqual(violation.rules.filter((x) => x === FOCUS_RULE), [FOCUS_RULE]);
+  // an ancestor with no paint-affecting or focus-relevant declaration still lets the child be decided
+  const clean = await focusAuditFor(".a { color: red; &:focus { outline: none; box-shadow: 0 0 2px red; } }\n");
+  assert.deepEqual(clean.rules.filter((x) => x === FOCUS_RULE), []);
+  assert.equal(clean.examined, true);
+  assert.deepEqual(clean.unexaminable, []);
+  // a paint-affecting property on a SIBLING of the child, not an ancestor, is not inherited
+  const sibling = await focusAuditFor(".a { &.x { opacity: 0; } &:focus { outline: none; box-shadow: 0 0 2px red; } }\n");
+  assert.deepEqual(sibling.rules.filter((x) => x === FOCUS_RULE), []);
+  assert.equal(sibling.examined, true);
+});
+
+test("pilot P2: a known functional pseudo-class with an invalid argument leaves its whole list undecided", async () => {
+  // Codex P2 on 4260040: the browser discards the entire list when one member is invalid, so the :focus branch
+  // establishes nothing
+  for (const css of [
+    ":focus, :dir(foo) { outline: none; }\n",
+    ":focus, :dir() { outline: none; }\n",
+    ":focus, :dir(ltr rtl) { outline: none; }\n",
+    ":focus, :lang(1) { outline: none; }\n",
+    ":focus, :lang(en,) { outline: none; }\n",
+    ":focus, :not(>>) { outline: none; }\n",
+    ":focus, :has(.a ..b) { outline: none; }\n",
+    ":focus, :is(.a, ) { outline: none; }\n",
+    ":focus, :where(.a b >) { outline: none; }\n",
+    ":focus, :host(foo bar >) { outline: none; }\n",
+    ":focus, :matches(.a, ) { outline: none; }\n",
+  ]) {
+    const r = await focusAuditFor(css);
+    assert.deepEqual(r.rules.filter((x) => x === FOCUS_RULE), [], css);
+    assert.equal(r.examined, false, css);
+    assert.equal(r.unexaminable.length >= 1, true, css);
+  }
+});
+
+test("pilot P2 controls: a valid functional argument keeps the list valid and the decided branch decides", async () => {
+  for (const css of [
+    ":focus, :dir(ltr) { outline: none; }\n",
+    ":focus, :dir(RTL) { outline: none; }\n",
+    ":focus, :lang(en) { outline: none; }\n",
+    ":focus, :lang(en, de-CH, *-Latn) { outline: none; }\n",
+    ":focus, :not(.a, .b) { outline: none; }\n",
+    ":focus, :has(> .a) { outline: none; }\n",
+    ":focus, :is(.a, .b:hover) { outline: none; }\n",
+    ":focus, :where(#x) { outline: none; }\n",
+  ]) {
+    const r = await focusAuditFor(css);
+    assert.deepEqual(r.rules.filter((x) => x === FOCUS_RULE), [FOCUS_RULE], css);
+    assert.equal(r.unexaminable.length >= 1, true, css); // the functional branch itself stays off the list
+  }
+});
