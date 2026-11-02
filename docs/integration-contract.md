@@ -384,6 +384,19 @@ functional selectors, cross-rule interaction). A form is added to this list only
 | Exemption | `:focus:not(:focus-visible)` |
 | Interpolation | SCSS interpolation in a declaration whose value is statically readable (`#{none}`, a quoted literal); an unknown span, or any interpolation in a selector head (even a readable one, because resolving it pads it with spaces that would read as a combinator), is off the list; a top-level selector list is judged branch by branch |
 
+**Decided nesting.** A nested rule is decided under its composed selector: each comma branch of the rule joined with each
+branch of its enclosing rules, as a descendant by default and with an explicit `&` replaced by the parent, so `.a { .b {} }`,
+`&.x`, `&:hover`, `&-y`, `& > .x` and `.a &` are decided (a top-level `&` has no parent and is not). A rule's declarations are
+its own: an enclosing rule's declarations are never merged into it, so an enclosing rule that declares an outline, an
+indicator or `@apply`, or, when the nested rule declares an indicator or `@apply`, any paint-affecting property, makes the
+nested rule unexaminable. The conditional group at-rules `@media @supports @container @document @starting-style` (names
+read ASCII case-insensitively; `@-moz-document` too) keep the enclosing selector, and an at-rule prelude is never a selector
+(`@supports selector(:focus)` does not make a focus rule). `@at-root <selector>` emits at the stylesheet root and inherits nothing;
+`@at-root (with: ...)` and `(without: ...)` follow Sass's query semantics (a query that excludes style rules resets
+the inherited selector, one that keeps them preserves it); inside `@at-root` a literal `&` still names the enclosing rule.
+`@keyframes`, `@-webkit-keyframes` and `@font-face` are emitted at the root: their frames are not selectors and inherit nothing.
+Every other at-rule is in the second table.
+
 | Off the list: `detectorsUnexaminable[].reason` | Forms |
 | --- | --- |
 | a functional or unlisted pseudo-class selector is outside the decided list of selector forms | `:is() :where() :not()` other than `:not(:focus-visible)`, `:has() :host() :nth-*()`, any other pseudo-class or functional selector, an unresolved `&` (a top-level `&` has no parent and is invalid Sass) |
