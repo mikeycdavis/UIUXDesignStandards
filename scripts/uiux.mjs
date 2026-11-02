@@ -955,8 +955,10 @@ function functionalArgumentValid(name, argument) {
  * a selector list that holds an invalid member, so uncertainty in ONE member leaves the whole list undecided.
  */
 function hasUnknownPseudoName(selector) {
-  const stripped = selector.replace(/\[[^\]]*\]/g, "");
-  for (const m of stripped.matchAll(/(::?)([A-Za-z-]+)(\()?/g)) {
+  // Attribute selectors are masked (same length) only to find pseudo names and balance parentheses; the
+  // argument that is validated is sliced from the ORIGINAL text, so `:not([disabled])` keeps its argument.
+  const masked = selector.replace(/\[[^\]]*\]/g, (attribute) => "_".repeat(attribute.length));
+  for (const m of masked.matchAll(/(::?)([A-Za-z-]+)(\()?/g)) {
     const name = m[2].toLowerCase();
     if (m[1] === "::") {
       if (!DECIDED_PSEUDO_ELEMENTS.has(name)) return true;
@@ -965,11 +967,11 @@ function hasUnknownPseudoName(selector) {
       // its argument must be balanced, non-empty and, for the nth-* family, an An+B expression
       let depth = 1;
       let end = m.index + m[0].length;
-      for (; end < stripped.length && depth > 0; end++) {
-        if (stripped[end] === "(") depth++;
-        else if (stripped[end] === ")") depth--;
+      for (; end < masked.length && depth > 0; end++) {
+        if (masked[end] === "(") depth++;
+        else if (masked[end] === ")") depth--;
       }
-      const argument = depth === 0 ? stripped.slice(m.index + m[0].length, end - 1).trim() : "";
+      const argument = depth === 0 ? selector.slice(m.index + m[0].length, end - 1).trim() : "";
       if (argument === "") return true;
       if (/^nth-/.test(name) && !/^(?:even|odd|[+-]?\d*n(?:\s*[+-]\s*\d+)?|[+-]?\d+)(?:\s+of\s+[\s\S]+)?$/i.test(argument)) return true;
       // the `of` selector list is part of the selector: a list holding an invalid member is discarded whole

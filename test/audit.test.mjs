@@ -1787,3 +1787,31 @@ test("pilot P2 round 2: a nested property block makes the owning rule undecided,
     assert.deepEqual((await focusAuditFor(css)).rules.filter((x) => x === FOCUS_RULE), [FOCUS_RULE], css);
   }
 });
+
+test("pilot final repair: pseudo names are found on attribute-masked text, arguments are validated unmasked", async () => {
+  // a valid list holding an attribute selector inside a functional pseudo-class still establishes the :focus finding
+  for (const css of [
+    ":focus, :not([disabled]) { outline: none; }\n",
+    ":focus, :nth-child(2 of [data-x]) { outline: none; }\n",
+    ":focus, :not([a=\")\"]) { outline: none; }\n",
+    ":focus, :is([a], .b) { outline: none; }\n",
+    ":focus, :not([a=\"(\"]) { outline: none; }\n", // a paren inside an attribute value is not a paren
+    ":focus, [data-x=\":bogus\"] { outline: none; }\n", // a colon inside an attribute value is not a pseudo name
+  ]) {
+    assert.deepEqual((await focusAuditFor(css)).rules.filter((x) => x === FOCUS_RULE), [FOCUS_RULE], css);
+  }
+  // an invalid member next to an attribute selector still invalidates the whole list: unexaminable, no finding
+  for (const css of [
+    ":focus, :nth-child(2 of >>) { outline: none; }\n",
+    ":focus, :nth-child(2 of [data-x], >>) { outline: none; }\n",
+    ":focus, :not([disabled], >>) { outline: none; }\n",
+    ":focus, :not([disabled]):bogus { outline: none; }\n",
+    ":focus, :not() { outline: none; }\n",
+    ":focus, :not([a b]) { outline: none; }\n", // the argument is judged unmasked: a bad attribute is not a name
+    ":focus, :not([disabled]) :bogus() { outline: none; }\n",
+  ]) {
+    const r = await focusAuditFor(css);
+    assert.deepEqual(r.rules.filter((x) => x === FOCUS_RULE), [], css);
+    assert.equal(r.examined, false, css);
+  }
+});
