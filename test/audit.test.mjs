@@ -1770,3 +1770,20 @@ test("pilot adversarial: nested, interpolated and wrapped forms of the two fixes
   assert.deepEqual(unrelated.rules.filter((x) => x === FOCUS_RULE), []);
   assert.equal(unrelated.examined, true);
 });
+
+test("pilot P2 round 2: a nested property block makes the owning rule undecided, and an invalid nth-child `of` list invalidates the whole selector list", async () => {
+  for (const css of [
+    ":focus { outline: none; outline: { width: 2px; style: solid; color: red; } }\n",
+    ":focus { outline: none; outline: { style: solid; } }\n",
+    ":focus, :nth-child(2 of >>) { outline: none; }\n",
+    ":focus, :nth-last-child(odd of .a, >>) { outline: none; }\n",
+  ]) {
+    const r = await focusAuditFor(css);
+    assert.deepEqual(r.rules.filter((x) => x === FOCUS_RULE), [], css);
+    assert.equal(r.examined, false, css);
+  }
+  // controls: the same flat removal with no nested block, and a valid `of` list beside a plain focus branch
+  for (const css of [":focus { outline: none; }\n", ":focus, :nth-child(2 of .a, .b) { outline: none; }\n"]) {
+    assert.deepEqual((await focusAuditFor(css)).rules.filter((x) => x === FOCUS_RULE), [FOCUS_RULE], css);
+  }
+});

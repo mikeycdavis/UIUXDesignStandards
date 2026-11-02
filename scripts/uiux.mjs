@@ -972,6 +972,9 @@ function hasUnknownPseudoName(selector) {
       const argument = depth === 0 ? stripped.slice(m.index + m[0].length, end - 1).trim() : "";
       if (argument === "") return true;
       if (/^nth-/.test(name) && !/^(?:even|odd|[+-]?\d*n(?:\s*[+-]\s*\d+)?|[+-]?\d+)(?:\s+of\s+[\s\S]+)?$/i.test(argument)) return true;
+      // the `of` selector list is part of the selector: a list holding an invalid member is discarded whole
+      const ofClause = /^nth-/.test(name) ? /\s+of\s+([\s\S]+)$/i.exec(argument) : null;
+      if (ofClause && !functionalArgumentValid("is", ofClause[1])) return true;
       if (!/^nth-/.test(name) && !functionalArgumentValid(name, argument)) return true;
     } else if (!DECIDED_PSEUDO_CLASSES.has(name) && !["before", "after", "first-line", "first-letter"].includes(name)) {
       return true;
@@ -1665,6 +1668,12 @@ export const DETECTORS = [
           for (let a = n.parent, k = 0; a && k <= MAX_DEPTH; a = a.parent, k++) enclosesOpaque.add(a);
         }
       }
+      // A nested property block (`outline: { style: none }`) may restore or remove the indicator the
+      // rule's own flat declarations show: the owning rule is then not decided either.
+      const ownsPropNest = new Set();
+      for (const n of nodes) {
+        if (n.propNest !== null && n.parent && (FOCUS_RELEVANT_PROPERTY.test(n.propNest) || n.propNest.includes(UNKNOWN))) ownsPropNest.add(n.parent);
+      }
       for (const node of nodes) {
         if (node.rootEmitted || node.inside || node.dataBlock) continue;
         // the line anchor (ST-05): the first non-whitespace character of the rule head
@@ -1686,6 +1695,10 @@ export const DETECTORS = [
           continue;
         }
         if (focusish.length === 0) continue; // cannot be a focus rule
+        if (ownsPropNest.has(node)) {
+          note(UNEXAMINABLE_REASONS.nestedProperty);
+          continue;
+        }
         // an interpolation in a property name, or outside a property: value declaration, may be an outline
         // (a CSS escape can spell a property name too: out\6c ine is outline)
         const shapes = splitDeclarations(node.body)

@@ -363,7 +363,7 @@ decision and a test that pins both the form and the nearest off-list neighbour.
 uncertainty about ONE member leaves the whole list undecided and no branch of it establishes a finding. Known valid but
 off-list members (for example `:is(.a)`) do not make the list uncertain: the decided branches decide and the off-list branch is
 recorded. A member is valid only when it is positively recognised: a listed pseudo-class or pseudo-element; or a functional
-pseudo-class whose argument fits its grammar: `:nth-*()` an `An+B` expression (optionally `of <selector>`), `:dir()`
+pseudo-class whose argument fits its grammar: `:nth-*()` an `An+B` expression (optionally `of <selector list>`, whose members must themselves be valid), `:dir()`
 `ltr` or `rtl`, `:lang()` a comma list of identifiers or wildcard ranges, and `:is() :where() :not() :has() :matches()
 :host() :host-context() :-webkit-any() :-moz-any()` a comma list of selectors in the recognised syntax with no empty member
 (`:has()` members may start with a combinator). Any other argument, an empty argument, a quoted `:lang()` range, or a
@@ -412,7 +412,7 @@ Every other at-rule is in the second table.
 | the rule is nested deeper, or its composed selector list is longer, than the decided bound (32 levels, 256 selectors) | nesting beyond 32 levels, or a rule whose composed selector list (the cross product of comma lists with its ancestors) exceeds 256; work per rule is bounded, so a small hostile file cannot exhaust memory or time |
 | a control directive, @include, @extend or mixin call in the rule may change its declarations, which are not modelled | a block-less `@include`, `@extend` or Less mixin call (`.ring();`) in the rule's own text, or a control directive / `@include` block inside it |
 | it sits inside an @include / control directive / mixin whose selector semantics are not modelled | `@include`, `@each`, `@if`, `@else`, `@for`, `@while`, `@mixin`, `@function`, `@scope`, and every at-rule other than the conditional group rules `@media @supports @container @layer @document @starting-style` (`@page`, `@property`, an unknown one) |
-| a nested property block spells its declarations indirectly | `outline: { style: none }` under a focus rule |
+| a nested property block spells its declarations indirectly | `outline: { style: none }` under a focus rule; the owning rule is undecided too, because the block may restore or remove what its flat declarations show |
 
 **The `var()` assumption, stated once.** A custom property is decided in exactly one place: the colour token of a
 restoring outline whose width and style are literal (a literal width and style with a `var()` colour, the form the compliant fixture
