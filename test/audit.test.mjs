@@ -1745,3 +1745,27 @@ test("ST-05 criterion 2: each detector family reports the actual line of its fin
     }
   }
 });
+
+test("pilot adversarial: nested, interpolated and wrapped forms of the two fixes stay unexaminable, never a finding or a clean pass", async () => {
+  for (const css of [
+    ":focus, :dir(#{$d}) { outline: none; }\n",
+    ":focus, :not(.a, #{$b}) { outline: none; }\n",
+    ":focus, :lang(\"en\") { outline: none; }\n",
+    ":focus, :is(:dir(foo)) { outline: none; }\n",
+    ":focus, :not(:is(.a,)) { outline: none; }\n",
+    ":focus, :nth-child(2 of :dir(foo)) { outline: none; }\n",
+    ".a { opacity: 0; &:focus { outline: none; box-shadow: 0 0 2px #{$c}; } }\n",
+    ".a { #{$p}: 0; &:focus { outline: none; box-shadow: 0 0 2px red; } }\n",
+    ":focus { opacity: 0; &:hover { &.x { outline: none; box-shadow: 0 0 2px red; } } }\n",
+    ".a { @media (min-width: 1px) { opacity: 0; &:focus { outline: none; box-shadow: 0 0 2px red; } } }\n",
+  ]) {
+    const r = await focusAuditFor(css);
+    assert.deepEqual(r.rules.filter((x) => x === FOCUS_RULE), [], css);
+    assert.equal(r.examined, false, css);
+    assert.equal(r.unexaminable.length >= 1, true, css);
+  }
+  // a paint-affecting declaration on a rule that is NOT an ancestor is not inherited: the nested rule is still decided
+  const unrelated = await focusAuditFor(".a { opacity: 0; }\n.b:focus { outline: none; box-shadow: 0 0 2px red; }\n");
+  assert.deepEqual(unrelated.rules.filter((x) => x === FOCUS_RULE), []);
+  assert.equal(unrelated.examined, true);
+});
