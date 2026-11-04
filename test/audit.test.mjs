@@ -374,6 +374,28 @@ test("ST-04 criterion 4: existing focus behaviour is unchanged", async () => {
   assert.deepEqual(await focusRulesFor(":focus:not(:focus-visible) { outline: none; }\n"), []);
 });
 
+// --- ST-06 / #40: the issue's exact reproduction, with the evidence the issue asks for ----------------
+
+test("ST-06 criterion 1: the exact #40 .scss reproduction yields one focus finding and is not left without a subject", async () => {
+  const dir = await mkdtemp(path.join(tmpdir(), "uiux-st06-"));
+  try {
+    await writeFile(
+      path.join(dir, "reproduction.scss"),
+      ":focus-visible {\n  outline: none;\n  @apply ring-0 #{!important};\n  @apply ring-2;\n}\n",
+    );
+    const report = await runAudit(dir);
+    assert.deepEqual(rulesOf(report.findings), [FOCUS_RULE]);
+    assert.equal(report.findings.length, 1);
+    assert.equal(
+      (report.detectorsWithoutSubject ?? []).some((d) => d.rule === FOCUS_RULE),
+      false,
+      "the focus rule must not be reported as having no subject",
+    );
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
 // --- ST-07: a block containing SCSS interpolation is examined, not skipped --------------------------
 
 test("ST-07 criteria 1 and 2: a focus block containing #{...} is examined with the interpolation masked", async () => {
