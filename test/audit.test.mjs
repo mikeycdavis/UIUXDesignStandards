@@ -12,7 +12,7 @@ import { mkdtemp, cp, readFile, writeFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { spawnSync } from "node:child_process";
 import path from "node:path";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import {
   splitSource,
   runAudit,
@@ -1825,7 +1825,7 @@ test("P1 containment: the 145-byte, 24-level `& &` file is bounded before substi
   try {
     await writeFile(path.join(dir, "f.scss"), css);
     const script = `
-      const { runAudit } = await import(${JSON.stringify(path.join(ROOT, "scripts/uiux.mjs"))});
+      const { runAudit } = await import(${JSON.stringify(pathToFileURL(path.join(ROOT, "scripts/uiux.mjs")).href)});
       const a = await runAudit(${JSON.stringify(dir)});
       const mine = a.detectorsUnexaminable.filter((u) => u.rule === "accessibility.no-removed-focus-indicators");
       console.log(JSON.stringify({ findings: a.findings.length, reasons: mine.map((u) => u.reason) }));`;
@@ -1885,4 +1885,42 @@ test("P1 containment: the composed-selector bound is exactly 4,096 bytes for a r
   // an `&` substitution: part `& &:focus` (9 bytes) with two `&` over a parent of p bytes is 9 + 2 * (p - 1) bytes
   assert.deepEqual(await reasonsOf(`${x(2044)}{ & &:focus{outline:none;} }\n`), { found: 1, bound: 0 }); // 9 + 2*2043 = 4095
   assert.deepEqual(await reasonsOf(`${x(2045)}{ & &:focus{outline:none;} }\n`), { found: 0, bound: 1 }); // 9 + 2*2044 = 4097
+});
+
+test("P1 containment: the bound is 4,096 UTF-8 bytes, not UTF-16 units (multibyte exact-limit and one-byte-over cases)", async () => {
+  const boundOf = async (css) => {
+    const dir = await mkdtemp(path.join(tmpdir(), "uiux-p1-"));
+    try {
+      await writeFile(path.join(dir, "f.scss"), css);
+      const a = await runAudit(dir);
+      return a.detectorsUnexaminable.filter((u) => /decided bound/.test(u.reason)).length;
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  };
+  const bytes = (s) => Buffer.byteLength(s);
+  // a class name of exactly n UTF-8 bytes whose tail is `ch` repeated (2-byte \u00e9 or 3-byte \u20ac), padded with ASCII to the exact size
+  const name = (n, ch) => {
+    const k = Math.floor((n - 1) / bytes(ch));
+    const body = "." + ch.repeat(k);
+    return body + "a".repeat(n - bytes(body));
+  };
+  for (const ch of ["\u00e9", "\u20ac"]) {
+    const exact = name(4096 - 6, ch) + ":focus"; // 4,096 bytes, far fewer UTF-16 units
+    const over = name(4097 - 6, ch) + ":focus"; // 4,097 bytes
+    assert.equal(bytes(exact), 4096);
+    assert.equal(bytes(over), 4097);
+    assert.ok(exact.length < 4096 - 1000, "the exact case has far fewer UTF-16 units than bytes");
+    assert.equal(await boundOf(`${exact}{outline:none;}\n`), 0, `exact limit, ${ch}`);
+    assert.equal(await boundOf(`${over}{outline:none;}\n`), 1, `one byte over, ${ch}`);
+    // a descendant join counts the space: parent + 1 + part
+    const parent = name(2047, ch);
+    assert.equal(await boundOf(`${parent}{ ${name(2048, ch)}{outline:none;} }\n`), 0, `join, exact, ${ch}`);
+    assert.equal(await boundOf(`${parent}{ ${name(2049, ch)}{outline:none;} }\n`), 1, `join, one over, ${ch}`);
+    // an `&` substitution counts one copy of the parent per `&`: "& &:focus" is 7 + 2 * parent bytes
+    assert.equal(await boundOf(`${name(2044, ch)}{ & &:focus{outline:none;} }\n`), 0, `ampersand, 4,095, ${ch}`);
+    assert.equal(await boundOf(`${name(2045, ch)}{ & &:focus{outline:none;} }\n`), 1, `ampersand, 4,097, ${ch}`);
+  }
+  // UTF-16 counting would let this through: 2,049 two-byte characters are 2,049 units but 4,098 bytes
+  assert.equal(await boundOf(`.${"\u00e9".repeat(2049)}:focus{outline:none;}\n`), 1);
 });
