@@ -361,11 +361,381 @@ const MARKUP_EXTENSIONS = new Set([".html", ".htm", ".vue", ".svelte", ".jsx", "
 const STYLE_EXTENSIONS = new Set([".css", ".scss", ".less"]);
 
 /**
+ * Resolve SCSS interpolation spans (`#{ ... }`) without changing the text's length or line structure.
+ *
+ * The block matcher splits on braces, so an interpolation cuts a rule into fragments. Resolving keeps
+ * every offset valid. Each span is one of two things:
+ *
+ *   STATIC   its content is a bare keyword, number or `!important`, or a quoted literal - Sass
+ *            interpolates those verbatim - so the content is substituted (`#{none}` reads as `none`,
+ *            `#{!important}` as `!important`). The content is read from `sourceText`, because the
+ *            structure view blanks a quoted literal. It is padded with spaces to the span's length, on
+ *            the side that keeps it from fusing with an adjacent identifier character.
+ *   DYNAMIC  anything else (a variable, a function call, a map, arithmetic, an unterminated span).
+ *            Its value is unknowable here, so it is masked with `_` and its range returned; the
+ *            detector decides whether not knowing it makes a block unexaminable.
+ *
+ * Returns the resolved text; a dynamic span's characters are UNKNOWN, so whichever block owns that
+ * text owns the unknown, with no separate range bookkeeping.
+ */
+/** Stands in for every character of an interpolation whose value is not statically knowable. */
+const UNKNOWN = "\uE000";
+
+function resolveInterpolation(text, sourceText = text, rawText = sourceText, readable = true) {
+  const isIdent = (ch) => ch !== undefined && /[A-Za-z0-9_-]/.test(ch);
+  // Pass 1: find every span, and read its content when it is statically readable.
+  const spans = [];
+  for (let i = 0; i < text.length; ) {
+    // Sass #{...} and Less @{...} interpolation: a brace here does not open a block
+    if ((text[i] !== "#" && text[i] !== "@") || text[i + 1] !== "{") {
+      i++;
+      continue;
+    }
+    // a Less span is never read (its value is a variable), and neither is Sass interpolation outside Sass
+    const lessSpan = text[i] === "@" || !readable;
+    let depth = 0;
+    let j = i + 1;
+    for (; j < text.length; j++) {
+      if (text[j] === "{") depth++;
+      else if (text[j] === "}" && --depth === 0) break;
+    }
+    const terminated = j < text.length;
+    const end = Math.min(j + 1, text.length); // an unterminated span is masked to the end
+    const inner = terminated ? sourceText.slice(i + 2, j).trim() : null;
+    // The views blank quote characters, so quoting is read from the raw file text: the BARE value
+    // `null` interpolates to nothing, while the string "null" interpolates to the text null.
+    const raw = terminated ? rawText.slice(i + 2, j).trim() : null;
+    let literal = !lessSpan && inner !== null && /^!?[A-Za-z0-9_.%-]+$/.test(inner) ? inner : null;
+    // A plain quoted string interpolates to its text, punctuation included (#{":focus"} is :focus).
+    const quoted = raw !== null ? /^(["'])([^"'\\\n{}#]*)\1$/.exec(raw) : null;
+    if (quoted !== null && !lessSpan) literal = quoted[2];
+    if (literal === "null" && raw === "null") literal = "";
+    spans.push({ start: i, end, literal });
+    i = end;
+  }
+  // Adjacent spans are ONE value: Sass concatenates them (#{n}#{one} is none). A run is readable only
+  // if every member is, and then its text is the concatenation, laid out contiguously.
+  const runs = [];
+  for (const span of spans) {
+    const last = runs[runs.length - 1];
+    if (last && last.end === span.start) {
+      last.end = span.end;
+      last.parts.push(span.literal);
+    } else runs.push({ start: span.start, end: span.end, parts: [span.literal] });
+  }
+  // Pass 2: write the text.
+  let out = "";
+  let at = 0;
+  for (const run of runs) {
+    out += text.slice(at, run.start);
+    const width = run.end - run.start;
+    const literal = run.parts.every((part) => part !== null) ? run.parts.join("") : null;
+    const before = text[run.start - 1];
+    const after = text[run.end];
+    // Fixed length cannot keep BOTH the colon's adjacency and an ident suffix (`:#{focus}-visible`
+    // is `:focus-visible`, three characters shorter): spaces after a colon would split the pseudo-class
+    // name, so that position is not readable and the span is masked rather than misread.
+    // The same holds before an opening parenthesis (`:#{not}(:focus)` is `:not(:focus)`): padding on the
+    // right would turn the functional pseudo-class into a name and a parenthesised group.
+    const splitsPseudo =
+      literal !== null && literal.length < width && ((before === ":" && isIdent(after)) || after === "(");
+    if (literal !== null && literal.length <= width && !(isIdent(before) && isIdent(after)) && !splitsPseudo) {
+      out += isIdent(after) ? literal.padStart(width, " ") : literal.padEnd(width, " ");
+    } else {
+      out += text.slice(run.start, run.end).replace(/[^\n]/g, UNKNOWN);
+    }
+    at = run.end;
+  }
+  return out + text.slice(at);
+}
+
+/**
+ * ONE small block tree for the static style detectors. Each node carries:
+ *
+ *   selector    its own selector text (an at-rule's prelude for an at-rule)
+ *   atRule      the at-rule name, or null for a style rule. A prelude is not a selector.
+ *   composed    the FULL selectors of a style rule, from its ancestors: `&` resolved, a descendant
+ *               combinator otherwise, comma lists as a cross product. An at-rule contributes nothing;
+ *               its children compose against the nearest style-rule ancestor.
+ *   body        the text the block OWNS - child blocks blanked - so a declaration, and an unknown
+ *               span within it, belongs to exactly one block.
+ */
+function parseBlocks(text, rawText = text) {
+  const frames = [];
+  const stack = [];
+  let boundary = -1;
+  for (let i = 0; i < text.length; i++) {
+    const ch = text[i];
+    if (ch === "{") {
+      const frame = { selStart: boundary + 1, open: i, close: text.length, children: [], parent: stack[stack.length - 1] ?? null };
+      stack.push(frame);
+      frames.push(frame);
+      boundary = i;
+    } else if (ch === "}") {
+      const frame = stack.pop();
+      if (frame) {
+        frame.close = i;
+        if (frame.parent) frame.parent.children.push([frame.selStart, i + 1]);
+      }
+      boundary = i;
+    } else if (ch === ";") {
+      boundary = i;
+    }
+  }
+  // A block still open at end of input (an unterminated interpolation swallowed its brace) keeps
+  // close = end of input, and is still a block. It is also a child of its parent, so the parent's own
+  // text does not include it (parsing stays linear however many blocks are left open).
+  while (stack.length > 0) {
+    const frame = stack.pop();
+    frame.close = text.length;
+    if (frame.parent) frame.parent.children.push([frame.selStart, text.length]);
+  }
+
+  const nodes = new Map();
+  const out = [];
+  for (const frame of frames) {
+    // frames are in source order, so a parent is always built before its children
+    const selector = text.slice(frame.selStart, frame.open);
+    const trimmed = selector.trim();
+    // At-rule names are ASCII case-insensitive: @MEDIA is @media.
+    let atRule = trimmed.startsWith("@") ? (/^@([A-Za-z-]+)/.exec(trimmed)?.[1] ?? "").toLowerCase() : null;
+    // A name that is only partly interpolated (`@-#{$v}-keyframes`, `@med#{$x}`) is not knowable
+    // either: it is treated as the unknown name, never as the readable prefix.
+    if (atRule !== null && trimmed.slice(1).replace(/^[A-Za-z-]*/, "").startsWith(UNKNOWN)) atRule = "";
+    // the text the block OWNS: its own segments between child blocks, joined by one space
+    const ownParts = [];
+    let pos = frame.open + 1;
+    for (const [from, to] of frame.children) {
+      const start = Math.max(from, pos);
+      if (start > pos) ownParts.push(text.slice(pos, start));
+      pos = Math.max(pos, Math.min(to, frame.close));
+    }
+    if (pos < frame.close) ownParts.push(text.slice(pos, frame.close));
+    const parent = frame.parent ? nodes.get(frame.parent) : null;
+    const depth = (parent ? parent.depth : 0) + 1;
+    // The inherited CONTEXT is what a child composes against: `parents` are the selectors a
+    // `&` names, and `reset` says whether a plain child is still a descendant of them. It is
+    // carried through every non-rule block, so a reset set by @at-root reaches the first style rule
+    // however many group at-rules sit between.
+    const ctx = parent ? parent.ctx : { parents: [""], reset: false, reasons: [null] };
+    // why each composed branch is off the closed list because of how its HEAD is written (an interpolation, a
+    // comment inside it), carried per branch through nesting: reasons[k] belongs to composed[k]
+    let reasons;
+    // Selector semantics of an at-rule:
+    //   group at-rules       inherit the context, and own declarations bubble to the enclosing rule
+    //   @at-root             follows Sass's query semantics (see atRootResets): a query that drops
+    //                        rules sets reset for what is inside; one that keeps rules leaves the
+    //                        context untouched and its own declarations belong to the enclosing rule.
+    //                        `@at-root .sel { }` is itself a style rule with that selector.
+    //   control / mixin / include-with-content: the selectors inside depend on code not modelled
+    //                        here, so everything inside is opaque and never examined as a finding.
+    //   anything else (@keyframes, @font-face, ...) has no selector semantics: the context passes
+    //                        through and none of it is focus-relevant.
+    // A colon followed by whitespace (or the end) after a property name makes a prelude a declaration;
+    // `a:hover` and `:focus` are selectors.
+    // A custom property is a declaration whatever follows its colon (`--x:foo {`, `--x:fn({`); an
+    // ordinary property needs whitespace or the end, because `a:hover` is a selector.
+    const declaration =
+      atRule === null ? /^(?:(--[\w-]*)\s*:|([\w\u{E000}-]+)\s*:(?:\s|$))/u.exec(trimmed) : null;
+    const declarationName = declaration ? (declaration[1] ?? declaration[2]) : null;
+    let opaque = (parent?.opaque ?? false) || (atRule !== null && OPAQUE_AT_RULES.has(atRule));
+    let composed;
+    let childCtx;
+    let rootEmitted = false;
+    if (atRule === "at-root") {
+      const prelude = trimmed.replace(/^@at-root/i, "").trim();
+      if (prelude === "" || prelude.startsWith("(")) {
+        const resets = prelude === "" ? true : atRootResets(prelude);
+        if (resets === null) opaque = true; // a query that cannot be read is not guessed at
+        const drops = resets !== false;
+        composed = drops ? [""] : ctx.reset ? [""] : ctx.parents;
+        reasons = drops || ctx.reset ? [null] : ctx.reasons;
+        childCtx = { parents: ctx.parents, reset: ctx.reset || drops, reasons: ctx.reasons };
+      } else {
+        composed = composeSelectors(prelude, ctx.parents, true);
+        reasons = branchReasons(composed, prelude, rawText.slice(frame.selStart, frame.open), ctx.parents.length, [null]);
+        childCtx = { parents: composed, reset: false, reasons };
+      }
+    } else if (atRule !== null && ROOT_EMITTED_AT_RULES.has(atRule.replace(/^-[a-z]+-/, ""))) {
+      // dart-sass: inside a style rule an at-rule is bubbled to the root and its contents are
+      // wrapped in the enclosing rule - except in @keyframes and @font-face, whose contents are not.
+      rootEmitted = true;
+      composed = [""];
+      reasons = [null];
+      childCtx = { parents: [""], reset: true, reasons: [null] };
+    } else if (atRule !== null) {
+      // The conditional group at-rules keep the enclosing rule around their declarations. Any other at-rule
+      // (@page and the descriptor at-rules, an unknown one) is not decided: its contents are not selector
+      // context the list reads. A name that is itself interpolated is not knowable either.
+      if (atRule === "" || !GROUP_AT_RULES.has(atRule.replace(/^-[a-z]+-/, ""))) opaque = true;
+      composed = ctx.reset ? [""] : ctx.parents;
+      reasons = ctx.reset ? [null] : ctx.reasons;
+      childCtx = ctx;
+    } else if (declaration) {
+      // `name: {` or `name: value {`: a block that belongs to a DECLARATION, not a rule. `--x: { }`
+      // is a custom property's value (data); `outline: { style: none }` is Sass property nesting.
+      composed = ctx.reset ? [""] : ctx.parents;
+      reasons = ctx.reset ? [null] : ctx.reasons;
+      childCtx = ctx;
+    } else {
+      composed = composeSelectors(selector, ctx.parents, ctx.reset);
+      reasons = branchReasons(composed, selector, rawText.slice(frame.selStart, frame.open), ctx.parents.length, ctx.reasons);
+      childCtx = { parents: composed, reset: false, reasons };
+    }
+    // work is bounded: a rule nested deeper than MAX_DEPTH is not composed at all
+    if (depth > MAX_DEPTH) {
+      composed = [TOO_DEEP];
+      reasons = [null];
+      childCtx = { parents: [TOO_DEEP], reset: false, reasons: [null] };
+    }
+    const node = {
+      depth,
+      selector,
+      selectorStart: frame.selStart,
+      atRule,
+      rootEmitted,
+      // dataBlock: a custom property's value; propNest: the property name of a Sass nested property
+      // block. Neither is a rule, and nothing inside either is read as one.
+      dataBlock: declaration !== null && declarationName.startsWith("--"),
+      propNest: declaration !== null && !declarationName.startsWith("--") ? declarationName : null,
+      inside: parent !== null && (parent.inside || parent.dataBlock || parent.propNest !== null),
+      opaque,
+      ctx: childCtx,
+      parent,
+      body: ownParts.join(" "),
+      composed,
+      reasons,
+    };
+    nodes.set(frame, node);
+    out.push(node);
+  }
+  return out;
+}
+
+/**
+ * Sass `@at-root` query semantics. Returns true when the query excludes style rules (so what is
+ * inside is no longer a descendant of the enclosing rule), false when it keeps them, and null when
+ * the query cannot be read.
+ *
+ *   (without: <names>)  excludes what it lists: resets iff the list contains `rule` or `all`
+ *   (with: <names>)     excludes everything it does not list: resets iff the list contains neither
+ *                       `rule` nor `all`
+ *   no query            defaults to (without: rule): resets
+ * Names such as `media` and `supports` concern at-rules only and never decide it.
+ */
+function atRootResets(prelude) {
+  const m = /^\(\s*(with|without)\s*:\s*([^()]*)\)$/i.exec(prelude);
+  if (!m || m[2].includes(UNKNOWN)) return null;
+  const names = m[2].toLowerCase().split(/[\s,]+/).filter(Boolean);
+  if (names.length === 0) return null;
+  const listsRule = names.includes("rule") || names.includes("all");
+  return m[1].toLowerCase() === "without" ? listsRule : !listsRule;
+}
+
+/** At-rules whose contents Sass does NOT wrap in the enclosing style rule (vendor prefix ignored). */
+const ROOT_EMITTED_AT_RULES = new Set(["keyframes", "font-face"]);
+/** The at-rules whose contents are selector context: a conditional group rule wraps its rules and declarations. */
+const GROUP_AT_RULES = new Set(["media", "supports", "container", "layer", "document", "starting-style"]);
+const OPAQUE_AT_RULES = new Set(["include", "each", "if", "else", "for", "while", "function", "mixin", "content", "return", "scope"]);
+
+/** Split on commas outside parentheses and brackets. */
+function splitSelectorList(selector) {
+  const parts = [];
+  let depth = 0;
+  let current = "";
+  for (const ch of selector) {
+    if (ch === "(" || ch === "[") depth++;
+    else if (ch === ")" || ch === "]") depth = Math.max(0, depth - 1);
+    if (ch === "," && depth === 0) {
+      parts.push(current);
+      current = "";
+    } else current += ch;
+  }
+  parts.push(current);
+  return parts.map((part) => part.trim()).filter((part) => part.length > 0);
+}
+
+/** A selector head split on top-level commas, with each part's [start, end) offsets in the head. */
+function headPartRanges(head) {
+  const ranges = [];
+  let depth = 0;
+  let start = 0;
+  for (let i = 0; i < head.length; i++) {
+    const ch = head[i];
+    if (ch === "(" || ch === "[") depth++;
+    else if (ch === ")" || ch === "]") depth = Math.max(0, depth - 1);
+    else if (ch === "," && depth === 0) {
+      ranges.push([start, i]);
+      start = i + 1;
+    }
+  }
+  ranges.push([start, head.length]);
+  return ranges.filter(([a, b]) => head.slice(a, b).trim().length > 0);
+}
+
+/** "interpolation" | "comment" | null for one raw part of a selector head. */
+const ATTRIBUTE_RAW = /^\s*[A-Za-z_-][\w-]*\s*(?:[~|^$*]?=\s*(?:"[^"]*"|'[^']*'|[A-Za-z_-][\w-]*)\s*[iIsS]?)?$/;
+
+function headPartReason(rawPart) {
+  // comments LEADING the part are not inside it (and may mention anything)
+  const inner = rawPart.replace(/^(?:\s|\/\*[\s\S]*?\*\/|\/\/[^\n]*(?:\n|$))*/, "");
+  if (inner.includes("#{") || inner.includes("@{")) return "interpolation";
+  // Sass allows the parent selector only at the start of a compound (span& and .a& are errors)
+  if (/[^\s>+~,(&]&/.test(inner.replace(/\[[^\]]*\]/g, ""))) return "syntax";
+  // an attribute selector is validated against the RAW text, where a quoted value is still a quoted value
+  for (const m of inner.matchAll(/\[([^\]]*)\]/g)) if (!ATTRIBUTE_RAW.test(m[1])) return "syntax";
+  // a comment INSIDE the part would be replaced by padding that reads as a combinator;
+  // quoted attribute values are data
+  const unquoted = inner.replace(/"(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*'/g, "");
+  return unquoted.includes("/*") || unquoted.includes("//") ? "comment" : null;
+}
+
+/**
+ * The head-written reason of every composed branch. Branch k is part Math.floor(k / parents) crossed with
+ * parent k % parents (composeSelectors' order), so a part's reason is replicated across its parent
+ * compositions and a parent's across its parts. When the parts cannot be lined up the whole rule is
+ * flagged if any part is.
+ */
+function branchReasons(composed, resolvedHead, rawHead, parentCount, parentReasons) {
+  // an empty member (a leading, trailing or repeated comma) makes the whole selector list invalid
+  if (resolvedHead.trim().length > 0 && resolvedHead.split(",").some((part, i, all) => part.trim() === "" && all.length > 1)) {
+    return composed.map(() => "syntax");
+  }
+  const ranges = headPartRanges(resolvedHead);
+  const partReasons = ranges.map(([a, b]) => headPartReason(rawHead.slice(a, b)));
+  if (composed.length === ranges.length * parentCount) {
+    return composed.map((_, k) => partReasons[Math.floor(k / parentCount)] ?? parentReasons[k % parentCount] ?? null);
+  }
+  const any = partReasons.find((r) => r !== null) ?? parentReasons.find((r) => r !== null) ?? null;
+  return composed.map(() => any);
+}
+
+/** Bounds on the work per rule: a longer composed list, or deeper nesting, is routed to unexaminable. */
+const MAX_COMPOSED = 256;
+const MAX_DEPTH = 32;
+const OVER_CAP = "";
+const TOO_DEEP = "";
+
+function composeSelectors(selector, parents, reset = false) {
+  const composed = [];
+  const parts = splitSelectorList(selector);
+  if (parts.length * parents.length > MAX_COMPOSED) return [OVER_CAP];
+  for (const part of parts) {
+    for (const parent of parents) {
+      // at the stylesheet root there is no parent: a top-level & is invalid Sass and stays unresolved (off the list)
+      if (part.includes("&")) composed.push(part.replaceAll("&", parent === "" ? "&" : parent));
+      else composed.push(parent === "" || reset ? part : `${parent} ${part}`);
+    }
+  }
+  return composed;
+}
+
+/**
  * True when the ring width a declaration block `@apply`s ends up non-zero.
  *
  * Model, from the Tailwind v3 documentation (https://v3.tailwindcss.com/docs/functions-and-directives):
  * "If you'd like to @apply an existing class and make it !important, simply add !important to the
- * end of the declaration" — so a trailing standalone `!important` makes every utility in that one
+ * end of the declaration" - so a trailing standalone `!important` makes every utility in that one
  * @apply declaration important, and a per-token `!ring-N` / `ring-N!` makes that token important.
  * An important declaration beats a non-important one regardless of order; among declarations of the
  * same importance the later one wins, as utilities are applied in source order. Tokens are read
@@ -391,6 +761,503 @@ function appliesRingWidth(body) {
     }
   }
   return ring;
+}
+
+/* ------------------------------------------------------------------------------------------------
+ * focus-visible-removal: the CLOSED LIST of forms the detector decides.
+ *
+ * The detector decides a small, closed set of forms and routes EVERYTHING else to
+ * `detectorsUnexaminable` with a named reason: an unknown is never an exemption and never a pass. It
+ * does not model the CSS cascade (importance, specificity, source order, layers, `all`, custom
+ * properties, Sass variables, functional selectors). A new form is added to the list only with a
+ * decision and a test; it is never modelled in passing. docs/integration-contract.md states the list.
+ *
+ * DECIDED (one block, plain literal values):
+ *   - a style rule whose selector branches are simple selectors (type, class, id, attribute, universal,
+ *     combinators) with pseudo-classes from DECIDED_PSEUDO_CLASSES, pseudo-elements from
+ *     DECIDED_PSEUDO_ELEMENTS, and `:not(:focus-visible)`;
+ *   - the rule removes the outline with exactly one `outline` declaration whose value is `none` or `0`;
+ *   - a replacement indicator is a declaration of box-shadow / border / border-color / border-bottom /
+ *     background / background-color / text-decoration with a
+ *     literal non-disabled value, or an `@apply` of a ring-width utility, in the SAME block;
+ *   - `:focus:not(:focus-visible)` is the mouse-only exemption;
+ *   - SCSS interpolation whose value is statically readable (`#{none}`, quoted literals), and nesting
+ *     whose enclosing rules declare nothing the nested rule could inherit.
+ * ---------------------------------------------------------------------------------------------- */
+
+/** Pseudo-classes and pseudo-elements the selector reading decides; any other is off the list. */
+const DECIDED_PSEUDO_CLASSES = new Set([
+  "focus", "focus-visible", "focus-within", "hover", "active", "visited", "link", "disabled", "enabled",
+  "checked", "required", "optional", "invalid", "valid", "read-only", "read-write", "placeholder-shown",
+  "first-child", "last-child", "only-child", "first-of-type", "last-of-type", "only-of-type", "empty", "target",
+]);
+const DECIDED_PSEUDO_ELEMENTS = new Set(["before", "after", "first-line", "first-letter", "placeholder", "selection", "marker"]);
+
+/** Each reason a form is routed to detectorsUnexaminable. The text is part of the contract. */
+const UNEXAMINABLE_REASONS = {
+  selectorInterpolation: "an interpolation in the selector may make it a focus rule",
+  selectorPlaceholder: "a Sass placeholder selector emits nothing unless it is extended, and an @extend may be in another file",
+  selectorBound: "the rule is nested deeper, or its composed selector list is longer, than the decided bound (32 levels, 256 selectors)",
+  selectorComment: "a comment inside the selector may split or join its compounds",
+  selectorSyntax: "a selector the closed list does not positively recognise (malformed or unlisted syntax)",
+  selectorEscape: "a CSS escape in the selector may spell a focus pseudo-class",
+  selectorFunctional: "a functional or unlisted pseudo-class selector is outside the decided list of selector forms",
+  selectorOpaque: "it sits inside an @include / control directive / mixin whose selector semantics are not modelled",
+  outlineForm: "the outline is not removed by exactly one plain 'outline: none|0' declaration (several declarations, a longhand, all:, an important or unresolved value are not decided)",
+  replacementForm: "a replacement indicator is not a plain literal in this block (an unresolved, calculated, disabled, important or repeated value is not decided)",
+  propertyName: "an interpolation or a CSS escape in a property name may be outline or an indicator property",
+  declarationForm: "an interpolation outside a property: value declaration",
+  opaqueChild: "a control directive, @include, @extend or mixin call in the rule may change its declarations, which are not modelled",
+  nested: "a nested rule inherits declarations of an enclosing rule or layer, and the cascade between them is not decided",
+  nestedProperty: "a nested property block spells its declarations indirectly",
+};
+
+/** A value that is not a plain literal: a custom property, Sass variable, calculation or interpolation. */
+// (a backslash makes the value an escape sequence that could spell any keyword: not decided either)
+const UNRESOLVED_VALUE = /(^|[^\w-])(var|env|calc|min|max|clamp)\(|\$[A-Za-z_-]|\\/i;
+const IMPORTANT = /!\s*important\s*$/i;
+const DISABLED_LITERAL = /^(none|hidden|0+(\.0*)?[a-z%]*|initial|unset|revert|revert-layer|transparent|inherit)$/i;
+
+/** Declaration properties whose value decides whether a focus indicator exists. */
+const FOCUS_RELEVANT_PROPERTY = /^(outline(-[a-z]+)?|box-shadow|border(-[a-z]+)*|background(-[a-z]+)?|text-decoration(-[a-z]+)?|--tw-ring[a-z-]*|ring[a-z-]*|filter|all)$/i;
+const REPLACEMENT_FAMILY = (property) => {
+  // only the properties that can BE a replacement indicator or disable one: border-radius, background-position,
+  // filter, ring variables and the rest are not indicators and do not matter
+  const p = property.toLowerCase();
+  if (p === "box-shadow") return "box-shadow";
+  if (/^border(-(top|right|bottom|left|block|inline)(-(start|end))?)?(-(style|width|color))?$/.test(p)) return "border";
+  if (/^background(-(color|image))?$/.test(p)) return "background";
+  if (/^text-decoration(-(line|color|style|thickness))?$/.test(p)) return "text-decoration";
+  return null;
+};
+/** The properties that ARE a replacement indicator when their literal value is not disabled (facet longhands only modify one). */
+const INDICATOR_PROPERTY =
+  /^(box-shadow|border(-(top|right|bottom|left|block|inline)(-(start|end))?)?|background(-color)?|text-decoration(-line)?)$/i;
+
+/** A block's own text split at top-level semicolons (one inside parentheses, as in a data: URL, ends nothing). */
+function splitDeclarations(body) {
+  const parts = [];
+  let depth = 0;
+  let current = "";
+  for (const ch of body) {
+    if (ch === "(") depth++;
+    else if (ch === ")") depth = Math.max(0, depth - 1);
+    if (ch === ";" && depth === 0) {
+      parts.push(current);
+      current = "";
+    } else current += ch;
+  }
+  parts.push(current);
+  return parts;
+}
+
+/** The declarations of a block as {property, value}; the value keeps its `!important`. */
+function declarationsOf(body) {
+  const out = [];
+  for (const raw of splitDeclarations(body)) {
+    const text = raw.trim();
+    if (text === "") continue;
+    if (/^@apply\b/i.test(text)) {
+      out.push({ property: "@apply", value: text.slice(6).trim(), raw: text });
+      continue;
+    }
+    const colon = text.indexOf(":");
+    if (colon === -1) continue;
+    out.push({ property: text.slice(0, colon).trim(), value: text.slice(colon + 1).trim(), raw: text });
+  }
+  return out;
+}
+
+/**
+ * The mouse-only idiom: the SUBJECT compound holds both the focus pseudo-class and its exclusion
+ * `:not(:focus-visible)`, in either order and with other simple selectors between them
+ * (`:focus:hover:not(:focus-visible)`). Only plain, listed selectors reach here, so the one parenthesis is that exclusion.
+ */
+function hidesRingFromMouseOnly(selector) {
+  const compounds = selectorCompounds(selector);
+  const subject = compounds.length > 0 ? compounds[compounds.length - 1] : selector;
+  return /:not\(\s*:focus-visible\s*\)/i.test(subject) && /:focus(?![A-Za-z0-9_-])/i.test(subject.replace(/:not\(\s*:focus-visible\s*\)/gi, ""));
+}
+
+/** A Sass placeholder selector: %name inside a compound (50% is a keyframe selector). */
+const PLACEHOLDER = /(?<![\d.])%[A-Za-z_-]/;
+
+/** A focus pseudo-class a selector names. `:focus-within` is one: it is matched by the `:focus` prefix. */
+const FOCUS_SELECTOR = /:focus(-visible|-within)?(?![A-Za-z0-9_-])/i;
+
+/**
+ * True when a selector could be a focus rule: it names focus, or it is a form the closed list does not
+ * read (a functional pseudo-class, an interpolation, a placeholder, :host) and so might hide one.
+ */
+function mayBeFocusRule(selector) {
+  return (
+    selector.includes(OVER_CAP) ||
+    selector.includes(TOO_DEEP) ||
+    /focus/i.test(selector) ||
+    selector.includes("\\") ||
+    selector.includes(UNKNOWN) ||
+    PLACEHOLDER.test(selector) ||
+    /:(is|where|not|has|matches|host|host-context|nth-[a-z-]+|-webkit-any|-moz-any)\b/i.test(selector) ||
+    /\(/.test(selector)
+  );
+}
+
+/** Why a selector branch is outside the closed list, or null when it is a decided form. */
+/**
+ * The decided selector syntax, positively recognised: compounds of an optional type or universal selector and
+ * any number of #id, .class, [attribute], :pseudo-class and ::pseudo-element parts, joined by a descendant,
+ * child, next-sibling or subsequent-sibling combinator (a leading one is allowed: a nested rule). A selector
+ * that does not match (`:focus..x`, `a >> b`, a trailing combinator) is not valid CSS or is not recognised.
+ */
+const WELL_FORMED_SELECTOR = (() => {
+  const ident = "-?[A-Za-z_][\\w-]*";
+  const simple = "(?:#" + ident + "|\\." + ident + "|\\[[^\\]]*\\]|::?" + ident + "(?:\\([^()]*\\))?)";
+  const compound = "(?:(?:\\*|" + ident + ")" + simple + "*|" + simple + "+)";
+  const combinator = "(?:\\s*[>+~]\\s*|\\s+)";
+  return new RegExp("^\\s*" + compound + "(?:" + combinator + compound + ")*\\s*$");
+})();
+// the structure view blanks a quoted value (quotes included) to two or more spaces, so a value is an identifier
+// or a blanked string; `[foo=]` has neither
+const ATTRIBUTE = /^\s*[A-Za-z_-][\w-]*\s*(?:[~|^$*]?=\s*(?: {2,}|[A-Za-z_-][\w-]*)\s*(?:[iIsS])?)?$/;
+
+const KNOWN_FUNCTIONAL_PSEUDO = new Set([
+  "is", "where", "not", "has", "matches", "host", "host-context", "nth-child", "nth-last-child", "nth-of-type",
+  "nth-last-of-type", "lang", "dir", "-webkit-any", "-moz-any",
+]);
+
+/**
+ * True when a selector names a pseudo-class or pseudo-element that is not known to be valid: the browser discards
+ * a selector list that holds an invalid member, so uncertainty in ONE member leaves the whole list undecided.
+ */
+function hasUnknownPseudoName(selector) {
+  const stripped = selector.replace(/\[[^\]]*\]/g, "");
+  for (const m of stripped.matchAll(/(::?)([A-Za-z-]+)(\()?/g)) {
+    const name = m[2].toLowerCase();
+    if (m[1] === "::") {
+      if (!DECIDED_PSEUDO_ELEMENTS.has(name)) return true;
+    } else if (m[3] === "(") {
+      if (!KNOWN_FUNCTIONAL_PSEUDO.has(name)) return true;
+      // its argument must be balanced, non-empty and, for the nth-* family, an An+B expression
+      let depth = 1;
+      let end = m.index + m[0].length;
+      for (; end < stripped.length && depth > 0; end++) {
+        if (stripped[end] === "(") depth++;
+        else if (stripped[end] === ")") depth--;
+      }
+      const argument = depth === 0 ? stripped.slice(m.index + m[0].length, end - 1).trim() : "";
+      if (argument === "") return true;
+      if (/^nth-/.test(name) && !/^(?:even|odd|[+-]?\d*n(?:\s*[+-]\s*\d+)?|[+-]?\d+)(?:\s+of\s+[\s\S]+)?$/i.test(argument)) return true;
+    } else if (!DECIDED_PSEUDO_CLASSES.has(name) && !["before", "after", "first-line", "first-letter"].includes(name)) {
+      return true;
+    }
+  }
+  return false;
+}
+
+function offListSelector(selector) {
+  if (selector.includes(OVER_CAP) || selector.includes(TOO_DEEP)) return UNEXAMINABLE_REASONS.selectorBound;
+  if (selector.includes(UNKNOWN)) return UNEXAMINABLE_REASONS.selectorInterpolation;
+  if (selector.includes("\\")) return UNEXAMINABLE_REASONS.selectorEscape;
+  if (PLACEHOLDER.test(selector)) return UNEXAMINABLE_REASONS.selectorPlaceholder;
+  const rest = selector
+    .replace(/\[[^\]]*\]/g, "")
+    .replace(/:not\(\s*:focus-visible\s*\)/gi, "");
+  if (/[()&]/.test(rest)) return UNEXAMINABLE_REASONS.selectorFunctional;
+  for (const m of rest.matchAll(/(::?)([A-Za-z-]+)/g)) {
+    const name = m[2].toLowerCase();
+    const legacy = ["before", "after", "first-line", "first-letter"].includes(name);
+    if (m[1] === "::" ? !DECIDED_PSEUDO_ELEMENTS.has(name) : !DECIDED_PSEUDO_CLASSES.has(name) && !legacy) {
+      return UNEXAMINABLE_REASONS.selectorFunctional;
+    }
+  }
+  // a pseudo-element cannot be the left side of a combinator: only the last compound may hold one
+  const compounds = selectorCompounds(selector);
+  for (const compound of compounds.slice(0, -1)) {
+    if (/::|:(before|after|first-line|first-letter)(?![A-Za-z-])/i.test(compound)) return UNEXAMINABLE_REASONS.selectorSyntax;
+  }
+  // within a compound only pseudo-classes may follow a pseudo-element (.x::before.foo and ::before::after are errors)
+  for (const compound of compounds) {
+    const element = /(?:::[A-Za-z-]+|:(?:before|after|first-line|first-letter)(?![A-Za-z-]))/i.exec(compound);
+    if (element !== null && !/^(?::(?:hover|active|focus|focus-visible)(?![A-Za-z-]))*$/i.test(compound.slice(element.index + element[0].length))) {
+      return UNEXAMINABLE_REASONS.selectorSyntax;
+    }
+  }
+  // the remaining syntax must be positively recognised, attribute selectors included
+  for (const m of selector.matchAll(/\[([^\]]*)\]/g)) if (!ATTRIBUTE.test(m[1])) return UNEXAMINABLE_REASONS.selectorSyntax;
+  if (!WELL_FORMED_SELECTOR.test(selector)) return UNEXAMINABLE_REASONS.selectorSyntax;
+  return null;
+}
+
+/**
+ * True when a plain, listed selector selects FOCUSED elements. Only called on selectors that passed
+ * offListSelector, so the only parenthesis is `:not(:focus-visible)`, which selects none of the focus
+ * pseudo-classes it names.
+ */
+function isFocusSelector(selector) {
+  // the focus pseudo-class must be on the SUBJECT (the last compound): `.btn:focus .icon` styles the icon
+  const compounds = selectorCompounds(selector);
+  const subject = compounds.length > 0 ? compounds[compounds.length - 1] : selector;
+  // a pseudo-element subject (`:focus::before`) is not the focused element: its outline starts as none
+  if (/::|:(before|after|first-line|first-letter)(?![A-Za-z-])/i.test(subject)) return false;
+  return FOCUS_SELECTOR.test(subject.replace(/:not\(\s*:focus-visible\s*\)/gi, ""));
+}
+
+/** Compound selectors of a selector: split on combinators and commas outside parentheses. */
+function selectorCompounds(selector) {
+  const out = [];
+  let depth = 0;
+  let current = "";
+  for (const ch of selector) {
+    if (ch === "(" || ch === "[") depth++;
+    else if (ch === ")" || ch === "]") depth = Math.max(0, depth - 1);
+    if (depth === 0 && /[\s>+~,]/.test(ch)) {
+      if (current) out.push(current);
+      current = "";
+    } else current += ch;
+  }
+  if (current) out.push(current);
+  return out;
+}
+
+/**
+ * The outline form of a block: { removes } when exactly one plain 'outline: none|0' decides, or
+ * { reason } when the outline is touched in a way the closed list does not decide.
+ */
+function outlineForm(declarations) {
+  const touching = declarations.filter((d) => /^(outline|outline-style|outline-width|all)$/i.test(d.property));
+  if (touching.length === 0) return { removes: false };
+  const only = touching[0];
+  const reason = UNEXAMINABLE_REASONS.outlineForm;
+  if (touching.length !== 1 || only.property.toLowerCase() !== "outline") return { reason };
+  if (/^(none|0)$/i.test(only.value)) return { removes: true };
+  return restoresOutline(only.value) ? { removes: false } : { reason };
+}
+
+/**
+ * A colour token that is positively opaque: a 3- or 6-digit hex, a three-component rgb()/hsl() (no alpha), a
+ * colour name other than transparent/currentcolor/the keywords, or a var()/env() in the colour place. A
+ * 4- or 8-digit hex, rgba()/hsla(), color-mix(), a gradient or a url() can paint nothing and is not decided.
+ */
+/** rgb() and hsl() in their actual grammars: every separator a comma (legacy) or every one a space (modern). */
+const COLOUR_FUNCTION = (() => {
+  const num = "(?:\\d+(?:\\.\\d+)?|\\.\\d+)";
+  const pct = num + "%";
+  const channel = "(?:" + num + "|" + pct + ")";
+  const hue = num + "(?:deg)?";
+  const forms = [
+    "rgb\\(\\s*" + num + "\\s*,\\s*" + num + "\\s*,\\s*" + num + "\\s*\\)",
+    "rgb\\(\\s*" + pct + "\\s*,\\s*" + pct + "\\s*,\\s*" + pct + "\\s*\\)",
+    "rgb\\(\\s*" + channel + "\\s+" + channel + "\\s+" + channel + "\\s*\\)",
+    "hsl\\(\\s*" + hue + "\\s*,\\s*" + pct + "\\s*,\\s*" + pct + "\\s*\\)",
+    "hsl\\(\\s*" + hue + "\\s+" + pct + "\\s+" + pct + "\\s*\\)",
+  ];
+  return new RegExp("^(?:" + forms.join("|") + ")$", "i");
+})();
+
+const NAMED_COLOURS = new Set("aliceblue antiquewhite aqua aquamarine azure beige bisque black blanchedalmond blue blueviolet brown burlywood cadetblue chartreuse chocolate coral cornflowerblue cornsilk crimson cyan darkblue darkcyan darkgoldenrod darkgray darkgreen darkgrey darkkhaki darkmagenta darkolivegreen darkorange darkorchid darkred darksalmon darkseagreen darkslateblue darkslategray darkslategrey darkturquoise darkviolet deeppink deepskyblue dimgray dimgrey dodgerblue firebrick floralwhite forestgreen fuchsia gainsboro ghostwhite gold goldenrod gray green greenyellow grey honeydew hotpink indianred indigo ivory khaki lavender lavenderblush lawngreen lemonchiffon lightblue lightcoral lightcyan lightgoldenrodyellow lightgray lightgreen lightgrey lightpink lightsalmon lightseagreen lightskyblue lightslategray lightslategrey lightsteelblue lightyellow lime limegreen linen magenta maroon mediumaquamarine mediumblue mediumorchid mediumpurple mediumseagreen mediumslateblue mediumspringgreen mediumturquoise mediumvioletred midnightblue mintcream mistyrose moccasin navajowhite navy oldlace olive olivedrab orange orangered orchid palegoldenrod palegreen paleturquoise palevioletred papayawhip peachpuff peru pink plum powderblue purple rebeccapurple red rosybrown royalblue saddlebrown salmon sandybrown seagreen seashell sienna silver skyblue slateblue slategray slategrey snow springgreen steelblue tan teal thistle tomato turquoise violet wheat white whitesmoke yellow yellowgreen".split(" "));
+
+function opaqueColour(token) {
+  if (/^#(?:[0-9a-f]{3}|[0-9a-f]{6})$/i.test(token)) return true;
+  // rgb()/hsl() in their actual grammars: all commas (legacy) or all spaces (modern), never mixed
+  if (COLOUR_FUNCTION.test(token)) return true;
+  if (/^(?:var|env)\(.*\)$/i.test(token)) return true;
+  // the finite CSS named-colour set: an unknown identifier makes the declaration invalid, so it paints nothing
+  return NAMED_COLOURS.has(token.toLowerCase());
+}
+
+/**
+ * An indicator value read against the GRAMMAR of its property, and decided only when it can be shown to paint:
+ *   box-shadow        comma layers of lengths, `inset` and one opaque colour
+ *   background(-color) one opaque colour (no image, no other part)
+ *   text-decoration   at least one line keyword (underline, overline, line-through), plus style keywords,
+ *                     a length and an opaque colour
+ *   text-decoration-line  one or more line keywords
+ * Anything else - a gradient, url(), rgba(), a 4/8-digit hex, transparent, an unknown identifier, a keyword the
+ * property does not accept - is not decided.
+ */
+function positiveIndicatorValue(property, value) {
+  const p = property.toLowerCase();
+  const length = (t) => /^[+-]?(?:0+\.?0*|\.0+|(?:\d+\.?\d*|\.\d+)(?:px|em|rem|ex|ch|vw|vh|pt|pc|cm|mm|in))$/i.test(t);
+  const tokensOf = (text) => text.trim().split(/\s+(?![^(]*\))/).filter(Boolean);
+  const line = /^(underline|overline|line-through)$/i;
+  if (p === "box-shadow") {
+    // a layer is two to four contiguous lengths (offsets, blur, spread), at most one inset and one colour
+    return splitLayers(value).every((layer) => {
+      const tokens = tokensOf(layer);
+      if (tokens.length === 0) return false; // an empty layer
+      const lengths = tokens.map((t, i) => (length(t) ? i : -1)).filter((i) => i >= 0);
+      const insets = tokens.filter((t) => /^inset$/i.test(t)).length;
+      const colours = tokens.filter((t) => opaqueColour(t)).length;
+      const contiguous = lengths.length > 0 && lengths[lengths.length - 1] - lengths[0] === lengths.length - 1;
+      // the third length is the blur radius, which must not be negative
+      const blur = lengths.length >= 3 ? tokens[lengths[2]] : "0";
+      // an outer shadow with every length zero (or a non-positive spread and no offset or blur) has no area
+      const [x, y, radius, spread] = [0, 1, 2, 3].map((k) => (k < lengths.length ? parseFloat(tokens[lengths[k]]) : 0));
+      if (!(x !== 0 || y !== 0 || radius > 0 || spread > 0)) return false;
+      // a negative spread contracts the shadow by an amount that depends on the (unknown) box: not decided
+      if (spread < 0) return false;
+      return contiguous && lengths.length >= 2 && lengths.length <= 4 && !blur.startsWith("-") && insets <= 1 && colours === 1 &&
+        lengths.length + insets + colours === tokens.length;
+    });
+  }
+  const tokens = tokensOf(value);
+  if (p === "background" || p === "background-color") {
+    return tokens.length === 1 && opaqueColour(tokens[0]) && splitLayers(value).length === 1;
+  }
+  // each line keyword at most once; a decoration has at most one style, one thickness and one colour
+  const lines = tokens.filter((t) => line.test(t)).map((t) => t.toLowerCase());
+  const uniqueLines = new Set(lines).size === lines.length;
+  // a decoration's colour defaults to currentcolor, which cannot be shown to paint: text-decoration-line alone is off the list
+  if (p === "text-decoration-line") return false;
+  if (p === "text-decoration") {
+    const styles = tokens.filter((t) => /^(solid|double|dotted|dashed|wavy)$/i.test(t)).length;
+    const lengths = tokens.filter((t) => length(t) && parseFloat(t) > 0).length;
+    const colours = tokens.filter((t) => opaqueColour(t)).length;
+    return lines.length > 0 && uniqueLines && styles <= 1 && lengths <= 1 && colours === 1 &&
+      lines.length + styles + lengths + colours === tokens.length;
+  }
+  return false;
+}
+
+/** A value split on top-level commas, EMPTY members kept (a trailing comma makes the declaration invalid). */
+function splitLayers(value) {
+  const layers = [];
+  let depth = 0;
+  let current = "";
+  for (const ch of value) {
+    if (ch === "(") depth++;
+    else if (ch === ")") depth = Math.max(0, depth - 1);
+    if (ch === "," && depth === 0) {
+      layers.push(current);
+      current = "";
+    } else current += ch;
+  }
+  layers.push(current);
+  return layers;
+}
+
+/**
+ * The decided restoring form: a non-zero literal width, a style other than none/hidden and at most one
+ * more token (the colour, which may be a var() custom property: the style and the width decide).
+ */
+function restoresOutline(value, allowAuto = true) {
+  const split = value.trim().split(/\s+(?![^(]*\))/).filter(Boolean);
+  const style = split.find((t) => (allowAuto ? /^(dotted|dashed|solid|double|groove|ridge|inset|outset|auto)$/i : /^(dotted|dashed|solid|double|groove|ridge|inset|outset)$/i).test(t));
+  const width = split.find((t) => /^(\d+\.?\d*|\.\d+)(px|em|rem)$/i.test(t) && parseFloat(t) > 0);
+  if (style === undefined || width === undefined) return false;
+  const rest = split.filter((t, i) => i !== split.indexOf(style) && i !== split.indexOf(width));
+  if (rest.length > 1) return false;
+  // the colour is mandatory: an omitted one is currentcolor, which cannot be shown to paint
+  if (rest.length === 0) return false;
+  // the one more token must be a colour: a hex, a function (rgb(), var()), or a colour name - not a
+  // number, a style or width keyword, or a CSS-wide value, which would make the shorthand invalid
+  const c = rest[0];
+  return opaqueColour(c);
+}
+
+/**
+ * Properties that can hide or replace what an indicator paints (a transparent border-image over the border, opacity,
+ * a clip or mask, a filter ...): the cascade between them and an indicator is not modelled, so a block that declares one
+ * is not decided.
+ */
+const PAINT_AFFECTING_PROPERTY =
+  /^(opacity|visibility|display|clip|clip-path|mask(-[a-z-]+)?|filter|backdrop-filter|mix-blend-mode|forced-color-adjust|content-visibility|border-image(-[a-z-]+)?)$/i;
+
+/** Why a block's replacement declarations are outside the closed list, or null. */
+function replacementReason(declarations) {
+  const seen = new Set();
+  let paintAffecting = false;
+  for (const d of declarations) {
+    if (PAINT_AFFECTING_PROPERTY.test(d.property)) paintAffecting = true;
+    // a repeated indicator property: which declaration wins is the cascade, which is not modelled
+    const key = d.property.toLowerCase();
+    if (REPLACEMENT_FAMILY(d.property) !== null) {
+      if (seen.has(key)) return UNEXAMINABLE_REASONS.replacementForm;
+      seen.add(key);
+    }
+    if (d.property === "@apply") {
+      // an @apply list is read for exact ring tokens only; an unresolved token may be one
+      if (d.raw.includes(UNKNOWN) || UNRESOLVED_VALUE.test(d.raw)) return UNEXAMINABLE_REASONS.replacementForm;
+      continue;
+    }
+    const family = REPLACEMENT_FAMILY(d.property);
+    if (family === null) continue; // the outline form is read by outlineForm; other properties do not matter
+    if (UNRESOLVED_VALUE.test(d.value) || d.value.includes(UNKNOWN) || IMPORTANT.test(d.value)) {
+      return UNEXAMINABLE_REASONS.replacementForm;
+    }
+    // a comma list is read layer by layer for box-shadow (every layer must be a literal, non-disabled
+    // shadow) and is off the list for every other indicator property (background layers, ...)
+    const layers = splitLayers(d.value);
+    if (layers.length > 1) {
+      if (family !== "box-shadow" || layers.some((layer) => DISABLED_LITERAL.test(layer.trim()))) {
+        return UNEXAMINABLE_REASONS.replacementForm;
+      }
+    }
+    // a value that cannot be shown to paint (a gradient, url(), rgba(), transparent, an 8-digit hex) is off the list;
+    // the border shorthand has its own, stricter reading below
+    if (!/^border/i.test(d.property) && !positiveIndicatorValue(d.property, d.value)) return UNEXAMINABLE_REASONS.replacementForm;
+    // a border colour longhand (border-color, border-top-color, ...) can override the shorthand's colour: one to four
+    // opaque colours, or it is off the list
+    if (/^border(-(top|right|bottom|left|block|inline)(-(start|end))?)?-color$/i.test(d.property)) {
+      const colours = d.value.trim().split(/\s+(?![^(]*\))/).filter(Boolean);
+      if (colours.length < 1 || colours.length > 4 || !colours.every((c) => opaqueColour(c))) return UNEXAMINABLE_REASONS.replacementForm;
+    }
+    const bare = d.value.trim();
+    // a border shorthand draws only with a drawn style and a non-zero literal width; an omitted style is none
+    if (/^border(-(top|right|bottom|left|block|inline)(-(start|end))?)?$/i.test(d.property) && !restoresOutline(bare, false)) {
+      return UNEXAMINABLE_REASONS.replacementForm;
+    }
+    // a border or text-decoration shorthand is disabled by ANY disabled token (0 solid red, 2px solid transparent)
+    const anyToken = family === "border" || family === "text-decoration";
+    if (anyToken ? bare.split(/\s+/).some((t) => DISABLED_LITERAL.test(t)) : DISABLED_LITERAL.test(bare)) {
+      return UNEXAMINABLE_REASONS.replacementForm;
+    }
+  }
+  // a border built from style/width longhands without a shorthand: the combination is not modelled
+  const borderShorthand = declarations.some((d) => /^border(-(top|right|bottom|left|block|inline)(-(start|end))?)?$/i.test(d.property));
+  const borderFacets = declarations.some((d) => /^border(-(top|right|bottom|left|block|inline)(-(start|end))?)?-(style|width)$/i.test(d.property));
+  if (borderFacets && !borderShorthand) return UNEXAMINABLE_REASONS.replacementForm;
+  // something that can hide an indicator matters only when there is an indicator to hide
+  const indicated = seen.size > 0 || declarations.some((d) => d.property === "@apply");
+  return paintAffecting && indicated ? UNEXAMINABLE_REASONS.replacementForm : null;
+}
+
+/**
+ * A blockless call in a block's own text - Sass @include or @extend, a Less mixin call (`.ring();`, `.m(@a: 1);`) -
+ * may emit or inherit declarations that are not modelled, so the block is not decided. Anything without a
+ * property: value shape counts (a declaration always has a colon).
+ */
+function hasBlocklessCall(body) {
+  for (const raw of splitDeclarations(body)) {
+    const text = raw.trim();
+    if (text === "" || /^@apply\b/i.test(text)) continue;
+    if (/^@(include|extend)\b/i.test(text)) return true;
+    if (/^[.#][\w-]+\s*(\(|$)/.test(text)) return true;
+    if (!text.includes(":")) return true;
+  }
+  return false;
+}
+
+/** Does a block declare anything a nested rule could inherit or be overridden by? */
+function declaresStyle(declarations) {
+  return declarations.some(
+    (d) => /^\s*@apply\b/i.test(d.raw) || FOCUS_RELEVANT_PROPERTY.test(d.property) || d.property.includes(UNKNOWN),
+  );
+}
+
+/** Why a nested rule is outside the closed list (inherited declarations, a layer), or null. */
+function nestingReason(node) {
+  // `@at-root :focus { }` emits its selector at the root: it is itself the boundary, nothing above is inherited
+  if (node.atRule === "at-root" && /^\s*@at-root\s*[^(\s]/i.test(node.selector)) return null;
+  for (let ancestor = node.parent, k = 0; ancestor && k <= MAX_DEPTH; ancestor = ancestor.parent, k++) {
+    // an @at-root that drops style rules emits what is inside at the root: nothing above it is inherited
+    if (ancestor.atRule === "at-root" && ancestor.ctx.reset) break;
+    if (ancestor.atRule === "layer") return UNEXAMINABLE_REASONS.nested;
+    if (ancestor.dataBlock || ancestor.propNest !== null || ancestor.rootEmitted) continue;
+    if (declaresStyle(declarationsOf(ancestor.body))) return UNEXAMINABLE_REASONS.nested;
+  }
+  if (node.atRule === "layer") return UNEXAMINABLE_REASONS.nested;
+  return null;
 }
 
 export const DETECTORS = [
@@ -752,28 +1619,134 @@ export const DETECTORS = [
       const text = file.views.structureOf;
       const findings = [];
       let examined = false;
-      const compensating = /\b(box-shadow|border|border-bottom|border-color|background|background-color|text-decoration|outline-offset|outline-color)\s*:/i;
+      const unexaminable = [];
 
-      for (const block of text.matchAll(/([^{}]+)\{([^{}]*)\}/g)) {
-        const selector = block[1];
-        const body = block[2];
-        if (!/:focus\b|:focus-visible\b/.test(selector)) continue;
+      // SCSS interpolation contains braces, which would split a block. Resolve it on a copy of the
+      // same length: statically readable spans are substituted (#{none} reads as none) and unknowable
+      // ones become UNKNOWN. Every style rule is then read under its COMPOSED selector against the
+      // closed list of decided forms above; whatever is off the list is recorded, never decided.
+      // Sass interpolation is read only in .scss; in CSS and Less it is not valid, and every span is unknown
+      const resolved = resolveInterpolation(text, file.views.sourceOf, file.text, file.ext === ".scss");
+      const nodes = parseBlocks(resolved, file.text);
+      // A control directive or @include inside a rule may change its declarations, and parseBlocks has
+      // blanked it from the rule's own body: every rule that encloses one is not decided as a whole.
+      const enclosesOpaque = new Set();
+      for (const n of nodes) {
+        if (n.opaque && !(n.parent && n.parent.opaque)) {
+          for (let a = n.parent, k = 0; a && k <= MAX_DEPTH; a = a.parent, k++) enclosesOpaque.add(a);
+        }
+      }
+      for (const node of nodes) {
+        if (node.rootEmitted || node.inside || node.dataBlock) continue;
+        // the line anchor (ST-05): the first non-whitespace character of the rule head
+        const where = node.selectorStart + Math.max(0, node.selector.search(/\S/));
+        const note = (reason) => unexaminable.push({ index: where, reason });
+        const declarations = declarationsOf(node.body);
+        const outline = outlineForm(declarations);
+        if (node.propNest !== null) {
+          // `outline: { style: none }` spells outline-style: none; the declarations are not flat
+          const relevant = FOCUS_RELEVANT_PROPERTY.test(node.propNest) || node.propNest.includes(UNKNOWN);
+          if (relevant && node.composed.some((selector) => mayBeFocusRule(selector))) note(UNEXAMINABLE_REASONS.nestedProperty);
+          continue;
+        }
+        const focusish = node.composed.filter((selector) => mayBeFocusRule(selector));
+        if (node.opaque) {
+          if (node.atRule === null ? focusish.length > 0 || outline.removes || outline.reason : outline.removes || outline.reason) {
+            note(UNEXAMINABLE_REASONS.selectorOpaque);
+          }
+          continue;
+        }
+        if (focusish.length === 0) continue; // cannot be a focus rule
+        // an interpolation in a property name, or outside a property: value declaration, may be an outline
+        // (a CSS escape can spell a property name too: out\6c ine is outline)
+        const shapes = splitDeclarations(node.body)
+          .filter((raw) => !/^\s*@apply\b/i.test(raw) && (raw.includes(UNKNOWN) || raw.slice(0, Math.max(0, raw.indexOf(":"))).includes("\\")));
+        const badShape = shapes.find(
+          (raw) => raw.indexOf(":") === -1 || /[\\]/.test(raw.slice(0, raw.indexOf(":"))),
+        );
+        if (badShape !== undefined) {
+          note(badShape.indexOf(":") === -1 ? UNEXAMINABLE_REASONS.declarationForm : UNEXAMINABLE_REASONS.propertyName);
+          continue;
+        }
+        // An interpolation in a selector head is off the list even when its value is readable (resolving it at
+        // the span's length pads it with spaces that would read as a combinator), and so is a comment inside
+        // one (the structure view pads that too). The reason is tracked per composed branch (node.reasons), so
+        // a decided branch still decides beside an off-list one.
+        // (a malformed member invalidates the WHOLE list: the browser discards the rule)
+        // (a branch whose head holds an interpolation or comment is padding-damaged and already off the list on its own)
+        const listInvalid = node.composed.some((selector) => hasUnknownPseudoName(selector)) || node.composed.some(
+          (selector, k) =>
+            node.reasons[k] === "syntax" || (!node.reasons[k] && offListSelector(selector) === UNEXAMINABLE_REASONS.selectorSyntax),
+        );
+        const reasonOf = (b, k) => {
+          if (node.reasons[k] === "comment") return UNEXAMINABLE_REASONS.selectorComment;
+          if (node.reasons[k] === "interpolation") return UNEXAMINABLE_REASONS.selectorInterpolation;
+          if (node.reasons[k] === "syntax") return UNEXAMINABLE_REASONS.selectorSyntax;
+          // a branch keeps its own reason; one that is itself decided is still undecided beside an invalid member
+          return offListSelector(b) ?? (listInvalid ? UNEXAMINABLE_REASONS.selectorSyntax : null);
+        };
+        const focusBranches = node.composed
+          .map((selector, k) => ({ selector, reason: reasonOf(selector, k) }))
+          .filter((b) => mayBeFocusRule(b.selector));
+        const offList = focusBranches.map((b) => b.reason).filter((reason) => reason !== null);
+        const plainFocus = focusBranches
+          .filter((b) => b.reason === null && isFocusSelector(b.selector))
+          .map((b) => b.selector);
+        // a selector whose subject is not focused and that has no off-list branch is not a focus rule at all:
+        // nothing about its declarations can matter
+        if (plainFocus.length === 0 && offList.length === 0) continue;
+        // a blockless @include/@extend/Less mixin call, or an @include/control-directive block inside the rule, may
+        // supply or remove anything: the block is not decided, whatever else it declares
+        if (enclosesOpaque.has(node) || hasBlocklessCall(node.body)) {
+          note(UNEXAMINABLE_REASONS.opaqueChild);
+          continue;
+        }
+        if (outline.reason !== undefined) {
+          note(outline.reason);
+          continue;
+        }
+        if (!outline.removes) {
+          if (plainFocus.length > 0) examined = true; // a focus rule that does not remove the outline
+          continue;
+        }
+        // the rule removes the outline with one plain declaration. Off-list branches are recorded but
+        // do not discard what the decided branches establish.
+        if (offList.length > 0) note(offList[0]);
+        if (plainFocus.length === 0) continue;
+        const nested = nestingReason(node);
+        if (nested !== null) {
+          note(nested);
+          continue;
+        }
+        const replacement = replacementReason(declarations);
+        if (replacement !== null) {
+          note(replacement);
+          continue;
+        }
         examined = true;
-        if (/:focus\s*:not\(\s*:focus-visible\s*\)/.test(selector)) continue;
-        if (!/\boutline\s*:\s*(none|0)\b/i.test(body)) continue;
-        if (compensating.test(body)) continue;
-        if (appliesRingWidth(body)) continue;
+        if (plainFocus.every((selector) => hidesRingFromMouseOnly(selector))) continue;
+        if (declarations.some((d) => INDICATOR_PROPERTY.test(d.property))) continue;
+        if (appliesRingWidth(node.body)) continue;
+        const own = text.slice(node.selectorStart, node.selectorStart + node.selector.length).trim();
+        const spelled = node.parent ? "(nested) " + own : own;
         findings.push(
           FINDING(
             this.rule,
             file,
-            block.index,
-            `'${selector.trim()}' removes the focus outline and declares no replacement indicator`,
+            where,
+            `'${spelled}' removes the focus outline and declares no replacement indicator`,
             { detector: this.id },
           ),
         );
       }
-      return { examined, findings };
+      return {
+        examined,
+        findings,
+        unexaminable: unexaminable.map((u) => ({
+          evidence: `${file.path}:${lineOf(file.text, u.index)}`,
+          reason: u.reason,
+        })),
+      };
     },
   },
 
@@ -976,26 +1949,46 @@ export function runDetectors(files, context, { auditOnly = false } = {}) {
   const findings = [];
   const examined = new Set();
   const unexamined = [];
+  const unexaminable = [];
 
   for (const detector of DETECTORS) {
     if (detector.auditOnly && !auditOnly) continue;
 
     let sawSubject = false;
+    const findingsBefore = findings.length;
+    const cannotRead = [];
     if (detector.project) {
       const result = detector.examineProject(files, context);
       if (result.examined) sawSubject = true;
       findings.push(...result.findings);
+      cannotRead.push(...(result.unexaminable ?? []));
     } else {
       for (const file of files) {
         if (detector.applies && !detector.applies(file, context)) continue;
         const result = detector.examine(file, context);
         if (result.examined) sawSubject = true;
         findings.push(...result.findings);
+        cannotRead.push(...(result.unexaminable ?? []));
       }
     }
 
-    if (sawSubject) examined.add(detector.rule);
-    else {
+    for (const item of cannotRead) {
+      unexaminable.push({ rule: detector.rule, detector: detector.id, evidence: [item.evidence], reason: item.reason });
+    }
+
+    // A rule with a span the detector could not read is not evaluated, even where it examined other
+    // instances: a clean result over the readable ones would otherwise stand in for the whole. A
+    // failure the detector DID establish is not suppressed by an unreadable sibling: unreadable
+    // spans prevent a clean pass, not an observed violation.
+    const establishedFailure = findings.length > findingsBefore;
+    if (sawSubject && (cannotRead.length === 0 || establishedFailure)) examined.add(detector.rule);
+    else if (cannotRead.length > 0) {
+      unexamined.push({
+        rule: detector.rule,
+        detector: detector.id,
+        reason: `${cannotRead.length} span(s) could not be examined statically (see detectorsUnexaminable), so ${detector.id} did not establish this rule`,
+      });
+    } else {
       unexamined.push({
         rule: detector.rule,
         detector: detector.id,
@@ -1006,7 +1999,7 @@ export function runDetectors(files, context, { auditOnly = false } = {}) {
     }
   }
 
-  return { findings, examined: [...examined], unexamined };
+  return { findings, examined: [...examined], unexamined, unexaminable };
 }
 
 // -------------------------------------------------------------------------------------------------
@@ -1202,7 +2195,7 @@ export function scopeOfRule(rule, gate) {
 export async function runAudit(target, { maxFiles = MAX_FILES } = {}) {
   const corpus = await readCorpus(target, { maxFiles });
   const context = { tokenSystem: detectTokenSystem(corpus.files, corpus.scan, null), policy: null };
-  const { findings, examined, unexamined } = runDetectors(corpus.files, context, { auditOnly: true });
+  const { findings, examined, unexamined, unexaminable } = runDetectors(corpus.files, context, { auditOnly: true });
 
   return {
     schemaVersion: "1.0",
@@ -1211,6 +2204,7 @@ export async function runAudit(target, { maxFiles = MAX_FILES } = {}) {
     evidenceSurface: census(target, corpus, context),
     detectorsExamined: examined,
     detectorsWithoutSubject: unexamined,
+    detectorsUnexaminable: unexaminable,
     findings,
   };
 }
