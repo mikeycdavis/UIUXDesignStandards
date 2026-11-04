@@ -1921,6 +1921,16 @@ test("P1 containment: the bound is 4,096 UTF-8 bytes, not UTF-16 units (multibyt
     assert.equal(await boundOf(`${name(2044, ch)}{ & &:focus{outline:none;} }\n`), 0, `ampersand, 4,095, ${ch}`);
     assert.equal(await boundOf(`${name(2045, ch)}{ & &:focus{outline:none;} }\n`), 1, `ampersand, 4,097, ${ch}`);
   }
+  // a part that holds both a `&` and multibyte text: "& " + name + ":focus" over the 2-byte parent ".a" is bytes(part) + 1 bytes
+  for (const ch of ["\u00e9", "\u20ac"]) {
+    const child = (total) => "& " + name(total - 1 - 2 - 6, ch) + ":focus";
+    assert.equal(bytes(child(4096)), 4095);
+    assert.equal(await boundOf(`.a{ ${child(4096)}{outline:none;} }\n`), 0, `part with & and multibyte text, exact, ${ch}`);
+    assert.equal(await boundOf(`.a{ ${child(4097)}{outline:none;} }\n`), 1, `part with & and multibyte text, one over, ${ch}`);
+  }
+  // at the stylesheet root each `&` stays one byte and still counts
+  assert.equal(await boundOf(`${"&".repeat(4090)}:focus{outline:none;}\n`), 0);
+  assert.equal(await boundOf(`${"&".repeat(4091)}:focus{outline:none;}\n`), 1);
   // UTF-16 counting would let this through: 2,049 two-byte characters are 2,049 units but 4,098 bytes
   assert.equal(await boundOf(`.${"\u00e9".repeat(2049)}:focus{outline:none;}\n`), 1);
 });
