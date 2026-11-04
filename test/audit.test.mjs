@@ -1815,3 +1815,74 @@ test("pilot final repair: pseudo names are found on attribute-masked text, argum
     assert.equal(r.examined, false, css);
   }
 });
+
+test("P1 containment: the 145-byte, 24-level `& &` file is bounded before substitution, in a bounded subprocess, at explicit heap limits", async () => {
+  // Each level doubles the composed selector (two `&` per level) while the selector count stays at one, so the
+  // count and depth caps never bind. The composed byte length must be checked before the substitution.
+  const css = "a{" + "& &{".repeat(24) + ":focus{outline:none;}" + "}".repeat(25) + "\n";
+  assert.equal(Buffer.byteLength(css), 145);
+  const dir = await mkdtemp(path.join(tmpdir(), "uiux-p1-"));
+  try {
+    await writeFile(path.join(dir, "f.scss"), css);
+    const script = `
+      const { runAudit } = await import(${JSON.stringify(path.join(ROOT, "scripts/uiux.mjs"))});
+      const a = await runAudit(${JSON.stringify(dir)});
+      const mine = a.detectorsUnexaminable.filter((u) => u.rule === "accessibility.no-removed-focus-indicators");
+      console.log(JSON.stringify({ findings: a.findings.length, reasons: mine.map((u) => u.reason) }));`;
+    for (const heap of [80, 256]) {
+      const started = Date.now();
+      const r = spawnSync(process.execPath, [`--max-old-space-size=${heap}`, "--input-type=module", "-e", script], {
+        encoding: "utf8",
+        timeout: 30_000,
+      });
+      const took = Date.now() - started;
+      assert.equal(r.signal, null, `heap ${heap}: killed by ${r.signal} after ${took} ms`);
+      assert.equal(r.status, 0, `heap ${heap}: exit ${r.status}: ${(r.stderr || "").split("\n")[0]}`);
+      assert.ok(took < 15_000, `heap ${heap}: took ${took} ms`);
+      const out = JSON.parse(r.stdout);
+      assert.equal(out.findings, 0, `heap ${heap}: a partial finding`);
+      assert.ok(out.reasons.length >= 1 && out.reasons.every((x) => /decided bound/.test(x)), `heap ${heap}: ${JSON.stringify(out.reasons)}`);
+    }
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test("P1 containment: a multi-`&` nesting that stays under the bound is still read (the guard changes only oversize selectors)", async () => {
+  const dir = await mkdtemp(path.join(tmpdir(), "uiux-p1-"));
+  try {
+    await writeFile(path.join(dir, "f.scss"), "a{& &{& &{:focus{outline:none;}}}}\n");
+    const a = await runAudit(dir);
+    assert.equal(a.findings.filter((f) => f.rule === "accessibility.no-removed-focus-indicators").length, 1);
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test("P1 containment: the composed-selector bound is exactly 4,096 bytes for a root head, a descendant join and an `&` substitution", async () => {
+  const reasonsOf = async (css) => {
+    const dir = await mkdtemp(path.join(tmpdir(), "uiux-p1-"));
+    try {
+      await writeFile(path.join(dir, "f.scss"), css);
+      const a = await runAudit(dir);
+      return {
+        found: a.findings.filter((f) => f.rule === "accessibility.no-removed-focus-indicators").length,
+        bound: a.detectorsUnexaminable.filter((u) => /decided bound/.test(u.reason)).length,
+      };
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  };
+  const x = (n) => "." + "a".repeat(n - 1); // n bytes
+  // a root head: 4,096 bytes is read, 4,097 is not
+  assert.deepEqual(await reasonsOf(`${x(4096 - 6)}:focus{outline:none;}\n`), { found: 1, bound: 0 });
+  assert.deepEqual(await reasonsOf(`${x(4097 - 6)}:focus{outline:none;}\n`), { found: 0, bound: 1 });
+  // a descendant join `parent + " " + part`: 2,047 + 1 + 2,048 = 4,096 is read, one more byte is not
+  assert.deepEqual(await reasonsOf(`${x(2047)}{ ${x(2042)}:focus{outline:none;} }\n`), { found: 1, bound: 0 });
+  assert.deepEqual(await reasonsOf(`${x(2047)}{ ${x(2043)}:focus{outline:none;} }\n`), { found: 0, bound: 1 });
+  // `@at-root` resets: the part is emitted alone, so a long parent does not count against it
+  assert.deepEqual(await reasonsOf(`${x(4090)}{ @at-root .b:focus{outline:none;} }\n`), { found: 1, bound: 0 });
+  // an `&` substitution: part `& &:focus` (9 bytes) with two `&` over a parent of p bytes is 9 + 2 * (p - 1) bytes
+  assert.deepEqual(await reasonsOf(`${x(2044)}{ & &:focus{outline:none;} }\n`), { found: 1, bound: 0 }); // 9 + 2*2043 = 4095
+  assert.deepEqual(await reasonsOf(`${x(2045)}{ & &:focus{outline:none;} }\n`), { found: 0, bound: 1 }); // 9 + 2*2044 = 4097
+});

@@ -713,6 +713,9 @@ function branchReasons(composed, resolvedHead, rawHead, parentCount, parentReaso
 /** Bounds on the work per rule: a longer composed list, or deeper nesting, is routed to unexaminable. */
 const MAX_COMPOSED = 256;
 const MAX_DEPTH = 32;
+// the approved composed-selector byte bound: checked BEFORE a substitution or concatenation, because `& &` doubles the
+// composed text at every level while the selector count stays at one
+const MAX_COMPOSED_BYTES = 4096;
 const OVER_CAP = "";
 const TOO_DEEP = "";
 
@@ -722,6 +725,10 @@ function composeSelectors(selector, parents, reset = false) {
   if (parts.length * parents.length > MAX_COMPOSED) return [OVER_CAP];
   for (const part of parts) {
     for (const parent of parents) {
+      // (parent and part are each at most the read budget, so these lengths are exact integers; nothing is built when the result would be too long)
+      const ampersands = part.split("&").length - 1;
+      const size = ampersands > 0 ? part.length + ampersands * Math.max(0, parent.length - 1) : parent === "" || reset ? part.length : parent.length + 1 + part.length;
+      if (size > MAX_COMPOSED_BYTES) return [OVER_CAP];
       // at the stylesheet root there is no parent: a top-level & is invalid Sass and stays unresolved (off the list)
       if (part.includes("&")) composed.push(part.replaceAll("&", parent === "" ? "&" : parent));
       else composed.push(parent === "" || reset ? part : `${parent} ${part}`);
@@ -797,7 +804,7 @@ const DECIDED_PSEUDO_ELEMENTS = new Set(["before", "after", "first-line", "first
 const UNEXAMINABLE_REASONS = {
   selectorInterpolation: "an interpolation in the selector may make it a focus rule",
   selectorPlaceholder: "a Sass placeholder selector emits nothing unless it is extended, and an @extend may be in another file",
-  selectorBound: "the rule is nested deeper, or its composed selector list is longer, than the decided bound (32 levels, 256 selectors)",
+  selectorBound: "the rule is nested deeper, or its composed selector list is longer, than the decided bound (32 levels, 256 selectors, 4,096 bytes per composed selector)",
   selectorComment: "a comment inside the selector may split or join its compounds",
   selectorSyntax: "a selector the closed list does not positively recognise (malformed or unlisted syntax)",
   selectorEscape: "a CSS escape in the selector may spell a focus pseudo-class",
