@@ -926,12 +926,39 @@ const KNOWN_FUNCTIONAL_PSEUDO = new Set([
 ]);
 
 /**
+ * The argument grammar of every known functional pseudo-class other than nth-*: `:dir()` takes ltr or rtl, `:lang()`
+ * a comma list of language ranges, and each selector-list form a comma list of positively recognised selectors with
+ * no empty member. An argument that does not fit is invalid, so the browser discards the whole selector list.
+ */
+function functionalArgumentValid(name, argument) {
+  if (name === "dir") return /^(?:ltr|rtl)$/i.test(argument);
+  if (name === "lang") return argument.split(",").every((range) => /^[A-Za-z*][\w*-]*$/.test(range.trim()));
+  const members = [];
+  let depth = 0;
+  let current = "";
+  for (const ch of argument) {
+    if (ch === "(" || ch === "[") depth++;
+    else if (ch === ")" || ch === "]") depth = Math.max(0, depth - 1);
+    if (ch === "," && depth === 0) {
+      members.push(current);
+      current = "";
+    } else current += ch;
+  }
+  members.push(current);
+  // :has() takes relative selectors, which may start with a combinator
+  const relative = (member) => (name === "has" ? member.replace(/^\s*[>+~]\s*/, "") : member);
+  return members.every((member) => member.trim() !== "" && WELL_FORMED_SELECTOR.test(relative(member)));
+}
+
+/**
  * True when a selector names a pseudo-class or pseudo-element that is not known to be valid: the browser discards
  * a selector list that holds an invalid member, so uncertainty in ONE member leaves the whole list undecided.
  */
 function hasUnknownPseudoName(selector) {
-  const stripped = selector.replace(/\[[^\]]*\]/g, "");
-  for (const m of stripped.matchAll(/(::?)([A-Za-z-]+)(\()?/g)) {
+  // Attribute selectors are masked (same length) only to find pseudo names and balance parentheses; the
+  // argument that is validated is sliced from the ORIGINAL text, so `:not([disabled])` keeps its argument.
+  const masked = selector.replace(/\[[^\]]*\]/g, (attribute) => "_".repeat(attribute.length));
+  for (const m of masked.matchAll(/(::?)([A-Za-z-]+)(\()?/g)) {
     const name = m[2].toLowerCase();
     if (m[1] === "::") {
       if (!DECIDED_PSEUDO_ELEMENTS.has(name)) return true;
@@ -940,13 +967,17 @@ function hasUnknownPseudoName(selector) {
       // its argument must be balanced, non-empty and, for the nth-* family, an An+B expression
       let depth = 1;
       let end = m.index + m[0].length;
-      for (; end < stripped.length && depth > 0; end++) {
-        if (stripped[end] === "(") depth++;
-        else if (stripped[end] === ")") depth--;
+      for (; end < masked.length && depth > 0; end++) {
+        if (masked[end] === "(") depth++;
+        else if (masked[end] === ")") depth--;
       }
-      const argument = depth === 0 ? stripped.slice(m.index + m[0].length, end - 1).trim() : "";
+      const argument = depth === 0 ? selector.slice(m.index + m[0].length, end - 1).trim() : "";
       if (argument === "") return true;
       if (/^nth-/.test(name) && !/^(?:even|odd|[+-]?\d*n(?:\s*[+-]\s*\d+)?|[+-]?\d+)(?:\s+of\s+[\s\S]+)?$/i.test(argument)) return true;
+      // the `of` selector list is part of the selector: a list holding an invalid member is discarded whole
+      const ofClause = /^nth-/.test(name) ? /\s+of\s+([\s\S]+)$/i.exec(argument) : null;
+      if (ofClause && !functionalArgumentValid("is", ofClause[1])) return true;
+      if (!/^nth-/.test(name) && !functionalArgumentValid(name, argument)) return true;
     } else if (!DECIDED_PSEUDO_CLASSES.has(name) && !["before", "after", "first-line", "first-letter"].includes(name)) {
       return true;
     }
@@ -1246,7 +1277,7 @@ function declaresStyle(declarations) {
 }
 
 /** Why a nested rule is outside the closed list (inherited declarations, a layer), or null. */
-function nestingReason(node) {
+function nestingReason(node, hasIndicator = false) {
   // `@at-root :focus { }` emits its selector at the root: it is itself the boundary, nothing above is inherited
   if (node.atRule === "at-root" && /^\s*@at-root\s*[^(\s]/i.test(node.selector)) return null;
   for (let ancestor = node.parent, k = 0; ancestor && k <= MAX_DEPTH; ancestor = ancestor.parent, k++) {
@@ -1254,7 +1285,10 @@ function nestingReason(node) {
     if (ancestor.atRule === "at-root" && ancestor.ctx.reset) break;
     if (ancestor.atRule === "layer") return UNEXAMINABLE_REASONS.nested;
     if (ancestor.dataBlock || ancestor.propNest !== null || ancestor.rootEmitted) continue;
-    if (declaresStyle(declarationsOf(ancestor.body))) return UNEXAMINABLE_REASONS.nested;
+    const inherited = declarationsOf(ancestor.body);
+    if (declaresStyle(inherited)) return UNEXAMINABLE_REASONS.nested;
+    // an ancestor that can hide what the nested rule paints matters only when the nested rule paints something
+    if (hasIndicator && inherited.some((d) => PAINT_AFFECTING_PROPERTY.test(d.property))) return UNEXAMINABLE_REASONS.nested;
   }
   if (node.atRule === "layer") return UNEXAMINABLE_REASONS.nested;
   return null;
@@ -1636,6 +1670,12 @@ export const DETECTORS = [
           for (let a = n.parent, k = 0; a && k <= MAX_DEPTH; a = a.parent, k++) enclosesOpaque.add(a);
         }
       }
+      // A nested property block (`outline: { style: none }`) may restore or remove the indicator the
+      // rule's own flat declarations show: the owning rule is then not decided either.
+      const ownsPropNest = new Set();
+      for (const n of nodes) {
+        if (n.propNest !== null && n.parent && (FOCUS_RELEVANT_PROPERTY.test(n.propNest) || n.propNest.includes(UNKNOWN))) ownsPropNest.add(n.parent);
+      }
       for (const node of nodes) {
         if (node.rootEmitted || node.inside || node.dataBlock) continue;
         // the line anchor (ST-05): the first non-whitespace character of the rule head
@@ -1657,6 +1697,10 @@ export const DETECTORS = [
           continue;
         }
         if (focusish.length === 0) continue; // cannot be a focus rule
+        if (ownsPropNest.has(node)) {
+          note(UNEXAMINABLE_REASONS.nestedProperty);
+          continue;
+        }
         // an interpolation in a property name, or outside a property: value declaration, may be an outline
         // (a CSS escape can spell a property name too: out\6c ine is outline)
         const shapes = splitDeclarations(node.body)
@@ -1713,7 +1757,7 @@ export const DETECTORS = [
         // do not discard what the decided branches establish.
         if (offList.length > 0) note(offList[0]);
         if (plainFocus.length === 0) continue;
-        const nested = nestingReason(node);
+        const nested = nestingReason(node, declarations.some((d) => INDICATOR_PROPERTY.test(d.property) || d.property === "@apply"));
         if (nested !== null) {
           note(nested);
           continue;
