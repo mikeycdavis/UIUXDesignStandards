@@ -1815,3 +1815,46 @@ test("pilot final repair: pseudo names are found on attribute-masked text, argum
     assert.equal(r.examined, false, css);
   }
 });
+
+test("P1 containment: the 145-byte, 24-level `& &` file is bounded before substitution, in a bounded subprocess, at explicit heap limits", async () => {
+  // Each level doubles the composed selector (two `&` per level) while the selector count stays at one, so the
+  // count and depth caps never bind. The composed byte length must be checked before the substitution.
+  const css = "a{" + "& &{".repeat(24) + ":focus{outline:none;}" + "}".repeat(25) + "\n";
+  assert.equal(Buffer.byteLength(css), 145);
+  const dir = await mkdtemp(path.join(tmpdir(), "uiux-p1-"));
+  try {
+    await writeFile(path.join(dir, "f.scss"), css);
+    const script = `
+      const { runAudit } = await import(${JSON.stringify(path.join(ROOT, "scripts/uiux.mjs"))});
+      const a = await runAudit(${JSON.stringify(dir)});
+      const mine = a.detectorsUnexaminable.filter((u) => u.rule === "accessibility.no-removed-focus-indicators");
+      console.log(JSON.stringify({ findings: a.findings.length, reasons: mine.map((u) => u.reason) }));`;
+    for (const heap of [80, 256]) {
+      const started = Date.now();
+      const r = spawnSync(process.execPath, [`--max-old-space-size=${heap}`, "--input-type=module", "-e", script], {
+        encoding: "utf8",
+        timeout: 30_000,
+      });
+      const took = Date.now() - started;
+      assert.equal(r.signal, null, `heap ${heap}: killed by ${r.signal} after ${took} ms`);
+      assert.equal(r.status, 0, `heap ${heap}: exit ${r.status}: ${(r.stderr || "").split("\n")[0]}`);
+      assert.ok(took < 15_000, `heap ${heap}: took ${took} ms`);
+      const out = JSON.parse(r.stdout);
+      assert.equal(out.findings, 0, `heap ${heap}: a partial finding`);
+      assert.ok(out.reasons.length >= 1 && out.reasons.every((x) => /decided bound/.test(x)), `heap ${heap}: ${JSON.stringify(out.reasons)}`);
+    }
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test("P1 containment: a multi-`&` nesting that stays under the bound is still read (the guard changes only oversize selectors)", async () => {
+  const dir = await mkdtemp(path.join(tmpdir(), "uiux-p1-"));
+  try {
+    await writeFile(path.join(dir, "f.scss"), "a{& &{& &{:focus{outline:none;}}}}\n");
+    const a = await runAudit(dir);
+    assert.equal(a.findings.filter((f) => f.rule === "accessibility.no-removed-focus-indicators").length, 1);
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
